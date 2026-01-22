@@ -1,5 +1,7 @@
 package com.test.cam.camera;
 
+import android.util.Size;
+
 /**
  * 摄像头回调接口
  */
@@ -23,4 +25,11 @@ public interface CameraCallback {
      * 摄像头错误
      */
     void onCameraError(String cameraId, int errorCode);
+
+    /**
+     * 预览尺寸已确定
+     * @param cameraId 摄像头ID
+     * @param previewSize 预览尺寸
+     */
+    void onPreviewSizeChosen(String cameraId, Size previewSize);
 }

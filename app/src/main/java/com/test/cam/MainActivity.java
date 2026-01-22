@@ -9,16 +9,24 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.TextureView;
+import android.view.View;
 import android.widget.Button;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
+import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.view.GravityCompat;
+import androidx.drawerlayout.widget.DrawerLayout;
+import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
+import androidx.fragment.app.FragmentTransaction;
 
+import com.google.android.material.navigation.NavigationView;
 import com.test.cam.camera.MultiCameraManager;
 
 import java.io.BufferedReader;
@@ -48,10 +56,16 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    private TextureView textureFront, textureBack, textureLeft, textureRight;
+    private AutoFitTextureView textureFront, textureBack, textureLeft, textureRight;
     private Button btnStartRecord, btnStopRecord;
     private MultiCameraManager cameraManager;
     private int textureReadyCount = 0;  // 记录准备好的TextureView数量
+
+    // 导航相关
+    private DrawerLayout drawerLayout;
+    private NavigationView navigationView;
+    private View recordingLayout;  // 录制界面布局
+    private View fragmentContainer;  // Fragment容器
 
     // 日志相关
     private TextView logText;
@@ -70,6 +84,7 @@ public class MainActivity extends AppCompatActivity {
         setContentView(R.layout.activity_main);
 
         initViews();
+        setupNavigationDrawer();
 
         // 权限检查，但不立即初始化摄像头
         // 等待TextureView准备好后再初始化
@@ -79,6 +94,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
+        drawerLayout = findViewById(R.id.drawer_layout);
+        navigationView = findViewById(R.id.nav_view);
+        recordingLayout = findViewById(R.id.main);
+        fragmentContainer = findViewById(R.id.fragment_container);
+
         textureFront = findViewById(R.id.texture_front);
         textureBack = findViewById(R.id.texture_back);
         textureLeft = findViewById(R.id.texture_left);
@@ -94,6 +114,15 @@ public class MainActivity extends AppCompatActivity {
 
         // 日志面板点击事件
         findViewById(R.id.log_header).setOnClickListener(v -> toggleLogPanel());
+
+        // 菜单按钮点击事件
+        findViewById(R.id.btn_menu).setOnClickListener(v -> {
+            if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+                drawerLayout.closeDrawer(GravityCompat.START);
+            } else {
+                drawerLayout.openDrawer(GravityCompat.START);
+            }
+        });
 
         btnStartRecord.setOnClickListener(v -> startRecording());
         btnStopRecord.setOnClickListener(v -> stopRecording());
@@ -140,6 +169,58 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化日志
         appendLog("应用启动");
+    }
+
+    /**
+     * 设置导航抽屉
+     */
+    private void setupNavigationDrawer() {
+        // 设置导航菜单点击监听
+        navigationView.setNavigationItemSelectedListener(item -> {
+            int itemId = item.getItemId();
+            if (itemId == R.id.nav_recording) {
+                // 显示录制界面
+                showRecordingInterface();
+            } else if (itemId == R.id.nav_playback) {
+                // 显示回看界面
+                showPlaybackInterface();
+            }
+            drawerLayout.closeDrawer(GravityCompat.START);
+            return true;
+        });
+
+        // 默认选中录制界面
+        navigationView.setCheckedItem(R.id.nav_recording);
+    }
+
+    /**
+     * 显示录制界面
+     */
+    private void showRecordingInterface() {
+        // 清除所有Fragment
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        for (Fragment fragment : fragmentManager.getFragments()) {
+            fragmentManager.beginTransaction().remove(fragment).commit();
+        }
+
+        // 显示录制布局，隐藏Fragment容器
+        recordingLayout.setVisibility(View.VISIBLE);
+        fragmentContainer.setVisibility(View.GONE);
+    }
+
+    /**
+     * 显示回看界面
+     */
+    private void showPlaybackInterface() {
+        // 隐藏录制布局，显示Fragment容器
+        recordingLayout.setVisibility(View.GONE);
+        fragmentContainer.setVisibility(View.VISIBLE);
+
+        // 显示PlaybackFragment
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        FragmentTransaction transaction = fragmentManager.beginTransaction();
+        transaction.replace(R.id.fragment_container, new PlaybackFragment());
+        transaction.commit();
     }
 
     /**
@@ -289,6 +370,54 @@ public class MainActivity extends AppCompatActivity {
         // 设置摄像头状态回调
         cameraManager.setStatusCallback((cameraId, status) -> {
             appendLog("摄像头 " + cameraId + ": " + status);
+
+            // 如果摄像头断开或被占用，提示用户
+            if (status.contains("错误") || status.contains("断开")) {
+                runOnUiThread(() -> {
+                    if (status.contains("ERROR_CAMERA_IN_USE") || status.contains("DISCONNECTED")) {
+                        Toast.makeText(MainActivity.this,
+                            "摄像头 " + cameraId + " 被占用，正在自动重连...",
+                            Toast.LENGTH_SHORT).show();
+                    } else if (status.contains("max reconnect attempts")) {
+                        Toast.makeText(MainActivity.this,
+                            "摄像头 " + cameraId + " 重连失败，请手动重启应用",
+                            Toast.LENGTH_LONG).show();
+                    }
+                });
+            } else if (status.contains("已打开") || status.contains("预览已启动")) {
+                // 摄像头恢复正常
+                runOnUiThread(() -> {
+                    // 可以在这里添加恢复提示，但为了避免过多提示，暂时注释
+                    // Toast.makeText(MainActivity.this, "摄像头 " + cameraId + " 已恢复", Toast.LENGTH_SHORT).show();
+                });
+            }
+        });
+
+        // 设置预览尺寸回调
+        cameraManager.setPreviewSizeCallback((cameraKey, cameraId, previewSize) -> {
+            appendLog("摄像头 " + cameraId + " 预览尺寸: " + previewSize.getWidth() + "x" + previewSize.getHeight());
+            // 根据 camera key 设置对应 TextureView 的宽高比
+            runOnUiThread(() -> {
+                AutoFitTextureView textureView = null;
+                switch (cameraKey) {
+                    case "front":
+                        textureView = textureFront;
+                        break;
+                    case "back":
+                        textureView = textureBack;
+                        break;
+                    case "left":
+                        textureView = textureLeft;
+                        break;
+                    case "right":
+                        textureView = textureRight;
+                        break;
+                }
+                if (textureView != null) {
+                    textureView.setAspectRatio(previewSize.getWidth(), previewSize.getHeight());
+                    appendLog("设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight());
+                }
+            });
         });
 
         // 等待TextureView准备好
@@ -359,12 +488,13 @@ public class MainActivity extends AppCompatActivity {
     private void startRecording() {
         if (cameraManager != null && !cameraManager.isRecording()) {
             appendLog("开始录制...");
+            appendLog("提示: 视频将自动分段，每段1分钟");
             boolean success = cameraManager.startRecording();
             if (success) {
                 btnStartRecord.setEnabled(false);
                 btnStopRecord.setEnabled(true);
-                appendLog("录制已开始");
-                Toast.makeText(this, "开始录制", Toast.LENGTH_SHORT).show();
+                appendLog("录制已开始（自动分段模式）");
+                Toast.makeText(this, "开始录制（每1分钟自动分段）", Toast.LENGTH_SHORT).show();
                 Log.d(TAG, "Recording started");
             } else {
                 appendLog("录制失败");
@@ -374,7 +504,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void stopRecording() {
-        if (cameraManager != null && cameraManager.isRecording()) {
+        if (cameraManager != null) {
             appendLog("停止录制...");
             cameraManager.stopRecording();
             btnStartRecord.setEnabled(true);
@@ -391,6 +521,15 @@ public class MainActivity extends AppCompatActivity {
         stopLogcatReader();
         if (cameraManager != null) {
             cameraManager.release();
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
+            drawerLayout.closeDrawer(GravityCompat.START);
+        } else {
+            super.onBackPressed();
         }
     }
 }

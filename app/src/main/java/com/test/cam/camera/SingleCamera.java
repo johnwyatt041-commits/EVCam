@@ -41,6 +41,12 @@ public class SingleCamera {
     private Size previewSize;
     private Surface recordSurface;  // 录制Surface
 
+    private boolean shouldReconnect = false;  // 是否应该重连
+    private int reconnectAttempts = 0;  // 重连尝试次数
+    private static final int MAX_RECONNECT_ATTEMPTS = 30;  // 最大重连次数（30次 = 1分钟）
+    private static final long RECONNECT_DELAY_MS = 2000;  // 重连延迟（毫秒）
+    private Runnable reconnectRunnable;  // 重连任务
+
     public SingleCamera(Context context, String cameraId, TextureView textureView) {
         this.context = context;
         this.cameraId = cameraId;
@@ -154,6 +160,8 @@ public class SingleCamera {
     public void openCamera() {
         try {
             Log.d(TAG, "openCamera: Starting for camera " + cameraId);
+            shouldReconnect = true;  // 启用自动重连
+            reconnectAttempts = 0;  // 重置重连计数
             startBackgroundThread();
 
             // 获取摄像头特性
@@ -182,6 +190,11 @@ public class SingleCamera {
                 // 选择合适的分辨率
                 previewSize = chooseOptimalSize(sizes);
                 Log.d(TAG, "Camera " + cameraId + " selected preview size: " + previewSize);
+
+                // 通知回调预览尺寸已确定
+                if (callback != null && previewSize != null) {
+                    callback.onPreviewSizeChosen(cameraId, previewSize);
+                }
             } else {
                 Log.e(TAG, "Camera " + cameraId + " StreamConfigurationMap is null!");
             }
@@ -203,11 +216,76 @@ public class SingleCamera {
             if (callback != null) {
                 callback.onCameraError(cameraId, -1);
             }
+            // 尝试重连
+            if (shouldReconnect) {
+                scheduleReconnect();
+            }
         } catch (SecurityException e) {
             Log.e(TAG, "No camera permission", e);
             if (callback != null) {
                 callback.onCameraError(cameraId, -2);
             }
+        }
+    }
+
+    /**
+     * 调度重连任务
+     */
+    private void scheduleReconnect() {
+        if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+            Log.e(TAG, "Camera " + cameraId + " max reconnect attempts reached (" + MAX_RECONNECT_ATTEMPTS + "), giving up");
+            shouldReconnect = false;
+            return;
+        }
+
+        reconnectAttempts++;
+        Log.d(TAG, "Camera " + cameraId + " scheduling reconnect attempt " + reconnectAttempts + "/" + MAX_RECONNECT_ATTEMPTS + " in " + (RECONNECT_DELAY_MS / 1000) + " seconds");
+
+        // 取消之前的重连任务
+        if (reconnectRunnable != null && backgroundHandler != null) {
+            backgroundHandler.removeCallbacks(reconnectRunnable);
+        }
+
+        // 创建新的重连任务
+        reconnectRunnable = () -> {
+            Log.d(TAG, "Camera " + cameraId + " attempting to reconnect (attempt " + reconnectAttempts + "/" + MAX_RECONNECT_ATTEMPTS + ")...");
+            try {
+                // 确保之前的资源已清理（捕获并忽略异常）
+                try {
+                    if (captureSession != null) {
+                        captureSession.close();
+                        captureSession = null;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Camera " + cameraId + " exception while closing session during reconnect (expected): " + e.getMessage());
+                }
+
+                try {
+                    if (cameraDevice != null) {
+                        cameraDevice.close();
+                        cameraDevice = null;
+                    }
+                } catch (Exception e) {
+                    Log.w(TAG, "Camera " + cameraId + " exception while closing device during reconnect (expected): " + e.getMessage());
+                }
+
+                // 重新打开摄像头
+                cameraManager.openCamera(cameraId, stateCallback, backgroundHandler);
+            } catch (CameraAccessException e) {
+                Log.e(TAG, "Failed to reconnect camera " + cameraId + ": " + e.getMessage());
+                // 继续尝试重连
+                if (shouldReconnect && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                    scheduleReconnect();
+                }
+            } catch (SecurityException e) {
+                Log.e(TAG, "No camera permission during reconnect", e);
+                shouldReconnect = false;
+            }
+        };
+
+        // 延迟执行重连
+        if (backgroundHandler != null) {
+            backgroundHandler.postDelayed(reconnectRunnable, RECONNECT_DELAY_MS);
         }
     }
 
@@ -218,6 +296,7 @@ public class SingleCamera {
         @Override
         public void onOpened(@NonNull CameraDevice camera) {
             cameraDevice = camera;
+            reconnectAttempts = 0;  // 重置重连计数
             Log.d(TAG, "Camera " + cameraId + " opened");
             if (callback != null) {
                 callback.onCameraOpened(cameraId);
@@ -227,39 +306,65 @@ public class SingleCamera {
 
         @Override
         public void onDisconnected(@NonNull CameraDevice camera) {
-            camera.close();
+            try {
+                camera.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Camera " + cameraId + " exception while closing on disconnect (expected): " + e.getMessage());
+            }
             cameraDevice = null;
-            Log.e(TAG, "Camera " + cameraId + " DISCONNECTED - this usually means resource exhaustion!");
+            Log.w(TAG, "Camera " + cameraId + " DISCONNECTED - will attempt to reconnect...");
             if (callback != null) {
                 callback.onCameraError(cameraId, -4); // 自定义错误码：断开连接
+            }
+
+            // 启动自动重连
+            if (shouldReconnect) {
+                scheduleReconnect();
             }
         }
 
         @Override
         public void onError(@NonNull CameraDevice camera, int error) {
-            camera.close();
+            try {
+                camera.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Camera " + cameraId + " exception while closing on error (expected): " + e.getMessage());
+            }
             cameraDevice = null;
             String errorMsg = "UNKNOWN";
+            boolean shouldRetry = false;
+
             switch (error) {
                 case CameraDevice.StateCallback.ERROR_CAMERA_IN_USE:
-                    errorMsg = "ERROR_CAMERA_IN_USE (1)";
+                    errorMsg = "ERROR_CAMERA_IN_USE (1) - Camera is being used by another app";
+                    shouldRetry = true;  // 摄像头被占用，可以重试
                     break;
                 case CameraDevice.StateCallback.ERROR_MAX_CAMERAS_IN_USE:
-                    errorMsg = "ERROR_MAX_CAMERAS_IN_USE (2)";
+                    errorMsg = "ERROR_MAX_CAMERAS_IN_USE (2) - Too many cameras open";
+                    shouldRetry = true;  // 摄像头数量超限，可以重试
                     break;
                 case CameraDevice.StateCallback.ERROR_CAMERA_DISABLED:
-                    errorMsg = "ERROR_CAMERA_DISABLED (3)";
+                    errorMsg = "ERROR_CAMERA_DISABLED (3) - Camera disabled by policy";
+                    shouldRetry = false;  // 摄像头被禁用，不应重试
                     break;
                 case CameraDevice.StateCallback.ERROR_CAMERA_DEVICE:
                     errorMsg = "ERROR_CAMERA_DEVICE (4) - Fatal device error!";
+                    shouldRetry = false;  // 设备错误，不应重试
                     break;
                 case CameraDevice.StateCallback.ERROR_CAMERA_SERVICE:
-                    errorMsg = "ERROR_CAMERA_SERVICE (5)";
+                    errorMsg = "ERROR_CAMERA_SERVICE (5) - Camera service error";
+                    shouldRetry = true;  // 服务错误，可以重试
                     break;
             }
+
             Log.e(TAG, "Camera " + cameraId + " error: " + errorMsg);
             if (callback != null) {
                 callback.onCameraError(cameraId, error);
+            }
+
+            // 如果应该重试且允许重连，则启动自动重连
+            if (shouldRetry && shouldReconnect) {
+                scheduleReconnect();
             }
         }
     };
@@ -373,19 +478,58 @@ public class SingleCamera {
      * 关闭摄像头
      */
     public void closeCamera() {
+        shouldReconnect = false;  // 禁用自动重连
+        reconnectAttempts = 0;  // 重置重连计数
+
+        // 取消待处理的重连任务
+        if (reconnectRunnable != null && backgroundHandler != null) {
+            backgroundHandler.removeCallbacks(reconnectRunnable);
+            reconnectRunnable = null;
+        }
+
+        // 关闭会话（捕获异常）
         if (captureSession != null) {
-            captureSession.close();
+            try {
+                captureSession.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Camera " + cameraId + " exception while closing session (expected): " + e.getMessage());
+            }
             captureSession = null;
         }
+
+        // 关闭设备（捕获异常）
         if (cameraDevice != null) {
-            cameraDevice.close();
+            try {
+                cameraDevice.close();
+            } catch (Exception e) {
+                Log.w(TAG, "Camera " + cameraId + " exception while closing device (expected): " + e.getMessage());
+            }
             cameraDevice = null;
         }
+
         stopBackgroundThread();
 
         Log.d(TAG, "Camera " + cameraId + " closed");
         if (callback != null) {
             callback.onCameraClosed(cameraId);
         }
+    }
+
+    /**
+     * 手动触发重连（重置重连计数）
+     */
+    public void reconnect() {
+        Log.d(TAG, "Camera " + cameraId + " manual reconnect requested");
+        reconnectAttempts = 0;
+        shouldReconnect = true;
+        closeCamera();
+        openCamera();
+    }
+
+    /**
+     * 检查摄像头是否已连接
+     */
+    public boolean isConnected() {
+        return cameraDevice != null;
     }
 }

@@ -3,6 +3,7 @@ package com.test.cam.camera;
 import android.content.Context;
 import android.os.Environment;
 import android.util.Log;
+import android.util.Size;
 import android.view.TextureView;
 
 import java.io.File;
@@ -34,9 +35,19 @@ public class MultiCameraManager {
 
     private boolean isRecording = false;
     private StatusCallback statusCallback;
+    private PreviewSizeCallback previewSizeCallback;
+    private int sessionConfiguredCount = 0;
+    private int expectedSessionCount = 0;
+    private Runnable pendingRecordingStart = null;
+    private android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable sessionTimeoutRunnable = null;
 
     public interface StatusCallback {
         void onCameraStatusUpdate(String cameraId, String status);
+    }
+
+    public interface PreviewSizeCallback {
+        void onPreviewSizeChosen(String cameraKey, String cameraId, Size previewSize);
     }
 
     public MultiCameraManager(Context context) {
@@ -45,6 +56,10 @@ public class MultiCameraManager {
 
     public void setStatusCallback(StatusCallback callback) {
         this.statusCallback = callback;
+    }
+
+    public void setPreviewSizeCallback(PreviewSizeCallback callback) {
+        this.previewSizeCallback = callback;
     }
 
     public void setMaxOpenCameras(int maxOpenCameras) {
@@ -81,6 +96,28 @@ public class MultiCameraManager {
                 if (statusCallback != null) {
                     statusCallback.onCameraStatusUpdate(cameraId, "预览已启动");
                 }
+
+                // 检查是否所有会话都已配置完成
+                if (expectedSessionCount > 0) {
+                    sessionConfiguredCount++;
+                    Log.d(TAG, "Session configured: " + sessionConfiguredCount + "/" + expectedSessionCount);
+
+                    if (sessionConfiguredCount >= expectedSessionCount) {
+                        // 所有会话都已配置完成，执行待处理的录制启动
+                        if (pendingRecordingStart != null) {
+                            Log.d(TAG, "All sessions configured, starting recording...");
+                            // 取消超时任务
+                            if (sessionTimeoutRunnable != null) {
+                                mainHandler.removeCallbacks(sessionTimeoutRunnable);
+                                sessionTimeoutRunnable = null;
+                            }
+                            pendingRecordingStart.run();
+                            pendingRecordingStart = null;
+                        }
+                        sessionConfiguredCount = 0;
+                        expectedSessionCount = 0;
+                    }
+                }
             }
 
             @Override
@@ -97,6 +134,52 @@ public class MultiCameraManager {
                 Log.e(TAG, "Callback: Camera " + cameraId + " error: " + errorCode + " - " + errorMsg);
                 if (statusCallback != null) {
                     statusCallback.onCameraStatusUpdate(cameraId, "错误: " + errorMsg);
+                }
+
+                // 如果在等待会话配置期间发生错误，减少期望计数
+                if (expectedSessionCount > 0 && errorCode == -3) {
+                    expectedSessionCount--;
+                    Log.d(TAG, "Session configuration failed, adjusted expected count: " + sessionConfiguredCount + "/" + expectedSessionCount);
+
+                    // 检查是否所有剩余会话都已配置完成
+                    if (sessionConfiguredCount >= expectedSessionCount && expectedSessionCount > 0) {
+                        if (pendingRecordingStart != null) {
+                            Log.d(TAG, "Remaining sessions configured, starting recording...");
+                            // 取消超时任务
+                            if (sessionTimeoutRunnable != null) {
+                                mainHandler.removeCallbacks(sessionTimeoutRunnable);
+                                sessionTimeoutRunnable = null;
+                            }
+                            pendingRecordingStart.run();
+                            pendingRecordingStart = null;
+                        }
+                        sessionConfiguredCount = 0;
+                        expectedSessionCount = 0;
+                    } else if (expectedSessionCount == 0) {
+                        // 所有会话都失败了
+                        Log.e(TAG, "All sessions failed to configure");
+                        if (sessionTimeoutRunnable != null) {
+                            mainHandler.removeCallbacks(sessionTimeoutRunnable);
+                            sessionTimeoutRunnable = null;
+                        }
+                        sessionConfiguredCount = 0;
+                        expectedSessionCount = 0;
+                        pendingRecordingStart = null;
+                    }
+                }
+            }
+
+            @Override
+            public void onPreviewSizeChosen(String cameraId, Size previewSize) {
+                Log.d(TAG, "Callback: Camera " + cameraId + " preview size: " + previewSize);
+                // 找到对应的 camera key
+                for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
+                    if (entry.getValue().getCameraId().equals(cameraId)) {
+                        if (previewSizeCallback != null) {
+                            previewSizeCallback.onPreviewSizeChosen(entry.getKey(), cameraId, previewSize);
+                        }
+                        break;
+                    }
                 }
             }
         };
@@ -201,43 +284,126 @@ public class MultiCameraManager {
             return false;
         }
 
-        boolean success = true;
+        // 第一步：准备所有 MediaRecorder（但不启动）
+        boolean prepareSuccess = true;
         for (String key : keys) {
             VideoRecorder recorder = recorders.get(key);
             if (recorder == null) {
                 continue;
             }
             String path = new File(saveDir, key + "_" + timestamp + ".mp4").getAbsolutePath();
-            success &= recorder.startRecording(path, RECORD_WIDTH, RECORD_HEIGHT);
+            // 只准备 MediaRecorder，获取 Surface
+            if (!recorder.prepareRecording(path, RECORD_WIDTH, RECORD_HEIGHT)) {
+                prepareSuccess = false;
+                break;
+            }
         }
 
-        if (success) {
+        if (!prepareSuccess) {
+            Log.e(TAG, "Failed to prepare recording");
+            // 清理已准备的录制器
             for (String key : keys) {
-                SingleCamera camera = cameras.get(key);
                 VideoRecorder recorder = recorders.get(key);
-                if (camera == null || recorder == null) {
-                    continue;
+                if (recorder != null) {
+                    recorder.release();
                 }
-                camera.setRecordSurface(recorder.getSurface());
-                camera.recreateSession();
+            }
+            return false;
+        }
+
+        // 第二步：将录制 Surface 添加到摄像头会话并重新创建会话
+        sessionConfiguredCount = 0;
+        expectedSessionCount = keys.size();
+
+        for (String key : keys) {
+            SingleCamera camera = cameras.get(key);
+            VideoRecorder recorder = recorders.get(key);
+            if (camera == null || recorder == null) {
+                continue;
+            }
+            camera.setRecordSurface(recorder.getSurface());
+            camera.recreateSession();
+        }
+
+        // 第三步：设置待处理的录制启动任务，等待所有会话配置完成后执行
+        pendingRecordingStart = () -> {
+            Log.d(TAG, "Attempting to start recording...");
+            boolean startSuccess = false;
+            int successCount = 0;
+
+            for (String key : keys) {
+                VideoRecorder recorder = recorders.get(key);
+                if (recorder != null) {
+                    if (recorder.startRecording()) {
+                        successCount++;
+                        startSuccess = true;  // 至少有一个成功
+                    }
+                }
             }
 
-            isRecording = true;
-            Log.d(TAG, "All cameras started recording");
-        } else {
-            Log.e(TAG, "Failed to start recording on some cameras");
-            stopRecording();
-        }
+            if (startSuccess) {
+                isRecording = true;
+                Log.d(TAG, successCount + " camera(s) started recording successfully");
+            } else {
+                Log.e(TAG, "Failed to start recording on all cameras");
+                isRecording = false;
+                // 清理所有录制器
+                for (String key : keys) {
+                    VideoRecorder recorder = recorders.get(key);
+                    if (recorder != null) {
+                        recorder.release();
+                    }
+                }
+            }
+        };
 
-        return success;
+        // 设置超时机制：如果 3 秒内没有所有会话配置完成，强制启动录制
+        sessionTimeoutRunnable = () -> {
+            Log.w(TAG, "Session configuration timeout, starting recording with available cameras");
+            if (pendingRecordingStart != null) {
+                pendingRecordingStart.run();
+                pendingRecordingStart = null;
+            }
+            sessionConfiguredCount = 0;
+            expectedSessionCount = 0;
+        };
+        mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
+
+        return true;
     }
 
     /**
      * 停止录制所有摄像头
      */
     public void stopRecording() {
+        Log.d(TAG, "stopRecording called, isRecording=" + isRecording);
+
+        // 清理待处理的录制启动任务
+        if (pendingRecordingStart != null) {
+            Log.d(TAG, "Cancelling pending recording start");
+            pendingRecordingStart = null;
+        }
+
+        // 清理超时任务
+        if (sessionTimeoutRunnable != null) {
+            mainHandler.removeCallbacks(sessionTimeoutRunnable);
+            sessionTimeoutRunnable = null;
+        }
+
+        // 重置会话计数器
+        sessionConfiguredCount = 0;
+        expectedSessionCount = 0;
+
         if (!isRecording) {
-            Log.w(TAG, "Not recording");
+            Log.w(TAG, "Not recording, but cleaning up anyway");
+            // 即使不在录制状态，也尝试清理录制器
+            List<String> keys = getActiveCameraKeys();
+            for (String key : keys) {
+                VideoRecorder recorder = recorders.get(key);
+                if (recorder != null) {
+                    recorder.release();
+                }
+            }
             return;
         }
 
