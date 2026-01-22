@@ -20,6 +20,7 @@ public class VideoRecorder {
     private MediaRecorder mediaRecorder;
     private RecordCallback callback;
     private boolean isRecording = false;
+    private boolean waitingForSessionReconfiguration = false;  // 等待会话重新配置
     private String currentFilePath;
 
     // 分段录制相关
@@ -67,6 +68,20 @@ public class VideoRecorder {
     }
 
     /**
+     * 检查是否正在等待会话重新配置
+     */
+    public boolean isWaitingForSessionReconfiguration() {
+        return waitingForSessionReconfiguration;
+    }
+
+    /**
+     * 清除等待会话重新配置的标志
+     */
+    public void clearWaitingForSessionReconfiguration() {
+        waitingForSessionReconfiguration = false;
+    }
+
+    /**
      * 准备录制器
      */
     private void prepareMediaRecorder(String filePath, int width, int height) throws IOException {
@@ -89,6 +104,9 @@ public class VideoRecorder {
             Log.w(TAG, "Camera " + cameraId + " is already recording");
             return false;
         }
+
+        // 先释放旧的 MediaRecorder（如果存在）
+        releaseMediaRecorder();
 
         try {
             // 保存录制参数用于分段
@@ -117,6 +135,11 @@ public class VideoRecorder {
         } catch (IOException e) {
             Log.e(TAG, "Failed to prepare recording for camera " + cameraId, e);
             releaseMediaRecorder();
+            // 确保状态被重置
+            isRecording = false;
+            waitingForSessionReconfiguration = false;
+            currentFilePath = null;
+            segmentIndex = 0;
             if (callback != null) {
                 callback.onRecordError(cameraId, e.getMessage());
             }
@@ -151,7 +174,8 @@ public class VideoRecorder {
             mediaRecorder.start();
             isRecording = true;
             Log.d(TAG, "Camera " + cameraId + " started recording segment " + segmentIndex);
-            if (callback != null) {
+            if (callback != null && segmentIndex == 0) {
+                // 只在第一段时通知开始录制
                 callback.onRecordStart(cameraId);
             }
 
@@ -201,9 +225,11 @@ public class VideoRecorder {
             if (mediaRecorder != null) {
                 try {
                     mediaRecorder.stop();
+                    isRecording = false;  // 立即更新状态
                     Log.d(TAG, "Camera " + cameraId + " stopped segment " + segmentIndex + ": " + currentFilePath);
                 } catch (RuntimeException e) {
                     Log.e(TAG, "Error stopping segment for camera " + cameraId, e);
+                    isRecording = false;  // 即使失败也更新状态
                     // 即使停止失败，也继续尝试下一段
                 }
                 releaseMediaRecorder();
@@ -215,21 +241,23 @@ public class VideoRecorder {
             prepareMediaRecorder(nextSegmentPath, recordWidth, recordHeight);
             currentFilePath = nextSegmentPath;
 
+            // 设置等待会话重新配置的标志
+            waitingForSessionReconfiguration = true;
+
             // 通知外部需要重新配置相机会话（因为 MediaRecorder 的 Surface 已经改变）
+            // 外部需要调用 startRecording() 来启动新段的录制
             if (callback != null) {
                 callback.onSegmentSwitch(cameraId, segmentIndex);
             }
 
-            // 启动下一段录制
-            mediaRecorder.start();
-            Log.d(TAG, "Camera " + cameraId + " started segment " + segmentIndex + ": " + nextSegmentPath);
-
-            // 调度再下一段
-            scheduleNextSegment();
+            // 注意：不在这里调用 start()，而是等待外部重新配置相机会话后调用 startRecording()
+            // 这样可以确保新的 Surface 已经添加到 CaptureSession 中
+            Log.d(TAG, "Camera " + cameraId + " prepared segment " + segmentIndex + ": " + nextSegmentPath + ", waiting for session reconfiguration");
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to switch segment for camera " + cameraId, e);
             isRecording = false;
+            waitingForSessionReconfiguration = false;
             if (callback != null) {
                 callback.onRecordError(cameraId, "Failed to switch segment: " + e.getMessage());
             }
@@ -250,27 +278,44 @@ public class VideoRecorder {
      * 停止录制
      */
     public void stopRecording() {
-        if (!isRecording) {
-            Log.w(TAG, "Camera " + cameraId + " is not recording");
-            return;
-        }
-
         // 取消分段定时器
         if (segmentRunnable != null) {
             segmentHandler.removeCallbacks(segmentRunnable);
             segmentRunnable = null;
         }
 
+        // 如果正在等待会话重新配置，说明MediaRecorder已经stop过了，只需要清理状态
+        if (waitingForSessionReconfiguration) {
+            Log.d(TAG, "Camera " + cameraId + " is waiting for session reconfiguration, skipping stop");
+            isRecording = false;
+            waitingForSessionReconfiguration = false;
+            releaseMediaRecorder();
+            currentFilePath = null;
+            segmentIndex = 0;
+            if (callback != null) {
+                callback.onRecordStop(cameraId);
+            }
+            return;
+        }
+
+        if (!isRecording) {
+            Log.w(TAG, "Camera " + cameraId + " is not recording");
+            return;
+        }
+
         try {
-            mediaRecorder.stop();
+            if (mediaRecorder != null) {
+                mediaRecorder.stop();
+                Log.d(TAG, "Camera " + cameraId + " stopped recording: " + currentFilePath + " (total segments: " + (segmentIndex + 1) + ")");
+            }
             isRecording = false;
 
-            Log.d(TAG, "Camera " + cameraId + " stopped recording: " + currentFilePath + " (total segments: " + (segmentIndex + 1) + ")");
             if (callback != null) {
                 callback.onRecordStop(cameraId);
             }
         } catch (RuntimeException e) {
             Log.e(TAG, "Failed to stop recording for camera " + cameraId, e);
+            isRecording = false;
         } finally {
             releaseMediaRecorder();
             currentFilePath = null;
@@ -299,9 +344,16 @@ public class VideoRecorder {
             segmentRunnable = null;
         }
 
-        if (isRecording) {
+        // 只有在真正录制中且mediaRecorder不为null时才调用stopRecording
+        if (isRecording && mediaRecorder != null) {
             stopRecording();
+        } else {
+            // 直接清理状态
+            isRecording = false;
+            waitingForSessionReconfiguration = false;
+            releaseMediaRecorder();
+            currentFilePath = null;
+            segmentIndex = 0;
         }
-        releaseMediaRecorder();
     }
 }

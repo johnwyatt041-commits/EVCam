@@ -40,6 +40,7 @@ public class SingleCamera {
 
     private Size previewSize;
     private Surface recordSurface;  // 录制Surface
+    private Surface previewSurface;  // 预览Surface（缓存以避免重复创建）
 
     private boolean shouldReconnect = false;  // 是否应该重连
     private int reconnectAttempts = 0;  // 重连尝试次数
@@ -82,7 +83,12 @@ public class SingleCamera {
         if (textureView != null && textureView.isAvailable()) {
             SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
             if (surfaceTexture != null) {
-                return new Surface(surfaceTexture);
+                // 缓存 Surface 以避免重复创建和资源泄漏
+                if (previewSurface == null) {
+                    previewSurface = new Surface(surfaceTexture);
+                    Log.d(TAG, "Camera " + cameraId + " created new preview surface");
+                }
+                return previewSurface;
             }
         }
         return null;
@@ -470,6 +476,15 @@ public class SingleCamera {
                 captureSession.close();
                 captureSession = null;
             }
+            // 清除旧的预览 Surface 缓存，强制重新创建
+            if (previewSurface != null) {
+                try {
+                    previewSurface.release();
+                } catch (Exception e) {
+                    Log.w(TAG, "Camera " + cameraId + " exception while releasing old preview surface: " + e.getMessage());
+                }
+                previewSurface = null;
+            }
             createCameraPreviewSession();
         }
     }
@@ -505,6 +520,17 @@ public class SingleCamera {
                 Log.w(TAG, "Camera " + cameraId + " exception while closing device (expected): " + e.getMessage());
             }
             cameraDevice = null;
+        }
+
+        // 释放预览 Surface
+        if (previewSurface != null) {
+            try {
+                previewSurface.release();
+                Log.d(TAG, "Camera " + cameraId + " released preview surface");
+            } catch (Exception e) {
+                Log.w(TAG, "Camera " + cameraId + " exception while releasing preview surface: " + e.getMessage());
+            }
+            previewSurface = null;
         }
 
         stopBackgroundThread();

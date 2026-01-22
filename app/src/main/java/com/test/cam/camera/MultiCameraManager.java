@@ -97,6 +97,21 @@ public class MultiCameraManager {
                     statusCallback.onCameraStatusUpdate(cameraId, "预览已启动");
                 }
 
+                // 检查是否有录制器正在等待会话重新配置（分段切换）
+                for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
+                    if (entry.getValue().getCameraId().equals(cameraId)) {
+                        String key = entry.getKey();
+                        VideoRecorder recorder = recorders.get(key);
+
+                        if (recorder != null && recorder.isWaitingForSessionReconfiguration()) {
+                            Log.d(TAG, "Camera " + cameraId + " session reconfigured, starting next segment recording");
+                            recorder.clearWaitingForSessionReconfiguration();
+                            recorder.startRecording();
+                        }
+                        break;
+                    }
+                }
+
                 // 检查是否所有会话都已配置完成
                 if (expectedSessionCount > 0) {
                     sessionConfiguredCount++;
@@ -178,7 +193,6 @@ public class MultiCameraManager {
                         if (previewSizeCallback != null) {
                             previewSizeCallback.onPreviewSizeChosen(entry.getKey(), cameraId, previewSize);
                         }
-                        break;
                     }
                 }
             }

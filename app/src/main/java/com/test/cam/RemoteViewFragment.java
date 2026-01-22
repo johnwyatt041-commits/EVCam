@@ -22,7 +22,7 @@ import com.test.cam.dingtalk.DingTalkStreamManager;
 public class RemoteViewFragment extends Fragment {
     private static final String TAG = "RemoteViewFragment";
 
-    private EditText etAppKey, etAppSecret, etClientId, etClientSecret;
+    private EditText etClientId, etClientSecret;
     private Button btnSaveConfig, btnStartService, btnStopService, btnMenu;
     private TextView tvConnectionStatus;
 
@@ -46,8 +46,6 @@ public class RemoteViewFragment extends Fragment {
 
     private void initViews(View view) {
         btnMenu = view.findViewById(R.id.btn_menu);
-        etAppKey = view.findViewById(R.id.et_app_key);
-        etAppSecret = view.findViewById(R.id.et_app_secret);
         etClientId = view.findViewById(R.id.et_client_id);
         etClientSecret = view.findViewById(R.id.et_client_secret);
         btnSaveConfig = view.findViewById(R.id.btn_save_config);
@@ -59,8 +57,6 @@ public class RemoteViewFragment extends Fragment {
 
     private void loadConfig() {
         if (config.isConfigured()) {
-            etAppKey.setText(config.getAppKey());
-            etAppSecret.setText(config.getAppSecret());
             etClientId.setText(config.getClientId());
             etClientSecret.setText(config.getClientSecret());
         }
@@ -86,17 +82,15 @@ public class RemoteViewFragment extends Fragment {
     }
 
     private void saveConfig() {
-        String appKey = etAppKey.getText().toString().trim();
-        String appSecret = etAppSecret.getText().toString().trim();
         String clientId = etClientId.getText().toString().trim();
         String clientSecret = etClientSecret.getText().toString().trim();
 
-        if (appKey.isEmpty() || appSecret.isEmpty() || clientId.isEmpty() || clientSecret.isEmpty()) {
+        if (clientId.isEmpty() || clientSecret.isEmpty()) {
             Toast.makeText(requireContext(), "请填写完整的配置信息", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        config.saveConfig(appKey, appSecret, clientId, clientSecret);
+        config.saveConfig(clientId, clientSecret);
         Toast.makeText(requireContext(), "配置已保存", Toast.LENGTH_SHORT).show();
     }
 

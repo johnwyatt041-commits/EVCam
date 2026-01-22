@@ -92,120 +92,151 @@
         </ScrollView>
     </LinearLayout>
 
-    <!-- 上半部分：前、后摄像头 -->
+    <!-- 摄像头显示区域：左侧前后，右侧左右 -->
+    <!-- 左侧：1280宽的横向画面 x2 (上下排列) -->
+    <!-- 右侧：800宽的竖向画面 x2 (左右排列) = 1600宽 -->
+    <!-- 比例：1280:1600 = 4:5 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:orientation="horizontal">
 
-        <!-- 前摄像头 -->
-        <FrameLayout
+        <!-- 左侧：前后摄像头垂直排列 (横向1280x800) -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="2dp"
-            android:gravity="center">
+            android:layout_weight="16"
+            android:orientation="vertical">
 
-            <com.test.cam.AutoFitTextureView
-                android:id="@+id/texture_front"
+            <!-- 前摄像头 -->
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:layout_gravity="center" />
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="1dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="8dp"
+                android:gravity="center">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="前"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:padding="8dp"
-                android:background="#80000000"
-                android:layout_gravity="top|start" />
-        </FrameLayout>
+                <com.test.cam.AutoFitTextureView
+                    android:id="@+id/texture_front"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
 
-        <!-- 后摄像头 -->
-        <FrameLayout
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_marginStart="25dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#80000000"
+                    android:padding="8dp"
+                    android:text="前"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+            </FrameLayout>
+
+            <!-- 后摄像头 -->
+            <FrameLayout
+                android:layout_width="match_parent"
+                android:layout_height="0dp"
+                android:layout_weight="1"
+                android:layout_marginStart="1dp"
+                android:layout_marginEnd="16dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginBottom="2dp"
+                android:gravity="center">
+
+                <com.test.cam.AutoFitTextureView
+                    android:id="@+id/texture_back"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_marginStart="25dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#80000000"
+                    android:padding="8dp"
+                    android:text="后"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+            </FrameLayout>
+        </LinearLayout>
+
+        <!-- 右侧：左右摄像头水平排列（旋转90度后竖向800x1280） -->
+        <LinearLayout
             android:layout_width="0dp"
             android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="2dp"
-            android:gravity="center">
+            android:layout_weight="25"
+            android:orientation="horizontal">
 
-            <com.test.cam.AutoFitTextureView
-                android:id="@+id/texture_back"
-                android:layout_width="match_parent"
+            <!-- 左摄像头（逆时针旋转90度） -->
+            <FrameLayout
+                android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_gravity="center" />
+                android:layout_weight="1"
+                android:layout_marginStart="12dp"
+                android:layout_marginEnd="1dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:gravity="center">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="后"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:padding="8dp"
-                android:background="#80000000"
-                android:layout_gravity="top|start" />
-        </FrameLayout>
-    </LinearLayout>
+                <com.test.cam.AutoFitTextureView
+                    android:id="@+id/texture_left"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
 
-    <!-- 下半部分：左、右摄像头 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="horizontal">
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_marginStart="22dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#80000000"
+                    android:padding="8dp"
+                    android:text="左"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+            </FrameLayout>
 
-        <!-- 左摄像头 -->
-        <FrameLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="2dp"
-            android:gravity="center">
-
-            <com.test.cam.AutoFitTextureView
-                android:id="@+id/texture_left"
-                android:layout_width="match_parent"
+            <!-- 右摄像头（顺时针旋转90度） -->
+            <FrameLayout
+                android:layout_width="0dp"
                 android:layout_height="match_parent"
-                android:layout_gravity="center" />
+                android:layout_weight="1"
+                android:layout_marginStart="1dp"
+                android:layout_marginEnd="2dp"
+                android:layout_marginTop="2dp"
+                android:layout_marginBottom="2dp"
+                android:gravity="center">
 
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="左"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:padding="8dp"
-                android:background="#80000000"
-                android:layout_gravity="top|start" />
-        </FrameLayout>
+                <com.test.cam.AutoFitTextureView
+                    android:id="@+id/texture_right"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:layout_gravity="center" />
 
-        <!-- 右摄像头 -->
-        <FrameLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="1"
-            android:layout_margin="2dp"
-            android:gravity="center">
-
-            <com.test.cam.AutoFitTextureView
-                android:id="@+id/texture_right"
-                android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:layout_gravity="center" />
-
-            <TextView
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="右"
-                android:textColor="#FFFFFF"
-                android:textSize="16sp"
-                android:padding="8dp"
-                android:background="#80000000"
-                android:layout_gravity="top|start" />
-        </FrameLayout>
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="top|start"
+                    android:layout_marginStart="22dp"
+                    android:layout_marginTop="8dp"
+                    android:background="#80000000"
+                    android:padding="8dp"
+                    android:text="右"
+                    android:textColor="#FFFFFF"
+                    android:textSize="16sp" />
+            </FrameLayout>
+        </LinearLayout>
     </LinearLayout>
 
     <!-- 控制按钮区域 -->
@@ -253,7 +284,7 @@
         android:layout_width="wrap_content"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:fitsSystemWindows="true"
+        android:fitsSystemWindows="false"
         app:headerLayout="@layout/nav_header"
         app:menu="@menu/navigation_menu" />
 

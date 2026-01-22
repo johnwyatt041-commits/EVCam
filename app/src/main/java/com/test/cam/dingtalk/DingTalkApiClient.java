@@ -40,7 +40,7 @@ public class DingTalkApiClient {
     }
 
     /**
-     * 获取 Access Token
+     * 获取 Access Token (新版 OAuth 2.0)
      */
     public String getAccessToken() throws IOException {
         // 检查缓存的 token 是否有效
@@ -54,8 +54,9 @@ public class DingTalkApiClient {
         String url = BASE_URL + "/v1.0/oauth2/accessToken";
 
         JsonObject body = new JsonObject();
-        body.addProperty("appKey", config.getAppKey());
-        body.addProperty("appSecret", config.getAppSecret());
+        body.addProperty("clientId", config.getClientId());
+        body.addProperty("clientSecret", config.getClientSecret());
+        body.addProperty("grantType", "client_credentials");
 
         Log.d(TAG, "正在获取新的 Access Token...");
 

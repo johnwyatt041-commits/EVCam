@@ -16,7 +16,6 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.NonNull;
-import androidx.appcompat.app.ActionBarDrawerToggle;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
@@ -28,7 +27,6 @@ import androidx.fragment.app.FragmentTransaction;
 
 import com.google.android.material.navigation.NavigationView;
 import com.test.cam.camera.MultiCameraManager;
-import com.test.cam.dingtalk.DingTalkApiClient;
 import com.test.cam.dingtalk.DingTalkApiClient;
 import com.test.cam.dingtalk.VideoUploadService;
 
@@ -117,7 +115,6 @@ public class MainActivity extends AppCompatActivity {
         textureBack = findViewById(R.id.texture_back);
         textureLeft = findViewById(R.id.texture_left);
         textureRight = findViewById(R.id.texture_right);
-
         btnStartRecord = findViewById(R.id.btn_start_record);
         btnStopRecord = findViewById(R.id.btn_stop_record);
 
@@ -430,7 +427,7 @@ public class MainActivity extends AppCompatActivity {
             appendLog("摄像头 " + cameraId + " 预览尺寸: " + previewSize.getWidth() + "x" + previewSize.getHeight());
             // 根据 camera key 设置对应 TextureView 的宽高比
             runOnUiThread(() -> {
-                AutoFitTextureView textureView = null;
+                final AutoFitTextureView textureView;
                 switch (cameraKey) {
                     case "front":
                         textureView = textureFront;
@@ -444,10 +441,27 @@ public class MainActivity extends AppCompatActivity {
                     case "right":
                         textureView = textureRight;
                         break;
+                    default:
+                        textureView = null;
+                        break;
                 }
                 if (textureView != null) {
-                    textureView.setAspectRatio(previewSize.getWidth(), previewSize.getHeight());
-                    appendLog("设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight());
+                    // 判断是否需要旋转
+                    boolean needRotation = "left".equals(cameraKey) || "right".equals(cameraKey);
+
+                    if (needRotation) {
+                        // 左右摄像头：容器使用旋转后的宽高比（800x1280，竖向）
+                        textureView.setAspectRatio(previewSize.getHeight(), previewSize.getWidth());
+                        appendLog("设置 " + cameraKey + " 宽高比(旋转后): " + previewSize.getHeight() + ":" + previewSize.getWidth());
+
+                        // 应用旋转变换
+                        int rotation = "left".equals(cameraKey) ? 270 : 90;  // 左逆时针90度(270)，右顺时针90度(90)
+                        applyRotationTransform(textureView, previewSize, rotation, cameraKey);
+                    } else {
+                        // 前后摄像头：使用原始宽高比（1280x800，横向）
+                        textureView.setAspectRatio(previewSize.getWidth(), previewSize.getHeight());
+                        appendLog("设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight());
+                    }
                 }
             });
         });
@@ -470,12 +484,13 @@ public class MainActivity extends AppCompatActivity {
                 // 根据可用摄像头数量初始化
                 if (cameraIds.length >= 4) {
                     // 有4个或更多摄像头
+                    // 修正摄像头位置映射：前=cameraIds[2], 后=cameraIds[1], 左=cameraIds[0], 右=cameraIds[3]
                     appendLog("使用4路摄像头模式");
                     cameraManager.initCameras(
-                            cameraIds[0], textureFront,
-                            cameraIds[1], textureBack,
-                            cameraIds[2], textureLeft,
-                            cameraIds[3], textureRight
+                            cameraIds[2], textureFront,  // 前摄像头使用 cameraIds[2]
+                            cameraIds[1], textureBack,   // 后摄像头使用 cameraIds[1]
+                            cameraIds[0], textureLeft,   // 左摄像头使用 cameraIds[0]
+                            cameraIds[3], textureRight   // 右摄像头使用 cameraIds[3]
                     );
                 } else if (cameraIds.length >= 2) {
                     // 只有2个摄像头，使用前两个位置
@@ -485,6 +500,8 @@ public class MainActivity extends AppCompatActivity {
                             cameraIds[1], textureBack,
                             cameraIds[0], textureLeft,  // 复用第一个
                             cameraIds[1], textureRight  // 复用第二个
+
+
                     );
                 } else if (cameraIds.length == 1) {
                     // 只有1个摄像头，所有位置使用同一个
@@ -514,6 +531,64 @@ public class MainActivity extends AppCompatActivity {
                 appendLog("摄像头访问失败: " + e.getMessage());
                 Toast.makeText(this, "摄像头访问失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
             }
+        });
+    }
+
+    /**
+     * 对 TextureView 应用旋转变换 (修正版 - 解决变形问题)
+     * @param textureView 要旋转的 TextureView
+     * @param previewSize 预览尺寸（原始的 1280x800）
+     * @param rotation 旋转角度（90 或 270）
+     * @param cameraKey 摄像头标识
+     */
+    private void applyRotationTransform(AutoFitTextureView textureView, android.util.Size previewSize,
+                                        int rotation, String cameraKey) {
+        // 延迟执行，确保 TextureView 已经完成布局
+        textureView.post(() -> {
+            int viewWidth = textureView.getWidth();
+            int viewHeight = textureView.getHeight();
+
+            if (viewWidth == 0 || viewHeight == 0) {
+                appendLog(cameraKey + " TextureView 尺寸为0，延迟应用旋转");
+                // 如果视图还没有尺寸，再次延迟
+                textureView.postDelayed(() -> applyRotationTransform(textureView, previewSize, rotation, cameraKey), 100);
+                return;
+            }
+
+            android.graphics.Matrix matrix = new android.graphics.Matrix();
+            android.graphics.RectF viewRect = new android.graphics.RectF(0, 0, viewWidth, viewHeight);
+            
+            // 缓冲区矩形，使用 float 精度
+            android.graphics.RectF bufferRect = new android.graphics.RectF(0, 0, previewSize.getWidth(), previewSize.getHeight());
+
+            float centerX = viewRect.centerX();
+            float centerY = viewRect.centerY();
+
+            if (rotation == 90 || rotation == 270) {
+                // 1. 将 bufferRect 中心移动到 viewRect 中心
+                bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+                
+                // 2. 将 buffer 映射到 view，这一步会处理拉伸校正
+                matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL);
+                
+                // 3. 计算缩放比例以填满屏幕 (Center Crop)
+                // 因为旋转了 90 度，所以 viewHeight 对应 previewWidth，viewWidth 对应 previewHeight
+                float scale = Math.max(
+                        (float) viewHeight / previewSize.getWidth(),
+                        (float) viewWidth / previewSize.getHeight());
+                
+                // 4. 应用缩放
+                matrix.postScale(scale, scale, centerX, centerY);
+                
+                // 5. 应用旋转
+                matrix.postRotate(rotation, centerX, centerY);
+            } else if (android.view.Surface.ROTATION_180 == rotation) {
+                // 如果需要处理 180 度翻转
+                matrix.postRotate(180, centerX, centerY);
+            }
+
+            textureView.setTransform(matrix);
+            appendLog(cameraKey + " 应用修正旋转: " + rotation + "度");
         });
     }
 

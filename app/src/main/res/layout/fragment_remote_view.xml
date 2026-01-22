@@ -38,47 +38,6 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <!-- AppKey -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="AppKey"
-            android:textColor="#CCCCCC"
-            android:textSize="14sp"
-            android:layout_marginBottom="8dp" />
-
-        <EditText
-            android:id="@+id/et_app_key"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="请输入钉钉应用的 AppKey"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#666666"
-            android:background="@android:drawable/edit_text"
-            android:padding="12dp"
-            android:layout_marginBottom="16dp" />
-
-        <!-- AppSecret -->
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="AppSecret"
-            android:textColor="#CCCCCC"
-            android:textSize="14sp"
-            android:layout_marginBottom="8dp" />
-
-        <EditText
-            android:id="@+id/et_app_secret"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:hint="请输入钉钉应用的 AppSecret"
-            android:textColor="#FFFFFF"
-            android:textColorHint="#666666"
-            android:background="@android:drawable/edit_text"
-            android:padding="12dp"
-            android:inputType="textPassword"
-            android:layout_marginBottom="16dp" />
-
         <!-- ClientId -->
         <TextView
             android:layout_width="match_parent"
@@ -195,7 +154,7 @@
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="1. 在钉钉开放平台创建企业内部应用\n2. 开启机器人能力并配置 Stream 模式\n3. 将应用的凭证信息填入上方\n4. 保存配置并启动服务\n5. 在钉钉群聊中 @机器人 发送「录制」指令\n6. 设备将自动录制 1 分钟视频并上传到钉钉群"
+            android:text="1. 在钉钉开放平台创建企业内部应用\n2. 开启机器人能力并配置 Stream 模式\n3. 将应用的 ClientId 和 ClientSecret 填入上方\n4. 保存配置并启动服务\n5. 在钉钉群聊中 @机器人 发送「录制」指令\n6. 设备将自动录制 1 分钟视频并上传到钉钉群"
             android:textColor="#CCCCCC"
             android:textSize="14sp"
             android:lineSpacingExtra="4dp" />

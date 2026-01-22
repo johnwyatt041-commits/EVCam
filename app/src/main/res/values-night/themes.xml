@@ -1,7 +1,17 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
     <!-- Base application theme. -->
     <style name="Base.Theme.Cam" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your dark theme here. -->
-        <!-- <item name="colorPrimary">@color/my_dark_primary</item> -->
+        <!-- 深灰色配色方案 (夜间模式) -->
+        <item name="colorPrimary">#424242</item>
+        <item name="colorPrimaryVariant">#2A2A2A</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#616161</item>
+        <item name="colorSecondaryVariant">#424242</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="android:colorBackground">#1A1A1A</item>
+        <item name="colorSurface">#2A2A2A</item>
+        <item name="colorOnSurface">#FFFFFF</item>
+        <item name="android:statusBarColor">#2A2A2A</item>
+        <item name="android:navigationBarColor">#000000</item>
     </style>
 </resources>

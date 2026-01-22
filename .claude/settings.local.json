@@ -9,7 +9,9 @@
       "Bash(git clone:*)",
       "Bash(cat:*)",
       "Bash(del:*)",
-      "Bash(e:\\e5\\cam-master\\cam\\gradlew.bat assembleDebug:*)"
+      "Bash(e:\\e5\\cam-master\\cam\\gradlew.bat assembleDebug:*)",
+      "Bash(.\\gradlew.bat assembleDebug:*)",
+      "Bash(gradlew.bat clean:*)"
     ],
     "deny": [],
     "ask": []

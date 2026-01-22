@@ -50,8 +50,7 @@ public class AutoFitTextureView extends TextureView {
             // 如果没有设置宽高比，使用默认测量
             setMeasuredDimension(width, height);
         } else {
-            // 根据宽高比调整尺寸
-            // 计算两种可能的尺寸：基于宽度和基于高度
+            // 根据宽高比调整尺寸，尽可能填满容器
             int newWidth, newHeight;
 
             // 方案1：基于容器宽度计算高度

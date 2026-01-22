@@ -139,6 +139,11 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             protected Bitmap doInBackground(Void... voids) {
                 MediaMetadataRetriever retriever = null;
                 try {
+                    // 检查文件是否存在且大小大于0（避免加载正在录制的文件）
+                    if (!videoFile.exists() || videoFile.length() == 0) {
+                        return null;
+                    }
+
                     retriever = new MediaMetadataRetriever();
                     retriever.setDataSource(videoFile.getAbsolutePath());
 
@@ -147,7 +152,8 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
 
                     return bitmap;
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    // 静默处理异常（可能是正在录制的文件）
+                    // e.printStackTrace();
                     return null;
                 } finally {
                     if (retriever != null) {

@@ -2,4 +2,10 @@
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
+
+    <!-- 深灰色配色方案 -->
+    <color name="dark_gray_primary">#424242</color>
+    <color name="dark_gray_secondary">#616161</color>
+    <color name="dark_gray_background">#1A1A1A</color>
+    <color name="dark_gray_surface">#2A2A2A</color>
 </resources>

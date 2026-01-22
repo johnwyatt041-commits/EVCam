@@ -8,8 +8,6 @@ import android.content.SharedPreferences;
  */
 public class DingTalkConfig {
     private static final String PREF_NAME = "dingtalk_config";
-    private static final String KEY_APP_KEY = "app_key";
-    private static final String KEY_APP_SECRET = "app_secret";
     private static final String KEY_CLIENT_ID = "client_id";
     private static final String KEY_CLIENT_SECRET = "client_secret";
     private static final String KEY_ACCESS_TOKEN = "access_token";
@@ -21,21 +19,11 @@ public class DingTalkConfig {
         prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
     }
 
-    public void saveConfig(String appKey, String appSecret, String clientId, String clientSecret) {
+    public void saveConfig(String clientId, String clientSecret) {
         prefs.edit()
-                .putString(KEY_APP_KEY, appKey)
-                .putString(KEY_APP_SECRET, appSecret)
                 .putString(KEY_CLIENT_ID, clientId)
                 .putString(KEY_CLIENT_SECRET, clientSecret)
                 .apply();
-    }
-
-    public String getAppKey() {
-        return prefs.getString(KEY_APP_KEY, "");
-    }
-
-    public String getAppSecret() {
-        return prefs.getString(KEY_APP_SECRET, "");
     }
 
     public String getClientId() {
@@ -47,8 +35,7 @@ public class DingTalkConfig {
     }
 
     public boolean isConfigured() {
-        return !getAppKey().isEmpty() && !getAppSecret().isEmpty() &&
-                !getClientId().isEmpty() && !getClientSecret().isEmpty();
+        return !getClientId().isEmpty() && !getClientSecret().isEmpty();
     }
 
     public void saveAccessToken(String token, long expireTime) {
