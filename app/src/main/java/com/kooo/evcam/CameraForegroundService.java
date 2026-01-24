@@ -7,6 +7,7 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
@@ -34,8 +35,19 @@ public class CameraForegroundService extends Service {
     public int onStartCommand(Intent intent, int flags, int startId) {
         AppLog.d(TAG, "Service started");
 
+        // 从Intent获取通知内容，如果没有则使用默认内容
+        String title = intent != null ? intent.getStringExtra("title") : null;
+        String content = intent != null ? intent.getStringExtra("content") : null;
+
+        if (title == null) {
+            title = "摄像头服务运行中";
+        }
+        if (content == null) {
+            content = "正在处理远程拍照/录制请求";
+        }
+
         // 创建通知
-        Notification notification = createNotification("摄像头服务运行中", "正在处理远程拍照/录制请求");
+        Notification notification = createNotification(title, content);
 
         // 启动前台服务
         startForeground(NOTIFICATION_ID, notification);
@@ -105,5 +117,34 @@ public class CameraForegroundService extends Service {
         if (manager != null) {
             manager.notify(NOTIFICATION_ID, notification);
         }
+    }
+
+    /**
+     * 静态方法：启动前台服务
+     * @param context 上下文
+     * @param title 通知标题
+     * @param content 通知内容
+     */
+    public static void start(Context context, String title, String content) {
+        Intent intent = new Intent(context, CameraForegroundService.class);
+        intent.putExtra("title", title);
+        intent.putExtra("content", content);
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            context.startForegroundService(intent);
+        } else {
+            context.startService(intent);
+        }
+        AppLog.d(TAG, "Starting foreground service: " + title);
+    }
+
+    /**
+     * 静态方法：停止前台服务
+     * @param context 上下文
+     */
+    public static void stop(Context context) {
+        Intent intent = new Intent(context, CameraForegroundService.class);
+        context.stopService(intent);
+        AppLog.d(TAG, "Stopping foreground service");
     }
 }

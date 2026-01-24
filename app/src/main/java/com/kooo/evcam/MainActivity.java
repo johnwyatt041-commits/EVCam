@@ -671,11 +671,14 @@ public class MainActivity extends AppCompatActivity {
             if (success) {
                 isRecording = true;
 
+                // 启动前台服务保护（防止后台录制被中断）
+                CameraForegroundService.start(this, "正在录制视频", "录制进行中，点击返回应用");
+
                 // 开始闪烁动画
                 startBlinkAnimation();
 
                 Toast.makeText(this, "开始录制（每1分钟自动分段）", Toast.LENGTH_SHORT).show();
-                AppLog.d(TAG, "Recording started");
+                AppLog.d(TAG, "Recording started with foreground service protection");
             } else {
                 Toast.makeText(this, "录制失败", Toast.LENGTH_SHORT).show();
             }
@@ -687,11 +690,14 @@ public class MainActivity extends AppCompatActivity {
             cameraManager.stopRecording();
             isRecording = false;
 
+            // 停止前台服务
+            CameraForegroundService.stop(this);
+
             // 停止闪烁动画，恢复红色
             stopBlinkAnimation();
 
             Toast.makeText(this, "录制已停止", Toast.LENGTH_SHORT).show();
-            AppLog.d(TAG, "Recording stopped");
+            AppLog.d(TAG, "Recording stopped, foreground service stopped");
         }
     }
 
@@ -703,6 +709,9 @@ public class MainActivity extends AppCompatActivity {
         if (isRecording) {
             stopRecording();
         }
+
+        // 停止前台服务（确保清理）
+        CameraForegroundService.stop(this);
 
         // 停止钉钉服务
         if (dingTalkStreamManager != null) {
@@ -810,10 +819,16 @@ public class MainActivity extends AppCompatActivity {
         if (success) {
             AppLog.d(TAG, "远程录制已开始");
 
+            // 启动前台服务保护（防止后台录制被中断）
+            CameraForegroundService.start(this, "远程录制进行中", "正在录制 " + durationSeconds + " 秒视频...");
+
             // 设置指定时长后自动停止
             autoStopRunnable = () -> {
                 AppLog.d(TAG, durationSeconds + " 秒录制完成，正在停止...");
                 cameraManager.stopRecording();
+
+                // 停止前台服务
+                CameraForegroundService.stop(this);
 
                 // 等待录制完全停止
                 new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
@@ -1210,6 +1225,9 @@ public class MainActivity extends AppCompatActivity {
         if (autoStopHandler != null && autoStopRunnable != null) {
             autoStopHandler.removeCallbacks(autoStopRunnable);
         }
+
+        // 停止前台服务（确保清理）
+        CameraForegroundService.stop(this);
 
         // 停止钉钉服务
         if (dingTalkStreamManager != null) {
