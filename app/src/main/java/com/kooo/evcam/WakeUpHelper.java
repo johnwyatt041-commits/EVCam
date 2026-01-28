@@ -196,4 +196,18 @@ public class WakeUpHelper {
             String conversationType, String userId) {
         launchMainActivityWithCommand(context, "photo", conversationId, conversationType, userId, 0);
     }
+
+    /**
+     * 启动 MainActivity 执行启动持续录制命令（等同点击录制按钮）
+     */
+    public static void launchForStartRecording(Context context) {
+        launchMainActivityWithCommand(context, "start_recording", null, null, null, 0);
+    }
+
+    /**
+     * 启动 MainActivity 执行停止录制命令
+     */
+    public static void launchForStopRecording(Context context) {
+        launchMainActivityWithCommand(context, "stop_recording", null, null, null, 0);
+    }
 }

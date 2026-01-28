@@ -1,8 +1,10 @@
 package com.kooo.evcam;
 
+import android.app.AlertDialog;
 import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
+import android.text.InputType;
 import android.text.TextWatcher;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -36,8 +38,12 @@ public class SettingsFragment extends Fragment {
 
     private SwitchMaterial debugSwitch;
     private Button saveLogsButton;
+    private Button uploadLogsButton;
+    private LinearLayout logButtonsLayout;
     private SwitchMaterial autoStartSwitch;
     private SwitchMaterial autoStartRecordingSwitch;
+    private SwitchMaterial screenOffRecordingSwitch;
+    private LinearLayout screenOffRecordingLayout;
     private SwitchMaterial keepAliveSwitch;
     private SwitchMaterial preventSleepSwitch;
     private SwitchMaterial recordingStatsSwitch;
@@ -83,6 +89,7 @@ public class SettingsFragment extends Fragment {
     private String lastAppliedStorageLocation = null;
     private boolean hasExternalSdCard = false;
     
+    
     // 存储清理配置相关
     private EditText videoStorageLimitEdit;
     private EditText photoStorageLimitEdit;
@@ -105,7 +112,10 @@ public class SettingsFragment extends Fragment {
         // 初始化控件
         debugSwitch = view.findViewById(R.id.switch_debug_to_info);
         saveLogsButton = view.findViewById(R.id.btn_save_logs);
+        uploadLogsButton = view.findViewById(R.id.btn_upload_logs);
+        logButtonsLayout = view.findViewById(R.id.layout_log_buttons);
         Button menuButton = view.findViewById(R.id.btn_menu);
+        Button homeButton = view.findViewById(R.id.btn_home);
 
         // 设置菜单按钮点击事件
         menuButton.setOnClickListener(v -> {
@@ -114,6 +124,13 @@ public class SettingsFragment extends Fragment {
                 if (drawerLayout != null) {
                     drawerLayout.openDrawer(GravityCompat.START);
                 }
+            }
+        });
+
+        // 主页按钮 - 返回预览界面
+        homeButton.setOnClickListener(v -> {
+            if (getActivity() instanceof MainActivity) {
+                ((MainActivity) getActivity()).goToRecordingInterface();
             }
         });
 
@@ -164,6 +181,20 @@ public class SettingsFragment extends Fragment {
                     Toast.makeText(getContext(), "Logs saved to: " + logFile.getAbsolutePath(), Toast.LENGTH_LONG).show();
                 } else {
                     Toast.makeText(getContext(), "Failed to save logs", Toast.LENGTH_SHORT).show();
+                }
+            }
+        });
+
+        // 设置一键上传日志按钮监听器
+        uploadLogsButton.setOnClickListener(v -> {
+            if (getContext() != null && appConfig != null) {
+                // 检查是否已设置设备名称
+                if (!appConfig.hasDeviceNickname()) {
+                    // 首次上传，显示输入框
+                    showDeviceNicknameInputDialog();
+                } else {
+                    // 已有设备名称，显示确认对话框
+                    showUploadConfirmDialog(appConfig.getDeviceNickname());
                 }
             }
         });
@@ -239,11 +270,33 @@ public class SettingsFragment extends Fragment {
             autoStartRecordingSwitch.setChecked(appConfig.isAutoStartRecording());
         }
 
+        // 初始化息屏录制开关
+        screenOffRecordingSwitch = view.findViewById(R.id.switch_screen_off_recording);
+        screenOffRecordingLayout = view.findViewById(R.id.layout_screen_off_recording);
+        if (getContext() != null && appConfig != null) {
+            screenOffRecordingSwitch.setChecked(appConfig.isScreenOffRecordingEnabled());
+            // 根据启动自动录制的状态决定是否显示息屏录制开关
+            updateScreenOffRecordingVisibility(appConfig.isAutoStartRecording());
+        }
+
         // 设置启动自动录制开关监听器
         autoStartRecordingSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (getContext() != null && appConfig != null) {
                 appConfig.setAutoStartRecording(isChecked);
                 String message = isChecked ? "启动自动录制已启用，下次启动生效" : "启动自动录制已禁用";
+                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+                AppLog.d("SettingsFragment", message);
+                
+                // 更新息屏录制开关的可见性
+                updateScreenOffRecordingVisibility(isChecked);
+            }
+        });
+
+        // 设置息屏录制开关监听器
+        screenOffRecordingSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (getContext() != null && appConfig != null) {
+                appConfig.setScreenOffRecordingEnabled(isChecked);
+                String message = isChecked ? "息屏录制已启用，息屏时将继续录制" : "息屏录制已禁用，息屏10秒后将自动停止录制";
                 Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
                 AppLog.d("SettingsFragment", message);
             }
@@ -297,6 +350,18 @@ public class SettingsFragment extends Fragment {
 
         // 初始化悬浮窗设置
         initFloatingWindowSettings(view);
+
+        // 沉浸式状态栏兼容
+        View toolbar = view.findViewById(R.id.toolbar);
+        if (toolbar != null) {
+            final int originalPaddingTop = toolbar.getPaddingTop();
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(toolbar, (v, insets) -> {
+                int statusBarHeight = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars()).top;
+                v.setPadding(v.getPaddingLeft(), statusBarHeight + originalPaddingTop, v.getPaddingRight(), v.getPaddingBottom());
+                return insets;
+            });
+            androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
+        }
 
         return view;
     }
@@ -643,34 +708,62 @@ public class SettingsFragment extends Fragment {
             floatingWindowSettingsLayout.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
     }
+    
+    /**
+     * 更新息屏录制开关的可见性
+     * 仅当启动自动录制开启时才显示
+     */
+    private void updateScreenOffRecordingVisibility(boolean autoStartRecordingEnabled) {
+        if (screenOffRecordingLayout != null) {
+            screenOffRecordingLayout.setVisibility(autoStartRecordingEnabled ? View.VISIBLE : View.GONE);
+        }
+    }
 
     @Override
     public void onResume() {
         super.onResume();
         
-        // 重新检测 SD 卡（可能在授权后返回）
+        // 重新检测 U盘（可能在授权后返回或U盘插拔）
         if (getContext() != null) {
             boolean newHasSdCard = StorageHelper.hasExternalSdCard(getContext());
+            String currentLocation = appConfig != null ? appConfig.getStorageLocation() : AppConfig.STORAGE_INTERNAL;
+            
             if (newHasSdCard != hasExternalSdCard) {
                 hasExternalSdCard = newHasSdCard;
                 if (storageDebugButton != null) {
                     storageDebugButton.setVisibility(hasExternalSdCard ? View.GONE : View.VISIBLE);
                 }
-                if (hasExternalSdCard && storageLocationSpinner != null) {
-                    storageLocationOptions = new String[] {"内部存储", "外置SD卡"};
+                
+                // 更新 Spinner 选项文字
+                if (storageLocationSpinner != null) {
+                    if (hasExternalSdCard) {
+                        storageLocationOptions = new String[] {"内部存储", "U盘"};
+                    } else {
+                        storageLocationOptions = new String[] {"内部存储", "U盘（未检测到）"};
+                    }
                     ArrayAdapter<String> adapter = new ArrayAdapter<>(
                             getContext(),
                             R.layout.spinner_item,
                             storageLocationOptions
                     );
                     adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                    
+                    isInitializingStorageLocation = true;
                     storageLocationSpinner.setAdapter(adapter);
-                    Toast.makeText(getContext(), "检测到外置SD卡", Toast.LENGTH_SHORT).show();
-                    // 更新描述文字
-                    String currentLocation = appConfig != null ? appConfig.getStorageLocation() : AppConfig.STORAGE_INTERNAL;
-                    updateStorageLocationDescription(currentLocation);
+                    
+                    // 恢复用户之前的选择
+                    int selectedIndex = AppConfig.STORAGE_EXTERNAL_SD.equals(currentLocation) ? 1 : 0;
+                    storageLocationSpinner.setSelection(selectedIndex);
+                    storageLocationSpinner.post(() -> isInitializingStorageLocation = false);
+                    
+                    if (hasExternalSdCard) {
+                        Toast.makeText(getContext(), "检测到U盘", Toast.LENGTH_SHORT).show();
+                    }
                 }
             }
+            
+            // 始终更新描述文字（可能U盘状态变化或空间变化）
+            updateStorageLocationDescription(currentLocation);
             
             // 更新存储占用大小显示
             updateStorageUsedSizeDisplay();
@@ -745,6 +838,9 @@ public class SettingsFragment extends Fragment {
 
                 lastAppliedCarModel = newModel;
                 appConfig.setCarModel(newModel);
+                
+                // 切换车型时重置录制摄像头选择为全选（避免之前的设置导致无法录制）
+                appConfig.resetRecordingCameraSelection();
                 
                 // 更新录制摄像头选择的 UI（摄像头数量由 AppConfig.getCameraCount() 自动根据车型返回）
                 updateRecordingCameraSelectionUI();
@@ -1115,10 +1211,10 @@ public class SettingsFragment extends Fragment {
         isInitializingStorageLocation = true;
         lastAppliedStorageLocation = (appConfig != null) ? appConfig.getStorageLocation() : null;
         
-        // 检测是否有外置SD卡
+        // 检测是否有U盘
         hasExternalSdCard = StorageHelper.hasExternalSdCard(getContext());
         
-        // 如果未检测到SD卡，显示调试按钮
+        // 如果未检测到U盘，显示调试按钮
         if (storageDebugButton != null) {
             storageDebugButton.setVisibility(hasExternalSdCard ? View.GONE : View.VISIBLE);
             storageDebugButton.setOnClickListener(v -> showStorageDebugInfo());
@@ -1126,9 +1222,9 @@ public class SettingsFragment extends Fragment {
         
         // 动态生成选项（简短文字，详细信息在描述中显示）
         if (hasExternalSdCard) {
-            storageLocationOptions = new String[] {"内部存储", "外置SD卡"};
+            storageLocationOptions = new String[] {"内部存储", "U盘"};
         } else {
-            storageLocationOptions = new String[] {"内部存储", "外置SD卡（未检测到）"};
+            storageLocationOptions = new String[] {"内部存储", "U盘（未检测到）"};
         }
         
         ArrayAdapter<String> adapter = new ArrayAdapter<>(
@@ -1149,15 +1245,12 @@ public class SettingsFragment extends Fragment {
                     newLocation = AppConfig.STORAGE_INTERNAL;
                     locationName = "内部存储";
                 } else {
-                    if (!hasExternalSdCard) {
-                        if (!isInitializingStorageLocation && getContext() != null) {
-                            Toast.makeText(getContext(), "未检测到外置SD卡，请先在权限设置中授予「所有文件访问权限」", Toast.LENGTH_LONG).show();
-                            storageLocationSpinner.setSelection(0);
-                        }
-                        return;
-                    }
                     newLocation = AppConfig.STORAGE_EXTERNAL_SD;
-                    locationName = "外置SD卡";
+                    locationName = "U盘";
+                    // 如果U盘不可用，显示警告但仍然允许用户选择
+                    if (!hasExternalSdCard && !isInitializingStorageLocation && getContext() != null) {
+                        Toast.makeText(getContext(), "当前未检测到U盘，录制将临时使用内部存储", Toast.LENGTH_LONG).show();
+                    }
                 }
                 
                 updateStorageLocationDescription(newLocation);
@@ -1187,7 +1280,8 @@ public class SettingsFragment extends Fragment {
         
         String currentLocation = appConfig.getStorageLocation();
         int selectedIndex = 0;
-        if (AppConfig.STORAGE_EXTERNAL_SD.equals(currentLocation) && hasExternalSdCard) {
+        // 保持用户选择的存储位置，即使U盘不可用也显示选中状态
+        if (AppConfig.STORAGE_EXTERNAL_SD.equals(currentLocation)) {
             selectedIndex = 1;
         }
         storageLocationSpinner.setSelection(selectedIndex);
@@ -1208,6 +1302,9 @@ public class SettingsFragment extends Fragment {
         }
         
         boolean useExternal = AppConfig.STORAGE_EXTERNAL_SD.equals(location);
+        // 检测是否发生回退（用户选择了U盘但不可用）
+        boolean isFallback = useExternal && !hasExternalSdCard;
+        
         java.io.File videoDir = useExternal ? 
                 StorageHelper.getVideoDir(getContext(), true) :
                 StorageHelper.getVideoDir(getContext(), false);
@@ -1228,9 +1325,9 @@ public class SettingsFragment extends Fragment {
             // XXXX-XXXX 格式是 SD 卡
             int dcimIndex = path.indexOf("/DCIM/");
             if (dcimIndex > 0) {
-                displayPath = "SD卡" + path.substring(dcimIndex);
+                displayPath = "U盘" + path.substring(dcimIndex);
             } else {
-                displayPath = "SD卡/" + path.substring(path.lastIndexOf("/") + 1);
+                displayPath = "U盘/" + path.substring(path.lastIndexOf("/") + 1);
             }
         } else {
             // 其他路径原样显示
@@ -1243,7 +1340,12 @@ public class SettingsFragment extends Fragment {
         String availableStr = StorageHelper.formatSize(availableSpace);
         String totalStr = StorageHelper.formatSize(totalSpace);
         
-        storageLocationDescText.setText(displayPath + "\n可用: " + availableStr + " / 共: " + totalStr);
+        // 如果发生回退，显示提示
+        if (isFallback) {
+            storageLocationDescText.setText("⚠ U盘不可用，临时使用内部存储\n" + displayPath + "\n可用: " + availableStr + " / 共: " + totalStr);
+        } else {
+            storageLocationDescText.setText(displayPath + "\n可用: " + availableStr + " / 共: " + totalStr);
+        }
     }
     
     /**
@@ -1267,7 +1369,7 @@ public class SettingsFragment extends Fragment {
                 sb.append("已授权 ✓\n");
             } else {
                 sb.append("未授权 ✗\n");
-                sb.append("⚠️ 提示: 访问外置SD卡需要此权限！\n");
+                sb.append("⚠️ 提示: 访问U盘需要此权限！\n");
                 sb.append("   请前往「权限设置」授予「所有文件访问权限」\n");
             }
         } else {
@@ -1291,7 +1393,7 @@ public class SettingsFragment extends Fragment {
         
         // 显示当前自定义路径
         String customPath = appConfig.getCustomSdCardPath();
-        sb.append("\n=== 自定义SD卡路径 ===\n");
+        sb.append("\n=== 自定义U盘路径 ===\n");
         if (customPath != null) {
             sb.append("当前设置: " + customPath + "\n");
             java.io.File customDir = new java.io.File(customPath);
@@ -1309,7 +1411,7 @@ public class SettingsFragment extends Fragment {
             sb.append(line).append("\n");
         }
         
-        new android.app.AlertDialog.Builder(getContext())
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(getContext())
                 .setTitle("存储设备检测信息")
                 .setMessage(sb.toString())
                 .setPositiveButton("确定", null)
@@ -1327,7 +1429,7 @@ public class SettingsFragment extends Fragment {
     }
     
     /**
-     * 显示手动设置SD卡路径对话框
+     * 显示手动设置U盘路径对话框
      */
     private void showManualSdCardPathDialog() {
         if (getContext() == null) return;
@@ -1352,13 +1454,10 @@ public class SettingsFragment extends Fragment {
         input.setLayoutParams(params);
         container.addView(input);
         
-        new android.app.AlertDialog.Builder(getContext())
-                .setTitle("手动设置SD卡路径")
-                .setMessage("如果自动检测失败，你可以手动输入SD卡的挂载路径。\n\n" +
-                        "常见格式：\n" +
-                        "• /storage/XXXX-XXXX（十六进制ID）\n" +
-                        "• /storage/sdcard1\n" +
-                        "• /mnt/sdcard1\n\n" +
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(getContext())
+                .setTitle("手动设置U盘路径")
+                .setMessage("如果自动检测失败，你可以手动输入U盘的挂载路径。\n\n" +
+                        "常见格式：/storage/XXXX-XXXX（十六进制ID）\n\n" +
                         "留空表示使用自动检测。")
                 .setView(container)
                 .setPositiveButton("保存", (dialog, which) -> {
@@ -1375,7 +1474,7 @@ public class SettingsFragment extends Fragment {
                         } else if (!testDir.canWrite()) {
                             Toast.makeText(getContext(), "警告：路径不可写，但已保存", Toast.LENGTH_LONG).show();
                         } else {
-                            Toast.makeText(getContext(), "SD卡路径已设置", Toast.LENGTH_SHORT).show();
+                            Toast.makeText(getContext(), "U盘路径已设置", Toast.LENGTH_SHORT).show();
                         }
                         appConfig.setCustomSdCardPath(path);
                     }
@@ -1386,7 +1485,7 @@ public class SettingsFragment extends Fragment {
                         storageDebugButton.setVisibility(hasExternalSdCard ? View.GONE : View.VISIBLE);
                     }
                     if (hasExternalSdCard && storageLocationSpinner != null) {
-                        storageLocationOptions = new String[] {"内部存储", "外置SD卡"};
+                        storageLocationOptions = new String[] {"内部存储", "U盘"};
                         ArrayAdapter<String> adapter = new ArrayAdapter<>(
                                 getContext(),
                                 R.layout.spinner_item,
@@ -1548,11 +1647,11 @@ public class SettingsFragment extends Fragment {
     }
     
     /**
-     * 更新保存日志按钮的可见性（仅 Debug 开启时显示）
+     * 更新日志按钮区域的可见性（仅 Debug 开启时显示）
      */
     private void updateSaveLogsButtonVisibility(boolean visible) {
-        if (saveLogsButton != null) {
-            saveLogsButton.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (logButtonsLayout != null) {
+            logButtonsLayout.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
     }
     
@@ -1582,5 +1681,144 @@ public class SettingsFragment extends Fragment {
         transaction.replace(R.id.fragment_container, new ResolutionSettingsFragment());
         transaction.addToBackStack(null);
         transaction.commit();
+    }
+    
+    // ==================== 日志上传相关方法 ====================
+    
+    /**
+     * 显示设备名称输入对话框（首次上传时）
+     */
+    private void showDeviceNicknameInputDialog() {
+        if (getContext() == null) return;
+        
+        EditText inputEditText = new EditText(getContext());
+        inputEditText.setInputType(InputType.TYPE_CLASS_TEXT);
+        inputEditText.setHint("例如：张三的银河E5");
+        inputEditText.setPadding(48, 32, 48, 32);
+        
+        new AlertDialog.Builder(getContext())
+                .setTitle("设置设备识别名称")
+                .setMessage("请输入一个便于识别的名称，用于区分不同用户的日志：")
+                .setView(inputEditText)
+                .setPositiveButton("确认", (dialog, which) -> {
+                    String nickname = inputEditText.getText().toString().trim();
+                    if (nickname.isEmpty()) {
+                        Toast.makeText(getContext(), "名称不能为空", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    // 显示二次确认
+                    showNicknameConfirmDialog(nickname);
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+    
+    /**
+     * 显示设备名称二次确认对话框（首次设置名称后）
+     */
+    private void showNicknameConfirmDialog(String nickname) {
+        if (getContext() == null) return;
+        
+        new AlertDialog.Builder(getContext())
+                .setTitle("确认设备名称")
+                .setMessage("您输入的设备名称是：\n\n「" + nickname + "」\n\n确认使用此名称吗？")
+                .setPositiveButton("确认", (dialog, which) -> {
+                    // 保存名称，然后显示上传确认框
+                    if (appConfig != null) {
+                        appConfig.setDeviceNickname(nickname);
+                    }
+                    showUploadConfirmDialog(nickname);
+                })
+                .setNegativeButton("重新输入", (dialog, which) -> {
+                    // 重新显示输入框
+                    showDeviceNicknameInputDialog();
+                })
+                .show();
+    }
+    
+    /**
+     * 显示上传确认对话框（包含名称确认和问题描述输入）
+     */
+    private void showUploadConfirmDialog(String nickname) {
+        if (getContext() == null) return;
+        
+        // 创建包含名称显示和问题描述输入的布局
+        LinearLayout layout = new LinearLayout(getContext());
+        layout.setOrientation(LinearLayout.VERTICAL);
+        layout.setPadding(48, 24, 48, 8);
+        
+        // 名称显示
+        TextView nicknameLabel = new TextView(getContext());
+        nicknameLabel.setText("上传身份：「" + nickname + "」");
+        nicknameLabel.setTextSize(16);
+        nicknameLabel.setPadding(0, 0, 0, 24);
+        layout.addView(nicknameLabel);
+        
+        // 问题描述标签
+        TextView descLabel = new TextView(getContext());
+        descLabel.setText("问题描述：");
+        descLabel.setTextSize(14);
+        descLabel.setPadding(0, 0, 0, 8);
+        layout.addView(descLabel);
+        
+        // 问题描述输入框
+        EditText inputEditText = new EditText(getContext());
+        inputEditText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
+        inputEditText.setMinLines(3);
+        inputEditText.setMaxLines(6);
+        inputEditText.setHint("请描述遇到的问题...");
+        inputEditText.setBackgroundResource(android.R.drawable.edit_text);
+        layout.addView(inputEditText);
+        
+        new AlertDialog.Builder(getContext())
+                .setTitle("上传日志")
+                .setView(layout)
+                .setPositiveButton("上传", (dialog, which) -> {
+                    String problemDesc = inputEditText.getText().toString().trim();
+                    if (problemDesc.isEmpty()) {
+                        problemDesc = "（用户未填写问题描述）";
+                    }
+                    performLogUpload(nickname, problemDesc);
+                })
+                .setNeutralButton("修改名称", (dialog, which) -> {
+                    showDeviceNicknameInputDialog();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+    
+    /**
+     * 执行日志上传
+     */
+    private void performLogUpload(String deviceNickname, String problemDescription) {
+        if (getContext() == null) return;
+        
+        // 禁用按钮防止重复点击
+        uploadLogsButton.setEnabled(false);
+        uploadLogsButton.setText("上传中...");
+        
+        AppLog.uploadLogsToServer(getContext(), deviceNickname, problemDescription, new AppLog.UploadCallback() {
+            @Override
+            public void onSuccess() {
+                if (getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        uploadLogsButton.setEnabled(true);
+                        uploadLogsButton.setText("一键上传");
+                        Toast.makeText(getContext(), "作者已收到本次运行log", Toast.LENGTH_LONG).show();
+                    });
+                }
+            }
+
+            @Override
+            public void onError(String error) {
+                if (getActivity() != null) {
+                    getActivity().runOnUiThread(() -> {
+                        uploadLogsButton.setEnabled(true);
+                        uploadLogsButton.setText("一键上传");
+                        Toast.makeText(getContext(), "上传失败: " + error, Toast.LENGTH_SHORT).show();
+                    });
+                }
+            }
+        });
     }
 }

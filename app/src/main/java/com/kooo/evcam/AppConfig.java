@@ -13,19 +13,25 @@ public class AppConfig {
     
     // 配置项键名
     private static final String KEY_FIRST_LAUNCH = "first_launch";  // 首次启动标记
+    private static final String KEY_DEVICE_NICKNAME = "device_nickname";  // 设备识别名称（用于日志上传）
     private static final String KEY_AUTO_START_ON_BOOT = "auto_start_on_boot";  // 开机自启动
     private static final String KEY_AUTO_START_RECORDING = "auto_start_recording";  // 启动自动录制
+    private static final String KEY_SCREEN_OFF_RECORDING = "screen_off_recording";  // 息屏录制（锁车录制）
     private static final String KEY_KEEP_ALIVE_ENABLED = "keep_alive_enabled";  // 保活服务
     private static final String KEY_PREVENT_SLEEP_ENABLED = "prevent_sleep_enabled";  // 防止休眠（持续WakeLock）
     private static final String KEY_RECORDING_MODE = "recording_mode";  // 录制模式
     
     // 存储位置配置
     private static final String KEY_STORAGE_LOCATION = "storage_location";  // 存储位置
-    private static final String KEY_CUSTOM_SD_CARD_PATH = "custom_sd_card_path";  // 手动设置的SD卡路径
+    private static final String KEY_CUSTOM_SD_CARD_PATH = "custom_sd_card_path";  // 手动设置的U盘路径
+    private static final String KEY_LAST_DETECTED_SD_PATH = "last_detected_sd_path";  // 上次自动检测到的U盘路径（缓存）
     
     // 存储位置常量
     public static final String STORAGE_INTERNAL = "internal";  // 内部存储（默认）
-    public static final String STORAGE_EXTERNAL_SD = "external_sd";  // 外置SD卡
+    public static final String STORAGE_EXTERNAL_SD = "external_sd";  // U盘
+    
+    // U盘回退提示标志（每次冷启动后重置）
+    private static boolean sdFallbackShownThisSession = false;
     
     // 悬浮窗配置
     private static final String KEY_FLOATING_WINDOW_ENABLED = "floating_window_enabled";  // 悬浮窗开关
@@ -52,6 +58,54 @@ public class AppConfig {
     private static final String KEY_RECORDING_CAMERA_BACK_ENABLED = "recording_camera_back_enabled";    // 后摄像头参与录制
     private static final String KEY_RECORDING_CAMERA_LEFT_ENABLED = "recording_camera_left_enabled";    // 左摄像头参与录制
     private static final String KEY_RECORDING_CAMERA_RIGHT_ENABLED = "recording_camera_right_enabled";  // 右摄像头参与录制
+    
+    // 亮度/降噪调节配置
+    private static final String KEY_IMAGE_ADJUST_ENABLED = "image_adjust_enabled";  // 是否启用亮度/降噪调节
+    private static final String KEY_EXPOSURE_COMPENSATION = "exposure_compensation";  // 曝光补偿值
+    private static final String KEY_AWB_MODE = "awb_mode";  // 白平衡模式
+    private static final String KEY_TONEMAP_MODE = "tonemap_mode";  // 色调映射模式
+    private static final String KEY_EDGE_MODE = "edge_mode";  // 边缘增强模式
+    private static final String KEY_NOISE_REDUCTION_MODE = "noise_reduction_mode";  // 降噪模式
+    private static final String KEY_EFFECT_MODE = "effect_mode";  // 特效模式
+    private static final String KEY_SCENE_MODE = "scene_mode";  // 场景模式
+    
+    // 白平衡模式常量（对应 CameraMetadata.CONTROL_AWB_MODE_*）
+    public static final int AWB_MODE_DEFAULT = -1;  // 默认（不设置）
+    public static final int AWB_MODE_AUTO = 1;  // 自动
+    public static final int AWB_MODE_INCANDESCENT = 2;  // 白炽灯
+    public static final int AWB_MODE_FLUORESCENT = 3;  // 荧光灯
+    public static final int AWB_MODE_WARM_FLUORESCENT = 4;  // 暖荧光灯
+    public static final int AWB_MODE_DAYLIGHT = 5;  // 日光
+    public static final int AWB_MODE_CLOUDY_DAYLIGHT = 6;  // 阴天
+    public static final int AWB_MODE_TWILIGHT = 7;  // 黄昏
+    public static final int AWB_MODE_SHADE = 8;  // 阴影
+    
+    // 色调映射模式常量（对应 CameraMetadata.TONEMAP_MODE_*）
+    public static final int TONEMAP_MODE_DEFAULT = -1;  // 默认（不设置）
+    public static final int TONEMAP_MODE_CONTRAST_CURVE = 0;  // 对比度曲线
+    public static final int TONEMAP_MODE_FAST = 1;  // 快速
+    public static final int TONEMAP_MODE_HIGH_QUALITY = 2;  // 高质量
+    
+    // 边缘增强模式常量（对应 CameraMetadata.EDGE_MODE_*）
+    public static final int EDGE_MODE_DEFAULT = -1;  // 默认（不设置）
+    public static final int EDGE_MODE_OFF = 0;  // 关闭
+    public static final int EDGE_MODE_FAST = 1;  // 快速
+    public static final int EDGE_MODE_HIGH_QUALITY = 2;  // 高质量
+    
+    // 降噪模式常量（对应 CameraMetadata.NOISE_REDUCTION_MODE_*）
+    public static final int NOISE_REDUCTION_DEFAULT = -1;  // 默认（不设置）
+    public static final int NOISE_REDUCTION_OFF = 0;  // 关闭
+    public static final int NOISE_REDUCTION_FAST = 1;  // 快速
+    public static final int NOISE_REDUCTION_HIGH_QUALITY = 2;  // 高质量
+    
+    // 特效模式常量（对应 CameraMetadata.CONTROL_EFFECT_MODE_*）
+    public static final int EFFECT_MODE_DEFAULT = -1;  // 默认（不设置）
+    public static final int EFFECT_MODE_OFF = 0;  // 关闭
+    public static final int EFFECT_MODE_MONO = 1;  // 黑白
+    public static final int EFFECT_MODE_NEGATIVE = 2;  // 负片
+    public static final int EFFECT_MODE_SOLARIZE = 3;  // 曝光过度
+    public static final int EFFECT_MODE_SEPIA = 4;  // 怀旧
+    public static final int EFFECT_MODE_AQUA = 6;  // 水蓝
     
     // 分段时长常量（分钟）
     public static final int SEGMENT_DURATION_1_MIN = 1;
@@ -144,6 +198,34 @@ public class AppConfig {
         AppLog.d(TAG, "首次启动标记已设置为完成");
     }
     
+    // ==================== 设备识别名称相关方法 ====================
+    
+    /**
+     * 获取设备识别名称（用于日志上传）
+     * @return 设备名称，如果未设置返回 null
+     */
+    public String getDeviceNickname() {
+        return prefs.getString(KEY_DEVICE_NICKNAME, null);
+    }
+    
+    /**
+     * 设置设备识别名称
+     * @param nickname 设备名称
+     */
+    public void setDeviceNickname(String nickname) {
+        prefs.edit().putString(KEY_DEVICE_NICKNAME, nickname).apply();
+        AppLog.d(TAG, "设备识别名称已设置: " + nickname);
+    }
+    
+    /**
+     * 检查是否已设置设备识别名称
+     * @return true 表示已设置
+     */
+    public boolean hasDeviceNickname() {
+        String nickname = getDeviceNickname();
+        return nickname != null && !nickname.trim().isEmpty();
+    }
+    
     // ==================== 开机自启动相关方法 ====================
     
     /**
@@ -180,6 +262,24 @@ public class AppConfig {
     public boolean isAutoStartRecording() {
         // 默认禁用启动自动录制（需要用户主动开启）
         return prefs.getBoolean(KEY_AUTO_START_RECORDING, false);
+    }
+    
+    /**
+     * 设置息屏录制（锁车录制）
+     * @param enabled true 表示息屏时继续录制
+     */
+    public void setScreenOffRecordingEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_SCREEN_OFF_RECORDING, enabled).apply();
+        AppLog.d(TAG, "息屏录制设置: " + (enabled ? "启用" : "禁用"));
+    }
+    
+    /**
+     * 获取息屏录制设置
+     * @return true 表示息屏时继续录制
+     */
+    public boolean isScreenOffRecordingEnabled() {
+        // 默认禁用息屏录制
+        return prefs.getBoolean(KEY_SCREEN_OFF_RECORDING, false);
     }
     
     /**
@@ -832,29 +932,29 @@ public class AppConfig {
     }
     
     /**
-     * 是否使用外置SD卡存储
-     * @return true 表示使用外置SD卡
+     * 是否使用U盘存储
+     * @return true 表示使用U盘
      */
     public boolean isUsingExternalSdCard() {
         return STORAGE_EXTERNAL_SD.equals(getStorageLocation());
     }
     
     /**
-     * 设置自定义SD卡路径
-     * @param path SD卡路径，设为null或空字符串表示使用自动检测
+     * 设置自定义U盘路径
+     * @param path U盘路径，设为null或空字符串表示使用自动检测
      */
     public void setCustomSdCardPath(String path) {
         if (path == null || path.trim().isEmpty()) {
             prefs.edit().remove(KEY_CUSTOM_SD_CARD_PATH).apply();
-            AppLog.d(TAG, "清除自定义SD卡路径，使用自动检测");
+            AppLog.d(TAG, "清除自定义U盘路径，使用自动检测");
         } else {
             prefs.edit().putString(KEY_CUSTOM_SD_CARD_PATH, path.trim()).apply();
-            AppLog.d(TAG, "设置自定义SD卡路径: " + path.trim());
+            AppLog.d(TAG, "设置自定义U盘路径: " + path.trim());
         }
     }
     
     /**
-     * 获取自定义SD卡路径
+     * 获取自定义U盘路径
      * @return 自定义路径，如果未设置返回null
      */
     public String getCustomSdCardPath() {
@@ -866,10 +966,61 @@ public class AppConfig {
     }
     
     /**
-     * 是否使用自定义SD卡路径
+     * 是否使用自定义U盘路径
      */
     public boolean hasCustomSdCardPath() {
         return getCustomSdCardPath() != null;
+    }
+    
+    /**
+     * 设置上次自动检测到的U盘路径（缓存）
+     * @param path U盘路径
+     */
+    public void setLastDetectedSdPath(String path) {
+        if (path == null || path.trim().isEmpty()) {
+            prefs.edit().remove(KEY_LAST_DETECTED_SD_PATH).apply();
+        } else {
+            prefs.edit().putString(KEY_LAST_DETECTED_SD_PATH, path.trim()).apply();
+            AppLog.d(TAG, "缓存U盘路径: " + path.trim());
+        }
+    }
+    
+    /**
+     * 获取上次自动检测到的U盘路径（缓存）
+     * @return 缓存的路径，如果未设置返回null
+     */
+    public String getLastDetectedSdPath() {
+        return prefs.getString(KEY_LAST_DETECTED_SD_PATH, null);
+    }
+    
+    /**
+     * 检查本次启动是否已显示过U盘回退提示
+     */
+    public static boolean isSdFallbackShownThisSession() {
+        return sdFallbackShownThisSession;
+    }
+    
+    /**
+     * 标记本次启动已显示过U盘回退提示
+     */
+    public static void setSdFallbackShownThisSession(boolean shown) {
+        sdFallbackShownThisSession = shown;
+    }
+    
+    /**
+     * 重置U盘回退提示标志（应用启动时调用）
+     */
+    public static void resetSdFallbackFlag() {
+        sdFallbackShownThisSession = false;
+    }
+    
+    /**
+     * 检查当前是否应该使用中转写入
+     * 当选择U盘存储时，始终使用中转写入以避免U盘慢速写入导致录制卡顿
+     * @return true 表示应该使用中转写入
+     */
+    public boolean shouldUseRelayWrite() {
+        return isUsingExternalSdCard();
     }
     
     // ==================== 悬浮窗配置相关方法 ====================
@@ -966,10 +1117,10 @@ public class AppConfig {
     
     /**
      * 获取视频存储限制（GB）
-     * @return 存储限制，单位GB，0表示不限制
+     * @return 存储限制，单位GB，0表示不限制，默认10GB
      */
     public int getVideoStorageLimitGb() {
-        return prefs.getInt(KEY_VIDEO_STORAGE_LIMIT_GB, 0);
+        return prefs.getInt(KEY_VIDEO_STORAGE_LIMIT_GB, 10);
     }
     
     /**
@@ -983,10 +1134,10 @@ public class AppConfig {
     
     /**
      * 获取图片存储限制（GB）
-     * @return 存储限制，单位GB，0表示不限制
+     * @return 存储限制，单位GB，0表示不限制，默认10GB
      */
     public int getPhotoStorageLimitGb() {
-        return prefs.getInt(KEY_PHOTO_STORAGE_LIMIT_GB, 0);
+        return prefs.getInt(KEY_PHOTO_STORAGE_LIMIT_GB, 10);
     }
     
     /**
@@ -1146,6 +1297,19 @@ public class AppConfig {
             }
         }
         
+        // 安全检查：如果结果为空，返回所有可用摄像头（防止无法录制）
+        if (enabled.isEmpty()) {
+            AppLog.w(TAG, "没有启用的录制摄像头，自动启用所有可用摄像头");
+            if (cameraCount >= 1) enabled.add("front");
+            if (cameraCount >= 2) enabled.add("back");
+            if (cameraCount >= 4) {
+                enabled.add("left");
+                enabled.add("right");
+            }
+            // 同时重置配置
+            resetRecordingCameraSelection();
+        }
+        
         return enabled;
     }
     
@@ -1176,5 +1340,232 @@ public class AppConfig {
             return "位置" + index;
         }
         return name;
+    }
+    
+    // ==================== 亮度/降噪调节配置相关方法 ====================
+    
+    /**
+     * 设置是否启用亮度/降噪调节
+     * @param enabled true 表示启用
+     */
+    public void setImageAdjustEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_IMAGE_ADJUST_ENABLED, enabled).apply();
+        AppLog.d(TAG, "亮度/降噪调节设置: " + (enabled ? "启用" : "禁用"));
+    }
+    
+    /**
+     * 获取是否启用亮度/降噪调节
+     * @return true 表示启用
+     */
+    public boolean isImageAdjustEnabled() {
+        return prefs.getBoolean(KEY_IMAGE_ADJUST_ENABLED, false);
+    }
+    
+    /**
+     * 设置曝光补偿值
+     * @param value 曝光补偿值（范围取决于设备，通常 -12 到 +12）
+     */
+    public void setExposureCompensation(int value) {
+        prefs.edit().putInt(KEY_EXPOSURE_COMPENSATION, value).apply();
+        AppLog.d(TAG, "曝光补偿设置: " + value);
+    }
+    
+    /**
+     * 获取曝光补偿值
+     * @return 曝光补偿值，默认为 0
+     */
+    public int getExposureCompensation() {
+        return prefs.getInt(KEY_EXPOSURE_COMPENSATION, 0);
+    }
+    
+    /**
+     * 设置白平衡模式
+     * @param mode 白平衡模式（AWB_MODE_* 常量）
+     */
+    public void setAwbMode(int mode) {
+        prefs.edit().putInt(KEY_AWB_MODE, mode).apply();
+        AppLog.d(TAG, "白平衡模式设置: " + mode);
+    }
+    
+    /**
+     * 获取白平衡模式
+     * @return 白平衡模式，默认为 AWB_MODE_DEFAULT（不设置）
+     */
+    public int getAwbMode() {
+        return prefs.getInt(KEY_AWB_MODE, AWB_MODE_DEFAULT);
+    }
+    
+    /**
+     * 设置色调映射模式
+     * @param mode 色调映射模式（TONEMAP_MODE_* 常量）
+     */
+    public void setTonemapMode(int mode) {
+        prefs.edit().putInt(KEY_TONEMAP_MODE, mode).apply();
+        AppLog.d(TAG, "色调映射模式设置: " + mode);
+    }
+    
+    /**
+     * 获取色调映射模式
+     * @return 色调映射模式，默认为 TONEMAP_MODE_DEFAULT（不设置）
+     */
+    public int getTonemapMode() {
+        return prefs.getInt(KEY_TONEMAP_MODE, TONEMAP_MODE_DEFAULT);
+    }
+    
+    /**
+     * 设置边缘增强模式
+     * @param mode 边缘增强模式（EDGE_MODE_* 常量）
+     */
+    public void setEdgeMode(int mode) {
+        prefs.edit().putInt(KEY_EDGE_MODE, mode).apply();
+        AppLog.d(TAG, "边缘增强模式设置: " + mode);
+    }
+    
+    /**
+     * 获取边缘增强模式
+     * @return 边缘增强模式，默认为 EDGE_MODE_DEFAULT（不设置）
+     */
+    public int getEdgeMode() {
+        return prefs.getInt(KEY_EDGE_MODE, EDGE_MODE_DEFAULT);
+    }
+    
+    /**
+     * 设置降噪模式
+     * @param mode 降噪模式（NOISE_REDUCTION_* 常量）
+     */
+    public void setNoiseReductionMode(int mode) {
+        prefs.edit().putInt(KEY_NOISE_REDUCTION_MODE, mode).apply();
+        AppLog.d(TAG, "降噪模式设置: " + mode);
+    }
+    
+    /**
+     * 获取降噪模式
+     * @return 降噪模式，默认为 NOISE_REDUCTION_DEFAULT（不设置）
+     */
+    public int getNoiseReductionMode() {
+        return prefs.getInt(KEY_NOISE_REDUCTION_MODE, NOISE_REDUCTION_DEFAULT);
+    }
+    
+    /**
+     * 设置特效模式
+     * @param mode 特效模式（EFFECT_MODE_* 常量）
+     */
+    public void setEffectMode(int mode) {
+        prefs.edit().putInt(KEY_EFFECT_MODE, mode).apply();
+        AppLog.d(TAG, "特效模式设置: " + mode);
+    }
+    
+    /**
+     * 获取特效模式
+     * @return 特效模式，默认为 EFFECT_MODE_DEFAULT（不设置）
+     */
+    public int getEffectMode() {
+        return prefs.getInt(KEY_EFFECT_MODE, EFFECT_MODE_DEFAULT);
+    }
+    
+    /**
+     * 设置场景模式
+     * @param mode 场景模式
+     */
+    public void setSceneMode(int mode) {
+        prefs.edit().putInt(KEY_SCENE_MODE, mode).apply();
+        AppLog.d(TAG, "场景模式设置: " + mode);
+    }
+    
+    /**
+     * 获取场景模式
+     * @return 场景模式，默认为 -1（不设置）
+     */
+    public int getSceneMode() {
+        return prefs.getInt(KEY_SCENE_MODE, -1);
+    }
+    
+    /**
+     * 重置所有亮度/降噪调节参数为默认值
+     */
+    public void resetImageAdjustParams() {
+        prefs.edit()
+            .putInt(KEY_EXPOSURE_COMPENSATION, 0)
+            .putInt(KEY_AWB_MODE, AWB_MODE_DEFAULT)
+            .putInt(KEY_TONEMAP_MODE, TONEMAP_MODE_DEFAULT)
+            .putInt(KEY_EDGE_MODE, EDGE_MODE_DEFAULT)
+            .putInt(KEY_NOISE_REDUCTION_MODE, NOISE_REDUCTION_DEFAULT)
+            .putInt(KEY_EFFECT_MODE, EFFECT_MODE_DEFAULT)
+            .putInt(KEY_SCENE_MODE, -1)
+            .apply();
+        AppLog.d(TAG, "亮度/降噪调节参数已重置为默认值");
+    }
+    
+    /**
+     * 获取白平衡模式的显示名称
+     */
+    public static String getAwbModeDisplayName(int mode) {
+        switch (mode) {
+            case AWB_MODE_DEFAULT: return "默认";
+            case AWB_MODE_AUTO: return "自动";
+            case AWB_MODE_INCANDESCENT: return "白炽灯";
+            case AWB_MODE_FLUORESCENT: return "荧光灯";
+            case AWB_MODE_WARM_FLUORESCENT: return "暖荧光灯";
+            case AWB_MODE_DAYLIGHT: return "日光";
+            case AWB_MODE_CLOUDY_DAYLIGHT: return "阴天";
+            case AWB_MODE_TWILIGHT: return "黄昏";
+            case AWB_MODE_SHADE: return "阴影";
+            default: return "未知";
+        }
+    }
+    
+    /**
+     * 获取色调映射模式的显示名称
+     */
+    public static String getTonemapModeDisplayName(int mode) {
+        switch (mode) {
+            case TONEMAP_MODE_DEFAULT: return "默认";
+            case TONEMAP_MODE_CONTRAST_CURVE: return "对比度曲线";
+            case TONEMAP_MODE_FAST: return "快速";
+            case TONEMAP_MODE_HIGH_QUALITY: return "高质量";
+            default: return "未知";
+        }
+    }
+    
+    /**
+     * 获取边缘增强模式的显示名称
+     */
+    public static String getEdgeModeDisplayName(int mode) {
+        switch (mode) {
+            case EDGE_MODE_DEFAULT: return "默认";
+            case EDGE_MODE_OFF: return "关闭";
+            case EDGE_MODE_FAST: return "快速";
+            case EDGE_MODE_HIGH_QUALITY: return "高质量";
+            default: return "未知";
+        }
+    }
+    
+    /**
+     * 获取降噪模式的显示名称
+     */
+    public static String getNoiseReductionModeDisplayName(int mode) {
+        switch (mode) {
+            case NOISE_REDUCTION_DEFAULT: return "默认";
+            case NOISE_REDUCTION_OFF: return "关闭";
+            case NOISE_REDUCTION_FAST: return "快速";
+            case NOISE_REDUCTION_HIGH_QUALITY: return "高质量";
+            default: return "未知";
+        }
+    }
+    
+    /**
+     * 获取特效模式的显示名称
+     */
+    public static String getEffectModeDisplayName(int mode) {
+        switch (mode) {
+            case EFFECT_MODE_DEFAULT: return "默认";
+            case EFFECT_MODE_OFF: return "关闭";
+            case EFFECT_MODE_MONO: return "黑白";
+            case EFFECT_MODE_NEGATIVE: return "负片";
+            case EFFECT_MODE_SOLARIZE: return "曝光过度";
+            case EFFECT_MODE_SEPIA: return "怀旧";
+            case EFFECT_MODE_AQUA: return "水蓝";
+            default: return "未知";
+        }
     }
 }

@@ -70,6 +70,18 @@ public class PermissionSettingsFragment extends Fragment {
         // 更新权限状态
         updateAllPermissionStatus();
 
+        // 沉浸式状态栏兼容
+        View toolbar = view.findViewById(R.id.toolbar);
+        if (toolbar != null) {
+            final int originalPaddingTop = toolbar.getPaddingTop();
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(toolbar, (v, insets) -> {
+                int statusBarHeight = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars()).top;
+                v.setPadding(v.getPaddingLeft(), statusBarHeight + originalPaddingTop, v.getPaddingRight(), v.getPaddingBottom());
+                return insets;
+            });
+            androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
+        }
+
         return view;
     }
 
@@ -274,7 +286,7 @@ public class PermissionSettingsFragment extends Fragment {
             btnAllFilesPermission.setText("已授权");
             btnAllFilesPermission.setEnabled(false);
         } else {
-            tvAllFilesStatus.setText("未授权 - 无法存储到外置SD卡");
+            tvAllFilesStatus.setText("未授权 - 无法存储到U盘");
             tvAllFilesStatus.setTextColor(getResources().getColor(android.R.color.holo_orange_dark, null));
             btnAllFilesPermission.setText("去授权");
             btnAllFilesPermission.setEnabled(true);
@@ -361,7 +373,7 @@ public class PermissionSettingsFragment extends Fragment {
             Toast.makeText(getContext(), "请在权限列表中授予所需权限", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             AppLog.e("PermissionSettings", "打开应用设置失败", e);
-            Toast.makeText(getContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "无法打开设置页面，请使用第三方权限管理工具设置", Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -400,7 +412,7 @@ public class PermissionSettingsFragment extends Fragment {
                     Toast.makeText(getContext(), "请找到本应用并开启权限", Toast.LENGTH_LONG).show();
                 } catch (Exception e2) {
                     AppLog.e("PermissionSettings", "无法打开权限设置页面", e2);
-                    Toast.makeText(getContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(getContext(), "无法打开设置页面，请使用第三方权限管理工具设置", Toast.LENGTH_SHORT).show();
                 }
             }
         }
@@ -417,7 +429,7 @@ public class PermissionSettingsFragment extends Fragment {
             Toast.makeText(getContext(), "请找到「电车记录仪 - 保活服务」并启用", Toast.LENGTH_LONG).show();
         } catch (Exception e) {
             AppLog.e("PermissionSettings", "打开无障碍设置失败", e);
-            Toast.makeText(getContext(), "无法打开设置页面", Toast.LENGTH_SHORT).show();
+            Toast.makeText(getContext(), "无法打开设置页面，请使用第三方权限管理工具设置", Toast.LENGTH_SHORT).show();
         }
     }
 }

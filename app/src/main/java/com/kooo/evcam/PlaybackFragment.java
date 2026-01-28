@@ -43,12 +43,20 @@ public class PlaybackFragment extends Fragment {
         emptyText = view.findViewById(R.id.empty_text);
         btnRefresh = view.findViewById(R.id.btn_refresh);
         btnMenu = view.findViewById(R.id.btn_menu);
+        Button btnHome = view.findViewById(R.id.btn_home);
 
         // 设置RecyclerView为网格布局（4列）
         videoList.setLayoutManager(new GridLayoutManager(getContext(), 4));
         adapter = new VideoAdapter(getContext(), videoFiles);
         adapter.setOnVideoDeleteListener(this::updateVideoList);
         videoList.setAdapter(adapter);
+
+        // 主页按钮 - 返回预览界面
+        btnHome.setOnClickListener(v -> {
+            if (getActivity() instanceof MainActivity) {
+                ((MainActivity) getActivity()).goToRecordingInterface();
+            }
+        });
 
         // 菜单按钮
         btnMenu.setOnClickListener(v -> {
@@ -69,6 +77,18 @@ public class PlaybackFragment extends Fragment {
 
         // 加载视频列表
         updateVideoList();
+
+        // 沉浸式状态栏兼容
+        View toolbar = view.findViewById(R.id.toolbar);
+        if (toolbar != null) {
+            final int originalPaddingTop = toolbar.getPaddingTop();
+            androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(toolbar, (v, insets) -> {
+                int statusBarHeight = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.statusBars()).top;
+                v.setPadding(v.getPaddingLeft(), statusBarHeight + originalPaddingTop, v.getPaddingRight(), v.getPaddingBottom());
+                return insets;
+            });
+            androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
+        }
 
         return view;
     }

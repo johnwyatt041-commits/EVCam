@@ -3,6 +3,7 @@
     <!-- 夜间模式配色 -->
     <color name="menu_background">#FF20272E</color>
     <color name="button_background">#FF060809</color>
+    <color name="button_accent">#FF5B9BD5</color>
     <color name="button_text">#FFFFFFFF</color>
     <color name="page_background">#FF20272E</color>
     <color name="card_background">#FF060809</color>

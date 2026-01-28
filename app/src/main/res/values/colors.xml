@@ -12,6 +12,7 @@
     <!-- 日间模式配色 -->
     <color name="menu_background">#FFD4DBE6</color>
     <color name="button_background">#FFF9FAFB</color>
+    <color name="button_accent">#FF4A90D9</color>
     <color name="button_text">#FF1A1A1A</color>
     <color name="page_background">#FFD4DBE6</color>
     <color name="card_background">#FFF9FAFB</color>

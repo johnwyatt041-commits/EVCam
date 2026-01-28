@@ -33,8 +33,9 @@
 
         <!-- 提示内容1 -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:orientation="horizontal"
             android:layout_marginBottom="12dp">
             
@@ -48,9 +49,8 @@
                 android:layout_marginEnd="8dp" />
             
             <TextView
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:text="使用前，请务必授予软件所有可能需要的权限，并配置车型。"
                 android:textSize="15sp"
                 android:textColor="#333333"
@@ -59,8 +59,9 @@
 
         <!-- 提示内容2 -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:orientation="horizontal"
             android:layout_marginBottom="12dp">
             
@@ -74,9 +75,8 @@
                 android:layout_marginEnd="8dp" />
             
             <TextView
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:text="若您的车型未适配，请选择自定义车型并自行调试。"
                 android:textSize="15sp"
                 android:textColor="#333333"
@@ -85,8 +85,9 @@
 
         <!-- 提示内容3 -->
         <LinearLayout
-            android:layout_width="match_parent"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
             android:orientation="horizontal"
             android:layout_marginBottom="20dp">
             
@@ -100,9 +101,8 @@
                 android:layout_marginEnd="8dp" />
             
             <TextView
-                android:layout_width="0dp"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_weight="1"
                 android:text="若录制视频无法储存，请尝试修改「录制模式」。"
                 android:textSize="15sp"
                 android:textColor="#333333"

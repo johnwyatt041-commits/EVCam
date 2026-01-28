@@ -9,7 +9,9 @@ import android.view.Surface;
 import java.io.File;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -32,7 +34,9 @@ public class VideoRecorder {
 
     // 分段录制相关
     private long segmentDurationMs = 60000;  // 分段时长，默认1分钟，可通过 setSegmentDuration 配置
+    private static final long SEGMENT_DURATION_COMPENSATION_MS = 1000;  // 分段时长补偿（补偿编码器初始化和停止延迟）
     private static final long FILE_SIZE_CHECK_INTERVAL_MS = 5000;  // 每5秒检查一次文件大小
+    private static final long MIN_VALID_FILE_SIZE = 10 * 1024;  // 最小有效文件大小 10KB
     private android.os.Handler segmentHandler;
     private Runnable segmentRunnable;
     private Runnable fileSizeCheckRunnable;  // 文件大小检查任务
@@ -42,6 +46,7 @@ public class VideoRecorder {
     private int recordWidth;
     private int recordHeight;
     private long lastFileSize = 0;  // 上次检查的文件大小
+    private List<String> recordedFilePaths = new ArrayList<>();  // 本次录制的所有文件路径
 
     public VideoRecorder(String cameraId) {
         this.cameraId = cameraId;
@@ -102,6 +107,14 @@ public class VideoRecorder {
 
     public boolean isRecording() {
         return isRecording;
+    }
+
+    /**
+     * 检查录制器是否已准备好（但未开始录制）
+     * 用于判断是否可以启动初始录制
+     */
+    public boolean isPrepared() {
+        return mediaRecorder != null && cachedSurface != null && !isRecording && !waitingForSessionReconfiguration;
     }
 
     public Surface getSurface() {
@@ -243,6 +256,10 @@ public class VideoRecorder {
                 this.cameraPosition = "unknown";
             }
 
+            // 清空并初始化本次录制的文件列表
+            recordedFilePaths.clear();
+            recordedFilePaths.add(filePath);
+
             // 使用传入的文件路径作为第一段
             prepareMediaRecorder(filePath, width, height);
             currentFilePath = filePath;
@@ -332,6 +349,11 @@ public class VideoRecorder {
 
     /**
      * 调度下一段录制
+     * 
+     * 注意：分段时长需要加上补偿时间，因为：
+     * 1. MediaRecorder.start() 后需要时间初始化编码器
+     * 2. MediaRecorder.stop() 时可能丢失正在编码的帧
+     * 3. 这样可以确保实际录制的视频时长达到设定的分段时长
      */
     private void scheduleNextSegment() {
         // 取消之前的定时器
@@ -347,9 +369,11 @@ public class VideoRecorder {
             }
         };
 
-        // 延迟执行（使用配置的分段时长）
-        segmentHandler.postDelayed(segmentRunnable, segmentDurationMs);
-        AppLog.d(TAG, "Camera " + cameraId + " scheduled next segment in " + (segmentDurationMs / 1000) + " seconds");
+        // 延迟执行（使用配置的分段时长 + 补偿时间）
+        // 补偿编码器初始化延迟和停止时的帧丢失
+        long actualDelayMs = segmentDurationMs + SEGMENT_DURATION_COMPENSATION_MS;
+        segmentHandler.postDelayed(segmentRunnable, actualDelayMs);
+        AppLog.d(TAG, "Camera " + cameraId + " scheduled next segment in " + (segmentDurationMs / 1000) + " seconds (actual delay: " + actualDelayMs + "ms)");
     }
 
     /**
@@ -403,6 +427,10 @@ public class VideoRecorder {
      * 注意：这个方法需要通过回调通知外部重新配置相机会话
      */
     private void switchToNextSegment() {
+        // 保存当前分段的文件路径（已完成的文件）
+        String completedFilePath = currentFilePath;
+        boolean completedFileValid = false;
+        
         try {
             // 停止当前录制
             if (mediaRecorder != null) {
@@ -426,6 +454,7 @@ public class VideoRecorder {
 
                         // 验证并清理损坏的文件
                         validateAndCleanupFile(currentFilePath);
+                        completedFileValid = true;  // 标记文件有效
                     }
                 } catch (RuntimeException e) {
                     AppLog.e(TAG, "Error stopping segment for camera " + cameraId + " (file size was: " + fileSizeBeforeStop + " bytes)", e);
@@ -439,6 +468,7 @@ public class VideoRecorder {
                             AppLog.w(TAG, "Deleted corrupted segment file: " + currentFilePath);
                         }
                     }
+                    completedFilePath = null;  // 文件已删除，标记为无效
                 }
                 releaseMediaRecorder();
             }
@@ -448,6 +478,7 @@ public class VideoRecorder {
             String nextSegmentPath = generateSegmentPath();
             prepareMediaRecorder(nextSegmentPath, recordWidth, recordHeight);
             currentFilePath = nextSegmentPath;
+            recordedFilePaths.add(nextSegmentPath);  // 记录新分段文件
 
             // 设置等待会话重新配置的标志
             waitingForSessionReconfiguration = true;
@@ -455,7 +486,8 @@ public class VideoRecorder {
             // 通知外部需要重新配置相机会话（因为 MediaRecorder 的 Surface 已经改变）
             // 外部需要调用 startRecording() 来启动新段的录制
             if (callback != null) {
-                callback.onSegmentSwitch(cameraId, segmentIndex);
+                // 只传递有效的已完成文件路径
+                callback.onSegmentSwitch(cameraId, segmentIndex, completedFileValid ? completedFilePath : null);
             }
 
             // 注意：不在这里调用 start()，而是等待外部重新配置相机会话后调用 startRecording()
@@ -502,11 +534,13 @@ public class VideoRecorder {
             waitingForSessionReconfiguration = false;
             releaseMediaRecorder();
 
-            // 验证并清理损坏的文件
-            validateAndCleanupFile(currentFilePath);
+            // 验证并清理所有录制的文件
+            List<String> deletedFiles = validateAndCleanupAllFiles();
+            notifyCorruptedFilesDeleted(deletedFiles);
 
             currentFilePath = null;
             segmentIndex = 0;
+            recordedFilePaths.clear();
             if (callback != null) {
                 callback.onRecordStop(cameraId);
             }
@@ -526,6 +560,7 @@ public class VideoRecorder {
             AppLog.d(TAG, "Camera " + cameraId + " file size before stop: " + fileSizeBeforeStop + " bytes (" + (fileSizeBeforeStop / 1024) + " KB)");
         }
 
+        List<String> deletedFiles = new ArrayList<>();
         try {
             if (mediaRecorder != null) {
                 // 如果文件太小，说明 MediaRecorder 没有接收到帧，跳过 stop()
@@ -538,8 +573,8 @@ public class VideoRecorder {
             }
             isRecording = false;
 
-            // 验证并清理损坏的文件
-            validateAndCleanupFile(currentFilePath);
+            // 验证并清理所有录制的文件
+            deletedFiles = validateAndCleanupAllFiles();
 
             if (callback != null) {
                 callback.onRecordStop(cameraId);
@@ -553,6 +588,7 @@ public class VideoRecorder {
                 File file = new File(currentFilePath);
                 if (file.exists()) {
                     file.delete();
+                    deletedFiles.add(file.getName());
                     AppLog.w(TAG, "Deleted corrupted video file: " + currentFilePath);
                 }
             }
@@ -560,31 +596,68 @@ public class VideoRecorder {
             releaseMediaRecorder();
             currentFilePath = null;
             segmentIndex = 0;
+            
+            // 通知损坏文件被删除
+            notifyCorruptedFilesDeleted(deletedFiles);
+            recordedFilePaths.clear();
+        }
+    }
+
+    /**
+     * 验证并清理所有录制的文件
+     * @return 被删除的文件名列表
+     */
+    private List<String> validateAndCleanupAllFiles() {
+        List<String> deletedFiles = new ArrayList<>();
+        
+        AppLog.d(TAG, "Camera " + cameraId + " validating " + recordedFilePaths.size() + " recorded files");
+        
+        for (String filePath : recordedFilePaths) {
+            String deletedFileName = validateAndCleanupFile(filePath);
+            if (deletedFileName != null) {
+                deletedFiles.add(deletedFileName);
+            }
+        }
+        
+        if (!deletedFiles.isEmpty()) {
+            AppLog.w(TAG, "Camera " + cameraId + " deleted " + deletedFiles.size() + " corrupted files: " + deletedFiles);
+        }
+        
+        return deletedFiles;
+    }
+
+    /**
+     * 通知损坏文件被删除
+     */
+    private void notifyCorruptedFilesDeleted(List<String> deletedFiles) {
+        if (!deletedFiles.isEmpty() && callback != null) {
+            callback.onCorruptedFilesDeleted(cameraId, deletedFiles);
         }
     }
 
     /**
      * 验证并清理损坏的视频文件
+     * @return 如果文件被删除，返回文件名；否则返回 null
      */
-    private void validateAndCleanupFile(String filePath) {
+    private String validateAndCleanupFile(String filePath) {
         if (filePath == null) {
-            return;
+            return null;
         }
 
         File file = new File(filePath);
         if (!file.exists()) {
-            return;
+            return null;
         }
 
-        // 验证文件大小（至少应该有 50KB，否则可能是损坏的视频）
-        final long MIN_VALID_SIZE = 50 * 1024; // 50KB
         long fileSize = file.length();
 
-        if (fileSize < MIN_VALID_SIZE) {
-            AppLog.w(TAG, "Video file too small: " + filePath + " (size: " + fileSize + " bytes, minimum: " + MIN_VALID_SIZE + " bytes). Deleting...");
+        if (fileSize < MIN_VALID_FILE_SIZE) {
+            AppLog.w(TAG, "Video file too small: " + filePath + " (size: " + fileSize + " bytes, minimum: " + MIN_VALID_FILE_SIZE + " bytes). Deleting...");
             file.delete();
+            return file.getName();
         } else {
             AppLog.d(TAG, "Video file validated: " + filePath + " (size: " + (fileSize / 1024) + " KB)");
+            return null;
         }
     }
 
