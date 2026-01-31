@@ -43,6 +43,9 @@ import com.kooo.evcam.dingtalk.DingTalkStreamManager;
 import com.kooo.evcam.telegram.TelegramApiClient;
 import com.kooo.evcam.telegram.TelegramBotManager;
 import com.kooo.evcam.telegram.TelegramConfig;
+import com.kooo.evcam.wechat.WechatCloudManager;
+import com.kooo.evcam.wechat.WechatMiniConfig;
+import com.kooo.evcam.wechat.WechatRemoteManager;
 import com.kooo.evcam.remote.RemoteCommandDispatcher;
 import com.kooo.evcam.remote.handler.RemoteCommandHandler;
 
@@ -56,7 +59,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements WechatRemoteManager.CommandExecutor {
     private static final String TAG = "MainActivity";
     private static final int REQUEST_PERMISSIONS = 100;
 
@@ -171,6 +174,10 @@ public class MainActivity extends AppCompatActivity {
     private com.kooo.evcam.feishu.FeishuBotManager feishuBotManager;
     private String pendingFeishuChatId = null;  // 待处理的飞书 Chat ID
     
+    // 微信小程序远程服务相关
+    private WechatMiniConfig wechatMiniConfig;
+    private WechatRemoteManager wechatRemoteManager;
+    
     // 状态信息提供者（必须保持强引用，否则会被 GC 回收导致远程状态查询失败）
     private RemoteServiceManager.StatusInfoProvider statusInfoProvider;
     
@@ -190,6 +197,17 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化应用配置
         appConfig = new AppConfig(this);
+        
+        // 初始化微信小程序配置和管理器
+        wechatMiniConfig = new WechatMiniConfig(this);
+        wechatRemoteManager = new WechatRemoteManager(this, wechatMiniConfig);
+        wechatRemoteManager.setCommandExecutor(this);
+        
+        // 如果已配置凭证且开启了自动启动，启动微信云服务
+        if (wechatMiniConfig.isCloudConfigured() && wechatMiniConfig.isAutoStart()) {
+            AppLog.d(TAG, "微信云凭证已配置且自动启动已开启，启动服务");
+            wechatRemoteManager.startService();
+        }
         
         // 重置U盘回退提示标志（每次冷启动重置）
         AppConfig.resetSdFallbackFlag();
@@ -546,6 +564,65 @@ public class MainActivity extends AppCompatActivity {
                 } else {
                     AppLog.d(TAG, "Feishu: Cameras ready, executing command");
                     executeFeishuCommand(finalAction, finalChatId, duration);
+                }
+            }, delay);
+            return;
+        }
+        
+        // 检查是否是微信小程序命令
+        if ("wechat".equals(remoteSource)) {
+            String commandId = intent.getStringExtra("wechat_command_id");
+            int duration = intent.getIntExtra("remote_duration", 60);
+            
+            // 清除 Intent 中的命令，避免重复执行
+            intent.removeExtra("remote_action");
+            intent.removeExtra("remote_source");
+            
+            AppLog.d(TAG, "WeChat command: action=" + action + ", commandId=" + commandId + ", duration=" + duration);
+            
+            // 标记有待处理的远程命令
+            pendingRemoteCommand = true;
+            
+            // 判断是否应该在完成后返回后台
+            boolean shouldReturnToBackground = isInBackground && !isRecording;
+            if (shouldReturnToBackground) {
+                isRemoteWakeUp = true;
+                AppLog.d(TAG, "WeChat: Remote wake-up flag set, will return to background after completion");
+            } else {
+                isRemoteWakeUp = false;
+                AppLog.d(TAG, "WeChat: App was active, will stay in foreground after completion");
+            }
+            
+            // 延迟执行命令，等待摄像头准备好
+            int delay = isInBackground ? 3000 : 1500;
+            final String finalAction = action;
+            final String finalCommandId = commandId;
+            final int finalDuration = duration;
+            
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                pendingRemoteCommand = false;
+                
+                // 检查摄像头是否准备好
+                if (cameraManager == null) {
+                    AppLog.e(TAG, "WeChat: CameraManager is null");
+                    executeWechatCommand(finalAction, finalCommandId, finalDuration);
+                    return;
+                }
+                
+                int connectedCount = cameraManager.getConnectedCameraCount();
+                AppLog.d(TAG, "WeChat: Connected cameras: " + connectedCount);
+                
+                // 如果连接的摄像头不足，继续等待
+                if (!cameraManager.hasConnectedCameras()) {
+                    AppLog.w(TAG, "WeChat: No cameras connected yet, waiting 1.5s more...");
+                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                        boolean hasCamera = cameraManager != null && cameraManager.hasConnectedCameras();
+                        AppLog.d(TAG, "WeChat: After waiting, hasConnectedCameras: " + hasCamera);
+                        executeWechatCommand(finalAction, finalCommandId, finalDuration);
+                    }, 1500);
+                } else {
+                    AppLog.d(TAG, "WeChat: Cameras ready, executing command");
+                    executeWechatCommand(finalAction, finalCommandId, finalDuration);
                 }
             }, delay);
             return;
@@ -1343,6 +1420,9 @@ public class MainActivity extends AppCompatActivity {
             } else if (itemId == R.id.nav_feishu) {
                 // 显示飞书远程界面
                 showFeishuInterface();
+            } else if (itemId == R.id.nav_wechat_mini) {
+                // 显示微信小程序界面
+                showWechatMiniInterface();
             } else if (itemId == R.id.nav_settings) {
                 showSettingsInterface();
             }
@@ -1607,6 +1687,184 @@ public class MainActivity extends AppCompatActivity {
         FragmentTransaction transaction = fragmentManager.beginTransaction();
         transaction.replace(R.id.fragment_container, new FeishuFragment());
         transaction.commit();
+    }
+
+    /**
+     * 显示微信小程序界面
+     */
+    private void showWechatMiniInterface() {
+        // 隐藏录制布局，显示Fragment容器
+        recordingLayout.setVisibility(View.GONE);
+        fragmentContainer.setVisibility(View.VISIBLE);
+
+        // 显示 WechatMiniFragment
+        FragmentManager fragmentManager = getSupportFragmentManager();
+        FragmentTransaction transaction = fragmentManager.beginTransaction();
+        transaction.replace(R.id.fragment_container, new WechatMiniFragment());
+        transaction.commit();
+    }
+    
+    /**
+     * 获取微信远程管理器（供 Fragment 调用）
+     */
+    public WechatRemoteManager getWechatRemoteManager() {
+        return wechatRemoteManager;
+    }
+    
+    /**
+     * 重新初始化微信远程管理器（配置更新后调用）
+     */
+    public void reinitWechatRemoteManager() {
+        // 停止旧的管理器
+        if (wechatRemoteManager != null) {
+            wechatRemoteManager.stopService();
+        }
+        
+        // 重新创建配置和管理器
+        wechatMiniConfig = new WechatMiniConfig(this);
+        wechatRemoteManager = new WechatRemoteManager(this, wechatMiniConfig);
+        wechatRemoteManager.setCommandExecutor(this);
+        
+        // 如果已配置凭证且开启了自动启动，启动服务
+        if (wechatMiniConfig.isCloudConfigured() && wechatMiniConfig.isAutoStart()) {
+            AppLog.d(TAG, "微信云凭证已配置且自动启动已开启，重新启动服务");
+            wechatRemoteManager.startService();
+        }
+    }
+    
+    // ==================== WechatRemoteManager.CommandExecutor 接口实现 ====================
+    // 只提供基础能力，业务逻辑（重试、上传等）由 WechatRemoteManager 处理
+    
+    @Override
+    public boolean isCameraReady() {
+        return cameraManager != null && cameraManager.hasConnectedCameras();
+    }
+    
+    @Override
+    public void openCameras() {
+        if (cameraManager != null) {
+            cameraManager.openAllCameras();
+        }
+    }
+    
+    @Override
+    public void takePicture(String timestamp) {
+        if (cameraManager != null) {
+            cameraManager.takePicture(timestamp);
+        }
+    }
+    
+    @Override
+    public void doStartRecording() {
+        runOnUiThread(() -> {
+            if (!isRecording) {
+                startRecording();
+            }
+        });
+    }
+    
+    @Override
+    public void doStopRecording() {
+        runOnUiThread(() -> {
+            if (isRecording) {
+                stopRecording();
+            }
+        });
+    }
+    
+    @Override
+    public void stopRecordingForRemote() {
+        runOnUiThread(() -> {
+            if (cameraManager != null && isRecording) {
+                cameraManager.stopRecording(true);  // skipRelayTransfer=true
+                isRecording = false;
+                isPreparingRecording = false;
+                stopBlinkAnimation();
+                stopRecordingTimer();
+                FloatingWindowService.sendRecordingStateChanged(this, false);
+                CameraForegroundService.stop(this);
+                AppLog.d(TAG, "Remote recording stopped");
+            }
+        });
+    }
+    
+    @Override
+    public boolean checkIsRecording() {
+        return isRecording;
+    }
+    
+    @Override
+    public java.io.File getPhotoDir() {
+        return StorageHelper.getPhotoDir(this);
+    }
+    
+    @Override
+    public void setRemoteWakeUp(boolean wakeUp) {
+        this.isRemoteWakeUp = wakeUp;
+    }
+    
+    /**
+     * 执行微信小程序命令（从 Intent 唤醒时调用）
+     * 委托给 WechatRemoteManager 处理具体逻辑
+     */
+    private void executeWechatCommand(String action, String commandId, int durationSeconds) {
+        if (wechatRemoteManager != null) {
+            wechatRemoteManager.setCommandExecutor(this);
+            wechatRemoteManager.executeCommandFromIntent(action, commandId, durationSeconds);
+        }
+    }
+    
+    /**
+     * 安排返回后台
+     */
+    @Override
+    public void scheduleReturnToBackground(String source) {
+        if (isRemoteWakeUp) {
+            AppLog.d(TAG, source + " completed, will return to background in 2 seconds");
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (isRemoteWakeUp && !isRecording) {
+                    WakeUpHelper.releaseWakeLock();
+                    AppLog.d(TAG, "Moving task to back...");
+                    boolean success = moveTaskToBack(true);
+                    AppLog.d(TAG, success ? "Returned to background successfully" : "Failed to return to background");
+                    isRemoteWakeUp = false;
+                }
+            }, 2000);
+        }
+    }
+    
+    @Override
+    public byte[] capturePreviewFrame() {
+        // 从第一个可用的 TextureView 捕获预览帧
+        android.view.TextureView targetView = null;
+        if (textureFront != null && textureFront.isAvailable()) {
+            targetView = textureFront;
+        } else if (textureBack != null && textureBack.isAvailable()) {
+            targetView = textureBack;
+        } else if (textureLeft != null && textureLeft.isAvailable()) {
+            targetView = textureLeft;
+        } else if (textureRight != null && textureRight.isAvailable()) {
+            targetView = textureRight;
+        }
+        
+        if (targetView == null) {
+            AppLog.w(TAG, "没有可用的 TextureView 用于捕获预览帧");
+            return null;
+        }
+        
+        try {
+            android.graphics.Bitmap bitmap = targetView.getBitmap();
+            if (bitmap != null) {
+                java.io.ByteArrayOutputStream baos = new java.io.ByteArrayOutputStream();
+                bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, baos);
+                byte[] data = baos.toByteArray();
+                bitmap.recycle();
+                return data;
+            }
+        } catch (Exception e) {
+            AppLog.e(TAG, "捕获预览帧失败: " + e.getMessage(), e);
+        }
+        return null;
     }
 
     /**
@@ -2942,7 +3200,7 @@ public class MainActivity extends AppCompatActivity {
             public void onConnected() {
                 runOnUiThread(() -> {
                     AppLog.d(TAG, "远程查看服务已连接");
-                    Toast.makeText(MainActivity.this, "远程查看已启动", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(MainActivity.this, "钉钉远程已启动", Toast.LENGTH_SHORT).show();
                     // 通知 RemoteViewFragment 更新 UI
                     updateRemoteViewFragmentUI();
                 });

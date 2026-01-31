@@ -21,7 +21,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 12
-        versionName = "0.9.9-test-01311542"
+        versionName = "0.9.9-test-01311846"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -63,6 +63,9 @@ dependencies {
 
     // JSON 解析
     implementation("com.google.code.gson:gson:2.10.1")
+
+    // ZXing 二维码生成（微信小程序绑定）
+    implementation("com.google.zxing:core:3.5.1")
 
     // Glide 图片加载库（用于缓存和优化缩略图加载）
     implementation("com.github.bumptech.glide:glide:4.16.0")
