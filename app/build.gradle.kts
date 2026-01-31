@@ -20,8 +20,8 @@ android {
         applicationId = "com.kooo.evcam"
         minSdk = 28
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.0.2"
+        versionCode = 12
+        versionName = "0.9.9-test-01311542"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -41,6 +41,7 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
+
 }
 
 dependencies {
@@ -53,6 +54,8 @@ dependencies {
 
     // 钉钉官方 Stream SDK
     implementation("com.dingtalk.open:app-stream-client:1.3.12")
+
+    // 飞书：使用轻量级 OkHttp WebSocket 实现，不再依赖官方 SDK
 
     // 网络请求和 WebSocket
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
