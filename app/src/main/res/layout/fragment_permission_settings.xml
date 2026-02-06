@@ -11,7 +11,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:paddingTop="15dp"
+        android:paddingBottom="8dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
         android:gravity="center_vertical"
         android:baselineAligned="false"
         android:background="@color/menu_background">
@@ -22,7 +25,7 @@
             android:layout_height="wrap_content"
             android:layout_gravity="center_vertical"
             android:text="←"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:minWidth="48dp"
             android:minHeight="48dp"
             android:layout_marginEnd="8dp"
@@ -36,7 +39,7 @@
             android:layout_gravity="center_vertical"
             android:text="权限设置"
             android:textColor="@color/text_primary"
-            android:textSize="28sp"
+            android:textSize="24sp"
             android:textStyle="bold" />
     </LinearLayout>
 
@@ -59,6 +62,62 @@
                 android:textColor="@color/text_secondary"
                 android:textSize="14sp"
                 android:layout_marginBottom="16dp" />
+
+            <!-- ========== ADB 一键获取权限 ========== -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:background="@color/card_background"
+                android:padding="16dp"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="ADB 一键获取权限"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:textStyle="bold"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="通过本机 ADB (localhost:5555) 自动授予所有权限"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="12dp" />
+
+                <Button
+                    android:id="@+id/btn_adb_grant_all"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="一键获取权限"
+                    android:textSize="16sp"
+                    android:backgroundTint="#FF4CAF50"
+                    android:textColor="#FFFFFFFF" />
+
+                <ScrollView
+                    android:id="@+id/scroll_adb_log"
+                    android:layout_width="match_parent"
+                    android:layout_height="240dp"
+                    android:layout_marginTop="12dp"
+                    android:background="@color/page_background"
+                    android:padding="10dp"
+                    android:visibility="gone"
+                    android:fillViewport="false">
+
+                    <TextView
+                        android:id="@+id/tv_adb_log"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@color/text_primary"
+                        android:textSize="12sp"
+                        android:fontFamily="monospace"
+                        android:lineSpacingExtra="2dp" />
+                </ScrollView>
+            </LinearLayout>
 
             <!-- ========== 基础权限 ========== -->
             <TextView

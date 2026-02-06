@@ -12,7 +12,10 @@
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:padding="8dp"
+        android:paddingTop="15dp"
+        android:paddingBottom="8dp"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
         android:gravity="center_vertical"
         android:background="@color/menu_background">
 
@@ -21,7 +24,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="☰"
-            android:textSize="18sp"
+            android:textSize="20sp"
             android:minWidth="48dp"
             android:minHeight="48dp"
             android:layout_marginEnd="8dp"
@@ -34,7 +37,7 @@
             android:layout_weight="1"
             android:text="微信小程序"
             android:textColor="@color/text_primary"
-            android:textSize="20sp"
+            android:textSize="24sp"
             android:textStyle="bold" />
 
         <Button
@@ -42,7 +45,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="⌂"
-            android:textSize="22sp"
+            android:textSize="20sp"
             android:minWidth="48dp"
             android:minHeight="48dp"
             android:backgroundTint="@color/button_background"
@@ -419,6 +422,18 @@
                     android:layout_marginTop="4dp"
                     android:visibility="gone" />
             </LinearLayout>
+
+            <!-- 开发者署名 -->
+            <TextView
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="小程序功能由小红书@邪恶银渐层 开发\n感谢车友们贡献的代码"
+                android:textColor="@color/text_hint"
+                android:textSize="12sp"
+                android:gravity="center"
+                android:lineSpacingExtra="4dp"
+                android:layout_marginTop="24dp"
+                android:layout_marginBottom="16dp" />
 
         </LinearLayout>
     </ScrollView>

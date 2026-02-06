@@ -36,6 +36,11 @@
                 android:checkable="true"
                 android:title="飞书远程" />
             <item
+                android:id="@+id/nav_heartbeat"
+                android:icon="@drawable/ic_nav_heartbeat"
+                android:checkable="true"
+                android:title="心跳推图" />
+            <item
                 android:id="@+id/nav_wechat_mini"
                 android:icon="@drawable/ic_nav_wechat"
                 android:checkable="true"
@@ -46,6 +51,11 @@
     <!-- 设置区 -->
     <item android:title="系统">
         <menu>
+            <item
+                android:id="@+id/nav_secondary_display"
+                android:icon="@drawable/ic_nav_remote"
+                android:checkable="true"
+                android:title="补盲选项" />
             <item
                 android:id="@+id/nav_settings"
                 android:icon="@drawable/ic_nav_settings"
