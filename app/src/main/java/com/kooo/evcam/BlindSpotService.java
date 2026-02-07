@@ -109,6 +109,12 @@ public class BlindSpotService extends Service {
                 return;
             }
         });
+        // 将用户配置的触发关键字传入，用于构建 logcat -e 原生过滤正则。
+        // 行驶中车机日志量暴增，不做原生过滤会导致转向灯信号被"淹没"而延迟。
+        signalObserver.setFilterKeywords(
+                appConfig.getTurnSignalLeftTriggerLog(),
+                appConfig.getTurnSignalRightTriggerLog()
+        );
         signalObserver.start();
     }
 
