@@ -322,7 +322,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal"
-                    android:gravity="center_vertical">
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="16dp">
 
                     <TextView
                         android:layout_width="0dp"
@@ -336,6 +337,37 @@
                         android:id="@+id/switch_border"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
+                </LinearLayout>
+
+                <!-- 悬浮窗透明度调节 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <TextView
+                        android:layout_width="72dp"
+                        android:layout_height="wrap_content"
+                        android:text="透明度"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
+
+                    <SeekBar
+                        android:id="@+id/seekbar_alpha"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:max="100" />
+
+                    <TextView
+                        android:id="@+id/tv_alpha_value"
+                        android:layout_width="50dp"
+                        android:layout_height="wrap_content"
+                        android:text="100%"
+                        android:gravity="end"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp" />
                 </LinearLayout>
             </LinearLayout>
 

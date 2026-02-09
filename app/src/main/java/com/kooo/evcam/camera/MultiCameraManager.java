@@ -316,6 +316,24 @@ public class MultiCameraManager {
     }
 
     /**
+     * 手动触发所有已有 previewSize 的摄像头的 PreviewSizeCallback。
+     * 用于后台初始化（CameraManagerHolder）复用场景：
+     * 摄像头在 BlindSpotService 中已打开并确定了预览尺寸，
+     * 但 MainActivity 的回调（旋转变换等）此时尚未注册。
+     * 在 MainActivity 注册回调后调用此方法，补偿缺失的回调触发。
+     */
+    public void firePreviewSizeCallbacks() {
+        if (previewSizeCallback == null) return;
+        for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
+            SingleCamera camera = entry.getValue();
+            Size size = camera.getPreviewSize();
+            if (size != null) {
+                previewSizeCallback.onPreviewSizeChosen(entry.getKey(), camera.getCameraId(), size);
+            }
+        }
+    }
+
+    /**
      * 初始化摄像头
      * 支持 null 参数以适配不同数量的摄像头配置（1摄/2摄/4摄）
      */
@@ -327,29 +345,29 @@ public class MultiCameraManager {
         // 清空之前的摄像头实例
         cameras.clear();
         
-        // 根据参数创建摄像头实例（支持 null 参数以跳过某些摄像头）
-        if (frontId != null && frontView != null) {
+        // 根据参数创建摄像头实例（支持 null TextureView 用于后台初始化）
+        if (frontId != null) {
             SingleCamera frontCamera = new SingleCamera(context, frontId, frontView);
             frontCamera.setCameraPosition("front");
             cameras.put("front", frontCamera);
             AppLog.d(TAG, "初始化前摄像头: ID=" + frontId);
         }
 
-        if (backId != null && backView != null) {
+        if (backId != null) {
             SingleCamera backCamera = new SingleCamera(context, backId, backView);
             backCamera.setCameraPosition("back");
             cameras.put("back", backCamera);
             AppLog.d(TAG, "初始化后摄像头: ID=" + backId);
         }
 
-        if (leftId != null && leftView != null) {
+        if (leftId != null) {
             SingleCamera leftCamera = new SingleCamera(context, leftId, leftView);
             leftCamera.setCameraPosition("left");
             cameras.put("left", leftCamera);
             AppLog.d(TAG, "初始化左摄像头: ID=" + leftId);
         }
 
-        if (rightId != null && rightView != null) {
+        if (rightId != null) {
             SingleCamera rightCamera = new SingleCamera(context, rightId, rightView);
             rightCamera.setCameraPosition("right");
             cameras.put("right", rightCamera);
@@ -2055,6 +2073,29 @@ public class MultiCameraManager {
      * 获取所有摄像头当前使用的分辨率信息
      * @return 格式化的分辨率信息字符串
      */
+    /**
+     * 获取所有摄像头的实时调试信息（FPS + 分辨率）
+     */
+    public String getDebugStats() {
+        StringBuilder sb = new StringBuilder();
+        String[] order = {"front", "back", "left", "right"};
+        String[] labels = {"前", "后", "左", "右"};
+        for (int i = 0; i < order.length; i++) {
+            SingleCamera camera = cameras.get(order[i]);
+            if (camera == null) continue;
+            if (sb.length() > 0) sb.append("\n");
+            android.util.Size previewSize = camera.getPreviewSize();
+            String res = previewSize != null
+                    ? previewSize.getWidth() + "×" + previewSize.getHeight()
+                    : "-";
+            float fps = camera.getCurrentFps();
+            sb.append(labels[i]).append("(").append(camera.getCameraId()).append(") ");
+            sb.append(String.format(java.util.Locale.US, "%.1f fps  ", fps));
+            sb.append(res);
+        }
+        return sb.toString();
+    }
+
     public String getCameraResolutionsInfo() {
         StringBuilder sb = new StringBuilder();
         for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {

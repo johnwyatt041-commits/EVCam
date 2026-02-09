@@ -174,6 +174,9 @@ public class AdbPermissionHelper {
         log(callback, "=== ADB 一键获取权限 ===");
 
         try {
+            // 0. 先断开重连，避免 ADB 被占用
+            resetAdbConnection(callback);
+
             // 1. 加载或生成 RSA 密钥对（用于 ADB 认证）
             loadOrGenerateKeyPair();
 
@@ -241,6 +244,37 @@ public class AdbPermissionHelper {
             notifyComplete(callback, false);
         } finally {
             closeSocket();
+        }
+    }
+
+    /**
+     * 重置 ADB 连接：先断开可能存在的旧连接，再短暂等待 ADB daemon 释放资源。
+     * 在每次 ADB 操作前调用，避免 ADB 被其他进程或残留连接占用导致失败。
+     */
+    private void resetAdbConnection(Callback callback) {
+        // 1. 关闭自身可能残留的旧连接
+        closeSocket();
+
+        // 2. 尝试连接后立即断开，迫使 ADB daemon 释放现有会话
+        log(callback, "重置 ADB 连接...");
+        Socket probe = null;
+        try {
+            probe = new Socket();
+            probe.connect(new InetSocketAddress(ADB_HOST, ADB_PORT), CONNECT_TIMEOUT_MS);
+            probe.close();
+            probe = null;
+            // 等待 ADB daemon 完成清理
+            Thread.sleep(800);
+            log(callback, "✓ ADB 连接已重置");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (Exception e) {
+            // 连接失败说明端口空闲或 ADB 未开启，无需重置
+            AppLog.d(TAG, "ADB reset: port not occupied or not available");
+        } finally {
+            if (probe != null) {
+                try { probe.close(); } catch (Exception ignored) {}
+            }
         }
     }
 
@@ -314,6 +348,9 @@ public class AdbPermissionHelper {
         log(callback, "=== ADB 安装更新 ===");
 
         try {
+            // 先断开重连，避免 ADB 被占用
+            resetAdbConnection(callback);
+
             loadOrGenerateKeyPair();
 
             socket = tryConnect(callback);
@@ -483,7 +520,140 @@ public class AdbPermissionHelper {
         }
     }
 
-    // ==================== Shell 命令执行 ====================
+    // ==================== 脚本执行（供外部调用） ====================
+
+    /**
+     * 通过 ADB 协议执行一个 shell 脚本文件，实时流式输出日志。
+     * 用于系统白名单配置等需要执行完整脚本的场景。
+     *
+     * @param scriptPath 脚本在设备上的绝对路径
+     * @param callback   实时日志和完成回调
+     */
+    public void executeScriptFile(String scriptPath, Callback callback) {
+        cancelled = false;
+        localIdCounter = 1;
+        executor.execute(() -> doExecuteScript(scriptPath, callback));
+    }
+
+    private void doExecuteScript(String scriptPath, Callback callback) {
+        try {
+            // 先断开重连，避免 ADB 被占用
+            resetAdbConnection(callback);
+
+            loadOrGenerateKeyPair();
+
+            socket = tryConnect(callback);
+            if (socket == null) {
+                notifyComplete(callback, false);
+                return;
+            }
+            socketIn = socket.getInputStream();
+            socketOut = socket.getOutputStream();
+
+            if (!performHandshake(callback)) {
+                log(callback, "\n✗ ADB 连接握手失败");
+                notifyComplete(callback, false);
+                return;
+            }
+
+            log(callback, "✓ ADB 连接成功");
+            log(callback, "");
+
+            // 脚本可能执行较长时间，延长超时
+            socket.setSoTimeout(60000);
+
+            // 执行脚本并流式输出
+            boolean success = executeShellCommandStreaming("sh " + scriptPath, callback);
+
+            log(callback, "");
+            if (success) {
+                log(callback, "✓ 脚本执行成功");
+            } else {
+                log(callback, "✗ 脚本执行过程中出现错误，请检查日志");
+            }
+
+            notifyComplete(callback, success);
+
+        } catch (java.net.SocketTimeoutException e) {
+            log(callback, "");
+            log(callback, "✗ 执行超时");
+            AppLog.e(TAG, "Script execution timeout", e);
+            notifyComplete(callback, false);
+        } catch (Exception e) {
+            log(callback, "");
+            log(callback, "✗ 错误: " + e.getMessage());
+            AppLog.e(TAG, "Script execution failed", e);
+            notifyComplete(callback, false);
+        } finally {
+            closeSocket();
+        }
+    }
+
+    /**
+     * 执行 shell 命令并通过回调实时输出每一行日志。
+     * 通过检测输出中是否包含 [ERROR] 来判断成功与否。
+     *
+     * @return true 如果输出中没有 [ERROR] 标记
+     */
+    private boolean executeShellCommandStreaming(String command, Callback callback) throws Exception {
+        int localId = localIdCounter++;
+        byte[] openData = ("shell:" + command + "\0").getBytes("UTF-8");
+        sendMessage(A_OPEN, localId, 0, openData);
+
+        StringBuilder lineBuffer = new StringBuilder();
+        boolean hasError = false;
+        boolean streamOpen = true;
+
+        while (streamOpen) {
+            AdbMessage msg = readMessage();
+
+            switch (msg.command) {
+                case A_OKAY:
+                    break;
+
+                case A_WRTE:
+                    sendMessage(A_OKAY, localId, msg.arg0, null);
+                    if (msg.data != null) {
+                        String chunk = new String(msg.data, "UTF-8");
+                        lineBuffer.append(chunk);
+
+                        // 逐行输出已完成的行
+                        int nlIndex;
+                        while ((nlIndex = lineBuffer.indexOf("\n")) >= 0) {
+                            String line = lineBuffer.substring(0, nlIndex);
+                            lineBuffer.delete(0, nlIndex + 1);
+                            log(callback, line);
+                            if (line.contains("[ERROR]")) {
+                                hasError = true;
+                            }
+                        }
+                    }
+                    break;
+
+                case A_CLSE:
+                    sendMessage(A_CLSE, localId, msg.arg0, null);
+                    streamOpen = false;
+                    break;
+
+                default:
+                    streamOpen = false;
+                    break;
+            }
+        }
+
+        // 输出缓冲区中剩余的内容
+        if (lineBuffer.length() > 0) {
+            String remaining = lineBuffer.toString();
+            log(callback, remaining);
+            if (remaining.contains("[ERROR]")) {
+                hasError = true;
+            }
+        }
+
+        return !hasError;
+    }
+
+    // ==================== Shell 命令执行（内部） ====================
 
     /**
      * 通过 ADB 协议执行一条 shell 命令并返回输出

@@ -48,9 +48,13 @@ public class BlindSpotService extends Service {
     private boolean isSecondaryAdjustMode = false;
     private int secondaryAttachedDisplayId = -1;
 
-    private LogcatSignalObserver signalObserver;
+    private LogcatSignalObserver logcatSignalObserver;
+    private VhalSignalObserver vhalSignalObserver;
+    private CarSignalManagerObserver carSignalManagerObserver;
     private final Handler hideHandler = new Handler(Looper.getMainLooper());
     private Runnable hideRunnable;
+    private Runnable signalKeepAliveRunnable; // 信号保活计时器（debounce）
+    private static final long SIGNAL_KEEPALIVE_MS = 1200; // 1.2秒无信号视为转向灯已关闭（约3个闪烁周期）
     private String currentSignalCamera = null; // 当前转向灯触发的摄像头
     private Runnable secondaryRetryRunnable;
     private int secondaryRetryCount = 0;
@@ -72,7 +76,81 @@ public class BlindSpotService extends Service {
     }
 
     private void initSignalObserver() {
-        signalObserver = new LogcatSignalObserver((line, data1) -> {
+        // 停止旧的观察者
+        stopSignalObservers();
+
+        String mode = appConfig.getTurnSignalTriggerMode();
+        if (appConfig.isCarSignalManagerTriggerMode()) {
+            initCarSignalManagerObserver();
+        } else if (appConfig.isVhalGrpcTriggerMode()) {
+            initVhalSignalObserver();
+        } else {
+            initLogcatSignalObserver();
+        }
+    }
+
+    private void initVhalSignalObserver() {
+        AppLog.d(TAG, "Using VHAL gRPC trigger mode");
+
+        vhalSignalObserver = new VhalSignalObserver(new VhalSignalObserver.TurnSignalListener() {
+            @Override
+            public void onTurnSignal(String direction, boolean on) {
+                if (!appConfig.isBlindSpotGlobalEnabled()) return;
+                if (!appConfig.isTurnSignalLinkageEnabled()) return;
+
+                if (on) {
+                    handleTurnSignal(direction);
+                } else {
+                    // 转向灯关闭，启动隐藏计时器
+                    startHideTimer();
+                }
+            }
+
+            @Override
+            public void onConnectionStateChanged(boolean connected) {
+                AppLog.d(TAG, "VHAL gRPC connection: " + (connected ? "connected" : "disconnected"));
+            }
+        });
+        vhalSignalObserver.start();
+    }
+
+    private void initCarSignalManagerObserver() {
+        AppLog.d(TAG, "Using CarSignalManager API trigger mode");
+
+        carSignalManagerObserver = new CarSignalManagerObserver(this, new CarSignalManagerObserver.TurnSignalListener() {
+            @Override
+            public void onTurnSignal(String direction, boolean on) {
+                if (!appConfig.isBlindSpotGlobalEnabled()) return;
+                if (!appConfig.isTurnSignalLinkageEnabled()) return;
+
+                if (on) {
+                    handleTurnSignal(direction);
+                } else {
+                    // 转向灯关闭，启动隐藏计时器
+                    startHideTimer();
+                }
+            }
+
+            @Override
+            public void onConnectionStateChanged(boolean connected) {
+                AppLog.d(TAG, "CarSignalManager connection: " + (connected ? "connected" : "disconnected"));
+            }
+        });
+        carSignalManagerObserver.start();
+    }
+
+    private void initLogcatSignalObserver() {
+        AppLog.d(TAG, "Using Logcat trigger mode");
+
+        // 安全兜底：即使 logcat -T 已从源头跳过历史缓冲，
+        // 仍保留 500ms 预热期以防极端情况（如系统时间跳变）
+        final long observerStartTime = System.currentTimeMillis();
+        final long WARMUP_MS = 500;
+
+        logcatSignalObserver = new LogcatSignalObserver((line, data1) -> {
+            if (System.currentTimeMillis() - observerStartTime < WARMUP_MS) return;
+
+            if (!appConfig.isBlindSpotGlobalEnabled()) return;
             if (!appConfig.isTurnSignalLinkageEnabled()) return;
 
             String leftKeyword = appConfig.getTurnSignalLeftTriggerLog();
@@ -99,7 +177,28 @@ public class BlindSpotService extends Service {
                 return;
             }
         });
-        signalObserver.start();
+        // 将用户配置的触发关键字传入，用于构建 logcat -e 原生过滤正则。
+        // 行驶中车机日志量暴增，不做原生过滤会导致转向灯信号被"淹没"而延迟。
+        logcatSignalObserver.setFilterKeywords(
+                appConfig.getTurnSignalLeftTriggerLog(),
+                appConfig.getTurnSignalRightTriggerLog()
+        );
+        logcatSignalObserver.start();
+    }
+
+    private void stopSignalObservers() {
+        if (logcatSignalObserver != null) {
+            logcatSignalObserver.stop();
+            logcatSignalObserver = null;
+        }
+        if (vhalSignalObserver != null) {
+            vhalSignalObserver.stop();
+            vhalSignalObserver = null;
+        }
+        if (carSignalManagerObserver != null) {
+            carSignalManagerObserver.stop();
+            carSignalManagerObserver = null;
+        }
     }
 
     private void handleTurnSignal(String cameraPos) {
@@ -109,6 +208,10 @@ public class BlindSpotService extends Service {
             hideRunnable = null;
         }
 
+        // 重置信号保活计时器（debounce）
+        // 每次收到有效信号（value:1）都重置，超过 1.2 秒无新信号则认为转向灯已关闭
+        resetSignalKeepAlive();
+
         if (cameraPos.equals(currentSignalCamera)) {
             AppLog.d(TAG, "转向灯相同，不重复切换: " + cameraPos);
             return;
@@ -117,43 +220,60 @@ public class BlindSpotService extends Service {
         currentSignalCamera = cameraPos;
         AppLog.d(TAG, "转向灯触发摄像头: " + cameraPos);
 
+        // 确保前台服务已启动（带 camera 类型的前台服务是后台访问摄像头的前提条件）
+        // 冷启动时 CameraForegroundService 可能还未启动，导致摄像头被系统 CAMERA_DISABLED 拦截
+        CameraForegroundService.start(this, "补盲运行中", "正在显示补盲画面");
+
+        // 确保摄像头已初始化（通过全局 Holder，不依赖 MainActivity）
+        com.kooo.evcam.camera.CameraManagerHolder.getInstance().getOrInit(this);
+
+        // --- 副屏窗口预创建 ---
+        // 先创建副屏窗口，让副屏 TextureView 提前进入渲染管线。
+        // openCamera 是异步操作（~200-500ms），在此期间副屏 TextureView 有充足时间完成首帧渲染，
+        // 使 secondaryDisplaySurface 在摄像头打开时已就位，首次 Session 即可包含两个 Surface，
+        // 避免副屏需要额外一次 Session 重建而延迟出画面。
+        if (appConfig.isSecondaryDisplayEnabled()) {
+            if (secondaryFloatingView == null) {
+                showSecondaryDisplay();
+            }
+        }
+
         boolean reuseMain = appConfig.isTurnSignalReuseMainFloating();
 
         if (reuseMain) {
             // --- 复用主屏悬浮窗逻辑 ---
-            if (mainFloatingWindowView == null) {
-                // 如果没开启，则尝试弹出临时悬浮窗
-                if (WakeUpHelper.hasOverlayPermission(this)) {
-                    mainFloatingWindowView = new MainFloatingWindowView(this);
-                    mainFloatingWindowView.show();
-                    isMainTempShown = true;
-                    AppLog.d(TAG, "主屏开启临时补盲悬浮窗");
-                }
-            }
+            // 切换方向时重建悬浮窗，确保窗口尺寸/旋转参数与新摄像头匹配
             if (mainFloatingWindowView != null) {
-                mainFloatingWindowView.updateCamera(cameraPos);
+                mainFloatingWindowView.dismiss();
+                mainFloatingWindowView = null;
+            }
+            if (WakeUpHelper.hasOverlayPermission(this)) {
+                mainFloatingWindowView = new MainFloatingWindowView(this);
+                mainFloatingWindowView.updateCamera(cameraPos, true);
+                mainFloatingWindowView.show();
+                isMainTempShown = true;
+                AppLog.d(TAG, "主屏开启临时补盲悬浮窗");
             }
         } else {
             // --- 使用独立补盲悬浮窗逻辑 ---
-            // 1. 关闭主屏悬浮窗 (如果有)
+            // 切换方向时重建悬浮窗
             if (mainFloatingWindowView != null) {
                 mainFloatingWindowView.dismiss();
                 mainFloatingWindowView = null;
                 isMainTempShown = false;
             }
-            // 2. 显示独立补盲窗
-            if (dedicatedBlindSpotWindow == null) {
-                dedicatedBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
-                dedicatedBlindSpotWindow.show();
+            if (dedicatedBlindSpotWindow != null) {
+                dedicatedBlindSpotWindow.dismiss();
+                dedicatedBlindSpotWindow = null;
             }
+            dedicatedBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
+            dedicatedBlindSpotWindow.setCameraPos(cameraPos); // 先设置摄像头位置，再 show
+            dedicatedBlindSpotWindow.show();
             dedicatedBlindSpotWindow.setCamera(cameraPos);
         }
 
-        // --- 副屏显示逻辑 ---
+        // --- 副屏摄像头预览 ---
         if (appConfig.isSecondaryDisplayEnabled()) {
-            if (secondaryFloatingView == null) {
-                showSecondaryDisplay();
-            }
             startSecondaryCameraPreviewDirectly(cameraPos);
         }
     }
@@ -161,12 +281,7 @@ public class BlindSpotService extends Service {
     private void startSecondaryCameraPreviewDirectly(String cameraPos) {
         secondaryDesiredCameraPos = cameraPos;
         BlindSpotCorrection.apply(secondaryTextureView, appConfig, cameraPos, appConfig.getSecondaryDisplayRotation());
-        MainActivity mainActivity = MainActivity.getInstance();
-        if (mainActivity == null) {
-            scheduleSecondaryRetry(cameraPos);
-            return;
-        }
-        MultiCameraManager cameraManager = mainActivity.getCameraManager();
+        MultiCameraManager cameraManager = com.kooo.evcam.camera.CameraManagerHolder.getInstance().getCameraManager();
         if (cameraManager == null) {
             scheduleSecondaryRetry(cameraPos);
             return;
@@ -187,26 +302,57 @@ public class BlindSpotService extends Service {
         }
 
         cancelSecondaryRetry();
-        if (secondaryCamera != null && secondaryCamera != newCamera) {
+        boolean isSwitchingCamera = secondaryCamera != null && secondaryCamera != newCamera;
+        if (isSwitchingCamera) {
             stopSecondaryCameraPreview();
         }
         secondaryCamera = newCamera;
         
         if (secondaryCamera != null && secondaryTextureView != null && secondaryTextureView.isAvailable()) {
             if (secondaryCachedSurface == null || !secondaryCachedSurface.isValid()) {
+                Size previewSize = secondaryCamera.getPreviewSize();
+                if (previewSize == null) {
+                    // 冷启动时 openCamera 尚未完成，previewSize 未确定。
+                    // 此时不能创建 Surface，否则 buffer 尺寸会使用 TextureView 的物理尺寸
+                    // （如 318x236），与摄像头输出尺寸（如 1280x800）不匹配，导致 HAL 拒绝。
+                    // 延迟重试，等待摄像头打开后 previewSize 就位。
+                    AppLog.d(TAG, "副屏摄像头预览尺寸未确定（摄像头未打开），延迟绑定: " + cameraPos);
+                    scheduleSecondaryRetry(cameraPos);
+                    return;
+                }
                 if (secondaryCachedSurface != null) secondaryCachedSurface.release();
                 android.graphics.SurfaceTexture surfaceTexture = secondaryTextureView.getSurfaceTexture();
                 if (surfaceTexture != null) {
-                    Size previewSize = secondaryCamera.getPreviewSize();
-                    if (previewSize != null) {
-                        surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-                    }
+                    surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
                 }
                 secondaryCachedSurface = new Surface(secondaryTextureView.getSurfaceTexture());
             }
-            AppLog.d(TAG, "副屏绑定新 Surface 并重建 Session: " + cameraPos);
-            secondaryCamera.setSecondaryDisplaySurface(secondaryCachedSurface);
-            secondaryCamera.recreateSession();
+            
+            if (isSwitchingCamera) {
+                // 切换摄像头：延迟绑定副屏 Surface，等旧 session 完全关闭释放 Surface
+                // 主悬浮窗会先显示（不含副屏 Surface），副屏稍后加入，避免 "connect: already connected"
+                AppLog.d(TAG, "副屏延迟绑定 Surface（等待旧 session 关闭）: " + cameraPos);
+                final SingleCamera delayedCamera = secondaryCamera;
+                final Surface delayedSurface = secondaryCachedSurface;
+                hideHandler.postDelayed(() -> {
+                    // 确认仍然是同一个摄像头和 Surface（防止快速切换导致的过期回调）
+                    if (delayedCamera == secondaryCamera && delayedSurface == secondaryCachedSurface
+                            && delayedSurface != null && delayedSurface.isValid()) {
+                        AppLog.d(TAG, "副屏绑定 Surface 并重建 Session: " + cameraPos);
+                        delayedCamera.setSecondaryDisplaySurface(delayedSurface);
+                        delayedCamera.recreateSession(false);
+                    }
+                }, 300);
+            } else {
+                // 同一个摄像头或首次绑定：立即设置
+                // 使用非紧急模式（delay=100ms），利用防抖机制：
+                // 主屏 TextureView 稍后就绪时会调用 recreateSession(urgent=true)，
+                // 自动取消此处的延迟任务并立即创建包含两个 Surface 的 Session，
+                // 避免多个 urgent recreateSession 同时触发导致会话雪崩
+                AppLog.d(TAG, "副屏绑定新 Surface 并重建 Session: " + cameraPos);
+                secondaryCamera.setSecondaryDisplaySurface(secondaryCachedSurface);
+                secondaryCamera.recreateSession(false);
+            }
             BlindSpotCorrection.apply(secondaryTextureView, appConfig, cameraPos, appConfig.getSecondaryDisplayRotation());
         } else {
             AppLog.d(TAG, "副屏 TextureView 尚未就绪，暂不绑定 Surface: " + cameraPos);
@@ -218,9 +364,12 @@ public class BlindSpotService extends Service {
         cancelSecondaryRetry();
         secondaryRetryCount++;
         long delayMs;
-        if (secondaryRetryCount <= 10) {
+        if (secondaryRetryCount <= 5) {
+            // 前5次快速重试（50ms），覆盖冷启动等待 previewSize 就位的场景
+            delayMs = 50;
+        } else if (secondaryRetryCount <= 15) {
             delayMs = 500;
-        } else if (secondaryRetryCount <= 30) {
+        } else if (secondaryRetryCount <= 35) {
             delayMs = 1000;
         } else {
             delayMs = 3000;
@@ -235,6 +384,24 @@ public class BlindSpotService extends Service {
             secondaryRetryRunnable = null;
         }
         secondaryRetryCount = 0;
+    }
+
+    /**
+     * 重置信号保活计时器（debounce 机制）
+     * 转向灯闪烁时，每 ~400ms 会产生一次 value:1 的日志。
+     * 如果超过 1.2 秒没有收到新的 value:1 信号，说明转向灯已关闭，
+     * 此时启动隐藏计时器（用户配置的延迟时间）。
+     */
+    private void resetSignalKeepAlive() {
+        if (signalKeepAliveRunnable != null) {
+            hideHandler.removeCallbacks(signalKeepAliveRunnable);
+        }
+        signalKeepAliveRunnable = () -> {
+            AppLog.d(TAG, "转向灯信号超时（" + SIGNAL_KEEPALIVE_MS + "ms 无新信号），启动隐藏计时器");
+            signalKeepAliveRunnable = null;
+            startHideTimer();
+        };
+        hideHandler.postDelayed(signalKeepAliveRunnable, SIGNAL_KEEPALIVE_MS);
     }
 
     private void startHideTimer() {
@@ -329,6 +496,7 @@ public class BlindSpotService extends Service {
         if (previewBlindSpotWindow == null) {
             previewBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
             previewBlindSpotWindow.enableAdjustPreviewMode();
+            previewBlindSpotWindow.setCameraPos(cameraPos); // 先设置摄像头位置，再 show
             previewBlindSpotWindow.show();
         }
         previewBlindSpotWindow.setCamera(cameraPos);
@@ -350,6 +518,24 @@ public class BlindSpotService extends Service {
     }
 
     private void updateWindows() {
+        // 全局开关关闭时，清理所有窗口并停止服务（调整模式和预览模式除外）
+        if (!appConfig.isBlindSpotGlobalEnabled() && !isSecondaryAdjustMode && previewCameraPos == null) {
+            removeSecondaryView();
+            if (mainFloatingWindowView != null) {
+                mainFloatingWindowView.dismiss();
+                mainFloatingWindowView = null;
+            }
+            if (dedicatedBlindSpotWindow != null) {
+                dedicatedBlindSpotWindow.dismiss();
+                dedicatedBlindSpotWindow = null;
+            }
+            removeMockControlWindow();
+            currentSignalCamera = null;
+            isMainTempShown = false;
+            stopSelf();
+            return;
+        }
+
         updateSecondaryDisplay();
         updateMainFloatingWindow();
         updateMockControlWindow();
@@ -473,6 +659,11 @@ public class BlindSpotService extends Service {
 
         secondaryWindowManager.updateViewLayout(secondaryFloatingView, params);
         secondaryFloatingView.setRotation(orientation);
+
+        // 应用透明度
+        float alpha = appConfig.getSecondaryDisplayAlpha() / 100f;
+        secondaryFloatingView.setAlpha(alpha);
+
         String cameraPos = currentSignalCamera != null ? currentSignalCamera : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
         BlindSpotCorrection.apply(secondaryTextureView, appConfig, cameraPos, rotation);
         
@@ -498,7 +689,17 @@ public class BlindSpotService extends Service {
         secondaryAttachedDisplayId = displayId;
 
         // 创建对应显示器的 Context
-        Context displayContext = createDisplayContext(display);
+        Context displayContext;
+        try {
+            displayContext = createDisplayContext(display);
+        } catch (Exception e) {
+            AppLog.e(TAG, "创建副屏 Context 失败（APK 资源可能不可用）: " + e.getMessage());
+            return;
+        }
+        if (displayContext.getResources() == null) {
+            AppLog.e(TAG, "副屏 Context 资源为空，跳过显示");
+            return;
+        }
         secondaryWindowManager = (WindowManager) displayContext.getSystemService(Context.WINDOW_SERVICE);
 
         // 加载布局
@@ -536,7 +737,9 @@ public class BlindSpotService extends Service {
                 finalWidth > 0 ? finalWidth : WindowManager.LayoutParams.WRAP_CONTENT,
                 finalHeight > 0 ? finalHeight : WindowManager.LayoutParams.WRAP_CONTENT,
                 type,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
+                        | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
                 PixelFormat.TRANSLUCENT
         );
 
@@ -580,6 +783,16 @@ public class BlindSpotService extends Service {
 
             @Override
             public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
+                // 保存当前 TextureView 的引用，用于判断回调是否来自旧的已替换的 TextureView
+                final TextureView currentTv = secondaryTextureView;
+                if (currentTv != null) {
+                    android.graphics.SurfaceTexture currentSt = currentTv.getSurfaceTexture();
+                    // 如果当前副屏的 SurfaceTexture 不是被销毁的那个，说明是旧的 TextureView
+                    if (currentSt != null && currentSt != surface) {
+                        AppLog.d(TAG, "Ignoring old secondary TextureView destroy callback");
+                        return true;
+                    }
+                }
                 stopSecondaryCameraPreview();
                 if (secondaryCachedSurface != null) {
                     secondaryCachedSurface.release();
@@ -591,6 +804,10 @@ public class BlindSpotService extends Service {
             @Override
             public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) {}
         });
+
+        // 应用透明度
+        float alpha = appConfig.getSecondaryDisplayAlpha() / 100f;
+        secondaryFloatingView.setAlpha(alpha);
 
         try {
             secondaryWindowManager.addView(secondaryFloatingView, params);
@@ -624,6 +841,9 @@ public class BlindSpotService extends Service {
 
     private void stopSecondaryCameraPreview() {
         if (secondaryCamera != null) {
+            // 立即停止推帧并关闭 session，确保 Surface 被释放
+            // 这样新摄像头才能使用同一个 Surface，避免 "connect: already connected"
+            secondaryCamera.stopRepeatingNow();
             secondaryCamera.setSecondaryDisplaySurface(null);
             secondaryCamera.recreateSession();
             secondaryCamera = null;
@@ -763,11 +983,12 @@ public class BlindSpotService extends Service {
 
     @Override
     public void onDestroy() {
-        if (signalObserver != null) {
-            signalObserver.stop();
-        }
+        stopSignalObservers();
         if (hideRunnable != null) {
             hideHandler.removeCallbacks(hideRunnable);
+        }
+        if (signalKeepAliveRunnable != null) {
+            hideHandler.removeCallbacks(signalKeepAliveRunnable);
         }
         cancelSecondaryRetry();
         removeSecondaryView();

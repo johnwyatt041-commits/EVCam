@@ -16,6 +16,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
+import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
 
@@ -41,12 +42,17 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private int retryBindCount = 0;
     private Runnable retryBindRunnable;
+    private android.animation.ValueAnimator windowAnimator;
+    private boolean pendingShowAnimation = false;
+    private Runnable showAnimFallback;
 
     private float lastX, lastY;
     private float initialX, initialY;
     private int initialWidth, initialHeight;
     private boolean isResizing = false;
     private int resizeMode = 0;
+    private boolean isCurrentlySwapped = false;
+    private boolean hasUnsavedResize = false;
 
     public BlindSpotFloatingWindowView(Context context, boolean isSetupMode) {
         super(context);
@@ -69,7 +75,15 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         if (isSetupMode) {
             saveLayout.setVisibility(View.VISIBLE);
             saveButton.setOnClickListener(v -> {
-                appConfig.setTurnSignalFloatingBounds(params.x, params.y, params.width, params.height);
+                hasUnsavedResize = false;
+                // 若宽高因矫正旋转而交换过，保存前还原为基础值
+                int saveW = params.width;
+                int saveH = params.height;
+                if (isCurrentlySwapped) {
+                    saveW = params.height;
+                    saveH = params.width;
+                }
+                appConfig.setTurnSignalFloatingBounds(params.x, params.y, saveW, saveH);
                 appConfig.setTurnSignalFloatingRotation(currentRotation);
                 dismiss();
             });
@@ -95,16 +109,13 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int width, int height) {
-                MainActivity mainActivity = MainActivity.getInstance();
-                if (mainActivity != null) {
-                    MultiCameraManager cameraManager = mainActivity.getCameraManager();
-                    if (cameraManager != null) {
-                        SingleCamera camera = cameraManager.getCamera(cameraPos);
-                        if (camera != null) {
-                            Size previewSize = camera.getPreviewSize();
-                            if (previewSize != null) {
-                                surface.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
-                            }
+                MultiCameraManager cm = CameraManagerHolder.getInstance().getCameraManager();
+                if (cm != null) {
+                    SingleCamera camera = cm.getCamera(cameraPos);
+                    if (camera != null) {
+                        Size previewSize = camera.getPreviewSize();
+                        if (previewSize != null) {
+                            surface.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
                         }
                     }
                 }
@@ -131,7 +142,16 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             }
 
             @Override
-            public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) {}
+            public void onSurfaceTextureUpdated(android.graphics.SurfaceTexture surface) {
+                if (pendingShowAnimation) {
+                    pendingShowAnimation = false;
+                    if (showAnimFallback != null) {
+                        mainHandler.removeCallbacks(showAnimFallback);
+                        showAnimFallback = null;
+                    }
+                    playShowAnimation();
+                }
+            }
         });
     }
 
@@ -202,32 +222,66 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                 return true;
 
             case MotionEvent.ACTION_UP:
+                if (isResizing) {
+                    hasUnsavedResize = true;
+                }
+                isResizing = false;
                 return true;
         }
         return super.onTouchEvent(event);
     }
 
+    /**
+     * 仅设置摄像头位置（不触发预览切换）。
+     * 用于 show() 前设定初始摄像头，避免 onSurfaceTextureAvailable 使用默认值。
+     */
+    public void setCameraPos(String cameraPos) {
+        this.cameraPos = cameraPos;
+    }
+
     public void setCamera(String cameraPos) {
         this.cameraPos = cameraPos;
-        stopCameraPreview();
+        stopCameraPreview(true); // 切换摄像头时使用紧急模式清除旧surface
         applyTransformNow();
+
+        // 更新 SurfaceTexture 的 buffer size 以匹配新摄像头的预览分辨率
+        // 避免 Surface 尺寸与摄像头配置不匹配导致 session 创建失败
+        if (textureView.isAvailable()) {
+            android.graphics.SurfaceTexture st = textureView.getSurfaceTexture();
+            if (st != null) {
+                MultiCameraManager cm = CameraManagerHolder.getInstance().getCameraManager();
+                if (cm != null) {
+                    SingleCamera camera = cm.getCamera(cameraPos);
+                    if (camera != null) {
+                        Size previewSize = camera.getPreviewSize();
+                        if (previewSize != null) {
+                            st.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+                            AppLog.d(TAG, "Updated buffer size to " + previewSize.getWidth() + "x" + previewSize.getHeight() + " for " + cameraPos);
+                        }
+                    }
+                }
+            }
+        }
+
         if (textureView.isAvailable() && cachedSurface != null && cachedSurface.isValid()) {
-            startCameraPreview(cachedSurface);
+            startCameraPreview(cachedSurface, true);
         } else {
             scheduleRetryBind();
         }
     }
 
     private void startCameraPreview(Surface surface) {
-        MainActivity mainActivity = MainActivity.getInstance();
-        if (mainActivity == null) {
-            scheduleRetryBind();
-            return;
-        }
-        MultiCameraManager cameraManager = mainActivity.getCameraManager();
+        startCameraPreview(surface, false);
+    }
+
+    private void startCameraPreview(Surface surface, boolean urgent) {
+        MultiCameraManager cameraManager = CameraManagerHolder.getInstance().getCameraManager();
         if (cameraManager == null) {
-            scheduleRetryBind();
-            return;
+            cameraManager = CameraManagerHolder.getInstance().getOrInit(getContext());
+            if (cameraManager == null) {
+                scheduleRetryBind();
+                return;
+            }
         }
 
         currentCamera = cameraManager.getCamera(cameraPos);
@@ -236,14 +290,34 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             return;
         }
         currentCamera.setMainFloatingSurface(surface);
-        currentCamera.recreateSession();
+
+        // 如果摄像头硬件还未打开（后台初始化时不打开），先打开
+        if (!currentCamera.isCameraOpened()) {
+            AppLog.d(TAG, "Camera not opened yet, opening now for " + cameraPos);
+            // 先打开当前需要的摄像头
+            currentCamera.openCamera();
+            // 延迟打开其他摄像头
+            final MultiCameraManager cm = cameraManager;
+            mainHandler.postDelayed(() -> {
+                AppLog.d(TAG, "Deferred opening remaining cameras");
+                cm.openAllCameras();
+            }, 500);
+        } else {
+            currentCamera.recreateSession(urgent);
+        }
         cancelRetryBind();
     }
 
     private void stopCameraPreview() {
+        stopCameraPreview(false);
+    }
+
+    private void stopCameraPreview(boolean urgent) {
         if (currentCamera != null) {
+            // 立即停止推帧，防止 Surface 销毁后 queueBuffer abandoned 刷屏
+            currentCamera.stopRepeatingNow();
             currentCamera.setMainFloatingSurface(null);
-            currentCamera.recreateSession();
+            currentCamera.recreateSession(urgent);
             currentCamera = null;
         }
     }
@@ -251,19 +325,99 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
     public void show() {
         try {
             if (this.getParent() == null) {
+                boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
+
+                // 等待首帧画面到达后再显示，避免黑屏闪烁
+                if (animEnabled) {
+                    setScaleX(0.85f);
+                    setScaleY(0.85f);
+                }
+                params.alpha = 0f;
+                pendingShowAnimation = true;
+
                 windowManager.addView(this, params);
                 if (isAdjustPreviewMode) {
                     moveToAdjustPreviewDefaultPosition();
                 }
                 applyTransformNow();
+
+                // 安全超时：如果摄像头迟迟没有推帧，最多等 800ms 后也直接显示
+                showAnimFallback = () -> {
+                    if (pendingShowAnimation) {
+                        pendingShowAnimation = false;
+                        playShowAnimation();
+                    }
+                };
+                mainHandler.postDelayed(showAnimFallback, 800);
             }
         } catch (Exception e) {
             AppLog.e(TAG, "Error showing blind spot floating window: " + e.getMessage());
         }
     }
 
+    private void playShowAnimation() {
+        boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
+
+        if (!animEnabled) {
+            // 无动效：直接显示
+            setScaleX(1f);
+            setScaleY(1f);
+            params.alpha = 1f;
+            try {
+                if (getParent() != null) {
+                    windowManager.updateViewLayout(BlindSpotFloatingWindowView.this, params);
+                }
+            } catch (Exception e) {}
+            return;
+        }
+
+        // 有动效：缩放 + 淡入
+        if (windowAnimator != null) windowAnimator.cancel();
+        windowAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f);
+        windowAnimator.setDuration(250);
+        windowAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
+        windowAnimator.addUpdateListener(animation -> {
+            float val = (float) animation.getAnimatedValue();
+            setScaleX(0.85f + 0.15f * val);
+            setScaleY(0.85f + 0.15f * val);
+            params.alpha = val;
+            try {
+                if (getParent() != null) {
+                    windowManager.updateViewLayout(BlindSpotFloatingWindowView.this, params);
+                }
+            } catch (Exception e) {}
+        });
+        windowAnimator.start();
+    }
+
     public void applyTransformNow() {
-        BlindSpotCorrection.apply(textureView, appConfig, cameraPos, currentRotation);
+        // 矫正旋转更接近竖屏时，悬浮窗宽高互换，让画面自然填满不裁切
+        int correctionRotation = 0;
+        if (appConfig.isBlindSpotCorrectionEnabled() && cameraPos != null) {
+            correctionRotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
+        }
+        int baseW = appConfig.getTurnSignalFloatingWidth();
+        int baseH = appConfig.getTurnSignalFloatingHeight();
+        boolean shouldSwap = BlindSpotCorrection.isCloserToPortrait(correctionRotation);
+        isCurrentlySwapped = shouldSwap;
+        int targetW = shouldSwap ? baseH : baseW;
+        int targetH = shouldSwap ? baseW : baseH;
+
+        // 用户正在拖动缩放或有未保存的缩放时，不覆盖 params，以免打断手势或丢失调整
+        if (!isResizing && !hasUnsavedResize
+                && params != null && (params.width != targetW || params.height != targetH)) {
+            params.width = targetW;
+            params.height = targetH;
+            try {
+                if (getParent() != null) {
+                    windowManager.updateViewLayout(this, params);
+                }
+            } catch (Exception e) {
+                // Ignore
+            }
+        }
+
+        BlindSpotCorrection.apply(textureView, appConfig, cameraPos, currentRotation, isCurrentlySwapped);
     }
 
     public void enableAdjustPreviewMode() {
@@ -318,11 +472,57 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
     public void dismiss() {
         cancelRetryBind();
         stopCameraPreview();
-        try {
-            windowManager.removeView(this);
-        } catch (Exception e) {
-            // Ignore
+        pendingShowAnimation = false;
+        if (showAnimFallback != null) {
+            mainHandler.removeCallbacks(showAnimFallback);
+            showAnimFallback = null;
         }
+
+        if (getParent() == null) return;
+
+        boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
+
+        if (!animEnabled) {
+            // 无动效：直接移除
+            params.alpha = 1f;
+            try {
+                windowManager.removeView(this);
+            } catch (Exception e) {}
+            return;
+        }
+
+        // 关闭动效：缩放 + 淡出
+        if (windowAnimator != null) {
+            windowAnimator.cancel();
+            windowAnimator = null;
+        }
+        windowAnimator = android.animation.ValueAnimator.ofFloat(1f, 0f);
+        windowAnimator.setDuration(200);
+        windowAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator(1.5f));
+        windowAnimator.addUpdateListener(animation -> {
+            float val = (float) animation.getAnimatedValue();
+            setScaleX(0.85f + 0.15f * val);
+            setScaleY(0.85f + 0.15f * val);
+            params.alpha = val;
+            try {
+                if (getParent() != null) {
+                    windowManager.updateViewLayout(BlindSpotFloatingWindowView.this, params);
+                }
+            } catch (Exception e1) {}
+        });
+        windowAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(android.animation.Animator animation) {
+                params.alpha = 1f;
+                try {
+                    if (getParent() != null) {
+                        windowManager.removeView(BlindSpotFloatingWindowView.this);
+                    }
+                } catch (Exception e) {}
+                windowAnimator = null;
+            }
+        });
+        windowAnimator.start();
     }
 
     private void scheduleRetryBind() {

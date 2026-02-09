@@ -50,6 +50,9 @@ public class AppConfig {
     // 录制状态显示配置
     private static final String KEY_RECORDING_STATS_ENABLED = "recording_stats_enabled";  // 录制状态显示开关
     
+    // 补盲功能全局开关
+    private static final String KEY_BLIND_SPOT_GLOBAL_ENABLED = "blind_spot_global_enabled";  // 补盲功能总开关
+    
     // 补盲选项配置 (原副屏显示)
     private static final String KEY_SECONDARY_DISPLAY_ENABLED = "secondary_display_enabled";  // 副屏显示开关
     private static final String KEY_SECONDARY_DISPLAY_CAMERA = "secondary_display_camera";    // 副屏显示的摄像头位置
@@ -61,6 +64,7 @@ public class AppConfig {
     private static final String KEY_SECONDARY_DISPLAY_ROTATION = "secondary_display_rotation"; // 副屏旋转角度
     private static final String KEY_SECONDARY_DISPLAY_BORDER = "secondary_display_border";    // 是否显示白边框
     private static final String KEY_SECONDARY_DISPLAY_ORIENTATION = "secondary_display_orientation"; // 屏幕方向（0/90/180/270）
+    private static final String KEY_SECONDARY_DISPLAY_ALPHA = "secondary_display_alpha"; // 副屏补盲悬浮窗透明度（0-100）
 
     // 主屏悬浮窗配置 (补盲选项新增)
     private static final String KEY_MAIN_FLOATING_ENABLED = "main_floating_enabled";          // 主屏悬浮窗开关
@@ -81,17 +85,36 @@ public class AppConfig {
     private static final String KEY_TURN_SIGNAL_FLOATING_ROTATION = "turn_signal_floating_rotation"; // 独立补盲悬浮窗旋转
     private static final String KEY_TURN_SIGNAL_CUSTOM_LEFT_TRIGGER_LOG = "turn_signal_custom_left_trigger_log"; // 左转向灯触发log关键字
     private static final String KEY_TURN_SIGNAL_CUSTOM_RIGHT_TRIGGER_LOG = "turn_signal_custom_right_trigger_log"; // 右转向灯触发log关键字
+    private static final String KEY_TURN_SIGNAL_TRIGGER_MODE = "turn_signal_trigger_mode"; // 转向灯触发模式
+
+    // 转向灯触发模式常量
+    public static final String TRIGGER_MODE_LOGCAT = "logcat";            // Logcat 日志触发（默认）
+    public static final String TRIGGER_MODE_VHAL_GRPC = "vhal_grpc";      // VHAL gRPC 触发（银河E5）
+    public static final String TRIGGER_MODE_CAR_SIGNAL_MANAGER = "car_signal_manager"; // CarSignalManager API 触发（银河L6/L7）
+    
+    // 兼容性别名（保持向后兼容）
+    public static final String TRIGGER_MODE_CAR_API = TRIGGER_MODE_VHAL_GRPC;
 
     // 桌面悬浮模拟按钮 (补盲选项新增)
     private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED = "mock_turn_signal_floating_enabled"; // 悬浮模拟按钮开关
     private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_X = "mock_turn_signal_floating_x";             // 悬浮模拟按钮X
     private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_Y = "mock_turn_signal_floating_y";             // 悬浮模拟按钮Y
 
+    // 补盲悬浮窗动效
+    private static final String KEY_FLOATING_WINDOW_ANIMATION_ENABLED = "floating_window_animation_enabled"; // 悬浮窗开启/关闭动效
+
+    // 主屏悬浮窗比例锁定
+    private static final String KEY_MAIN_FLOATING_ASPECT_RATIO_LOCKED = "main_floating_aspect_ratio_locked";
+
     // 补盲画面矫正 (Matrix)
     private static final String KEY_BLIND_SPOT_CORRECTION_ENABLED = "blind_spot_correction_enabled";
     private static final String KEY_BLIND_SPOT_CORRECTION_PREFIX = "blind_spot_correction_";
     private static final String KEY_BLIND_SPOT_DISCLAIMER_ACCEPTED = "blind_spot_disclaimer_accepted";
     
+    // 预览画面矫正配置
+    private static final String KEY_PREVIEW_CORRECTION_ENABLED = "preview_correction_enabled";
+    private static final String KEY_PREVIEW_CORRECTION_PREFIX = "preview_correction_";
+
     // 时间角标配置
     private static final String KEY_TIMESTAMP_WATERMARK_ENABLED = "timestamp_watermark_enabled";  // 时间角标开关
     
@@ -169,7 +192,7 @@ public class AppConfig {
     // 录制模式常量
     public static final String RECORDING_MODE_AUTO = "auto";  // 自动（根据车型决定）
     public static final String RECORDING_MODE_MEDIA_RECORDER = "media_recorder";  // MediaRecorder（硬件编码）
-    public static final String RECORDING_MODE_CODEC = "codec";  // OpenGL + MediaCodec（软编码）
+    public static final String RECORDING_MODE_CODEC = "codec";  // MediaCodec（软编码）
     
     // 分辨率配置相关键名
     private static final String KEY_TARGET_RESOLUTION = "target_resolution";  // 目标分辨率
@@ -420,9 +443,8 @@ public class AppConfig {
             // 强制使用 MediaRecorder 模式
             return false;
         } else {
-            // 自动模式：L6/L7、L7-多按钮、26款星舰7 车型使用 Codec 模式
-            String carModel = getCarModel();
-            return CAR_MODEL_L7.equals(carModel) || CAR_MODEL_L7_MULTI.equals(carModel) || CAR_MODEL_XINGHAN_7.equals(carModel);
+            // 自动模式：所有车型默认使用 MediaCodec 模式
+            return true;
         }
     }
     
@@ -1341,6 +1363,26 @@ public class AppConfig {
         return prefs.getBoolean(KEY_RECORDING_STATS_ENABLED, true);
     }
     
+    // ==================== 补盲功能全局开关 ====================
+    
+    /**
+     * 设置补盲功能全局开关
+     * 关闭时，所有补盲子功能（转向灯联动、主屏悬浮窗、副屏显示、模拟按钮、画面矫正）均不生效
+     * @param enabled true 表示启用补盲功能
+     */
+    public void setBlindSpotGlobalEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_GLOBAL_ENABLED, enabled).apply();
+        AppLog.d(TAG, "补盲功能全局开关: " + (enabled ? "启用" : "禁用"));
+    }
+    
+    /**
+     * 获取补盲功能全局开关状态
+     * @return true 表示补盲功能已启用
+     */
+    public boolean isBlindSpotGlobalEnabled() {
+        return prefs.getBoolean(KEY_BLIND_SPOT_GLOBAL_ENABLED, false);
+    }
+    
     // ==================== 补盲选项配置相关方法 (原副屏显示) ====================
     
     /**
@@ -1438,6 +1480,31 @@ public class AppConfig {
         return prefs.getInt(KEY_SECONDARY_DISPLAY_ORIENTATION, 180);
     }
 
+    /**
+     * 设置副屏补盲悬浮窗透明度（0-100）
+     * @param alpha 透明度百分比，0为完全透明，100为完全不透明
+     */
+    public void setSecondaryDisplayAlpha(int alpha) {
+        prefs.edit().putInt(KEY_SECONDARY_DISPLAY_ALPHA, Math.max(0, Math.min(100, alpha))).apply();
+        AppLog.d(TAG, "副屏补盲悬浮窗透明度设置: " + alpha + "%");
+    }
+
+    /**
+     * 获取副屏补盲悬浮窗透明度（0-100）
+     * @return 透明度百分比，默认为100（完全不透明）
+     */
+    public int getSecondaryDisplayAlpha() {
+        return prefs.getInt(KEY_SECONDARY_DISPLAY_ALPHA, 100);
+    }
+
+    public void setMainFloatingAspectRatioLocked(boolean locked) {
+        prefs.edit().putBoolean(KEY_MAIN_FLOATING_ASPECT_RATIO_LOCKED, locked).apply();
+    }
+
+    public boolean isMainFloatingAspectRatioLocked() {
+        return prefs.getBoolean(KEY_MAIN_FLOATING_ASPECT_RATIO_LOCKED, false);
+    }
+
     public void setBlindSpotCorrectionEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_BLIND_SPOT_CORRECTION_ENABLED, enabled).apply();
     }
@@ -1490,13 +1557,109 @@ public class AppConfig {
         return prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "translate_y"), 0.0f);
     }
 
+    public void setBlindSpotCorrectionRotation(String cameraPos, int rotation) {
+        prefs.edit().putInt(getBlindSpotCorrectionKey(cameraPos, "rotation"), rotation).apply();
+    }
+
+    public int getBlindSpotCorrectionRotation(String cameraPos) {
+        // 兼容旧的 float 存储，读取后转换
+        try {
+            return prefs.getInt(getBlindSpotCorrectionKey(cameraPos, "rotation"), 0);
+        } catch (ClassCastException e) {
+            // 旧版本存的是 float，读取并转换
+            float old = prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "rotation"), 0.0f);
+            int rounded = Math.round(old);
+            // 规整到 0/90/180/270
+            if (rounded != 0 && rounded != 90 && rounded != 180 && rounded != 270) rounded = 0;
+            setBlindSpotCorrectionRotation(cameraPos, rounded);
+            return rounded;
+        }
+    }
+
     public void resetBlindSpotCorrection(String cameraPos) {
         prefs.edit()
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "scale_x"), 1.0f)
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "scale_y"), 1.0f)
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "translate_x"), 0.0f)
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "translate_y"), 0.0f)
+                .putInt(getBlindSpotCorrectionKey(cameraPos, "rotation"), 0)
                 .apply();
+    }
+
+    // ==================== 预览画面矫正配置相关方法 ====================
+
+    /**
+     * 设置预览画面矫正开关
+     */
+    public void setPreviewCorrectionEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_PREVIEW_CORRECTION_ENABLED, enabled).apply();
+        AppLog.d(TAG, "预览画面矫正设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    /**
+     * 获取预览画面矫正开关
+     */
+    public boolean isPreviewCorrectionEnabled() {
+        return prefs.getBoolean(KEY_PREVIEW_CORRECTION_ENABLED, false);
+    }
+
+    private String getPreviewCorrectionKey(String cameraPos, String suffix) {
+        return KEY_PREVIEW_CORRECTION_PREFIX + cameraPos + "_" + suffix;
+    }
+
+    public void setPreviewCorrectionScaleX(String cameraPos, float scaleX) {
+        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), scaleX).apply();
+    }
+
+    public void setPreviewCorrectionScaleY(String cameraPos, float scaleY) {
+        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), scaleY).apply();
+    }
+
+    public void setPreviewCorrectionTranslateX(String cameraPos, float translateX) {
+        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), translateX).apply();
+    }
+
+    public void setPreviewCorrectionTranslateY(String cameraPos, float translateY) {
+        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), translateY).apply();
+    }
+
+    public float getPreviewCorrectionScaleX(String cameraPos) {
+        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), 1.0f);
+    }
+
+    public float getPreviewCorrectionScaleY(String cameraPos) {
+        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), 1.0f);
+    }
+
+    public float getPreviewCorrectionTranslateX(String cameraPos) {
+        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), 0.0f);
+    }
+
+    public float getPreviewCorrectionTranslateY(String cameraPos) {
+        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), 0.0f);
+    }
+
+    /**
+     * 重置单路摄像头的预览矫正参数
+     */
+    public void resetPreviewCorrection(String cameraPos) {
+        prefs.edit()
+                .putFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), 1.0f)
+                .putFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), 1.0f)
+                .putFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), 0.0f)
+                .putFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), 0.0f)
+                .apply();
+    }
+
+    /**
+     * 重置所有摄像头的预览矫正参数
+     */
+    public void resetAllPreviewCorrection() {
+        resetPreviewCorrection("front");
+        resetPreviewCorrection("back");
+        resetPreviewCorrection("left");
+        resetPreviewCorrection("right");
+        AppLog.d(TAG, "所有预览画面矫正参数已重置");
     }
 
     // ==================== 主屏悬浮窗配置相关方法 ====================
@@ -1550,6 +1713,18 @@ public class AppConfig {
 
     public int getMainFloatingHeight() {
         return prefs.getInt(KEY_MAIN_FLOATING_HEIGHT, 320);
+    }
+
+    /**
+     * 重置主屏悬浮窗位置和大小为默认值
+     */
+    public void resetMainFloatingBounds() {
+        prefs.edit()
+            .putInt(KEY_MAIN_FLOATING_X, 100)
+            .putInt(KEY_MAIN_FLOATING_Y, 100)
+            .putInt(KEY_MAIN_FLOATING_WIDTH, 480)
+            .putInt(KEY_MAIN_FLOATING_HEIGHT, 320)
+            .apply();
     }
 
     // ==================== 转向灯联动配置相关方法 ====================
@@ -1619,6 +1794,44 @@ public class AppConfig {
     }
 
     /**
+     * 设置转向灯触发模式
+     * @param mode TRIGGER_MODE_LOGCAT 或 TRIGGER_MODE_CAR_API
+     */
+    public void setTurnSignalTriggerMode(String mode) {
+        prefs.edit().putString(KEY_TURN_SIGNAL_TRIGGER_MODE, mode).apply();
+        AppLog.d(TAG, "转向灯触发模式: " + mode);
+    }
+
+    /**
+     * 获取转向灯触发模式
+     */
+    public String getTurnSignalTriggerMode() {
+        return prefs.getString(KEY_TURN_SIGNAL_TRIGGER_MODE, TRIGGER_MODE_LOGCAT);
+    }
+
+    /**
+     * 是否使用 CarAPI 触发模式（兼容性方法，包括 VHAL gRPC）
+     */
+    public boolean isCarApiTriggerMode() {
+        String mode = getTurnSignalTriggerMode();
+        return TRIGGER_MODE_VHAL_GRPC.equals(mode) || TRIGGER_MODE_CAR_API.equals(mode);
+    }
+
+    /**
+     * 是否使用 VHAL gRPC 触发模式
+     */
+    public boolean isVhalGrpcTriggerMode() {
+        return TRIGGER_MODE_VHAL_GRPC.equals(getTurnSignalTriggerMode());
+    }
+
+    /**
+     * 是否使用 CarSignalManager API 触发模式
+     */
+    public boolean isCarSignalManagerTriggerMode() {
+        return TRIGGER_MODE_CAR_SIGNAL_MANAGER.equals(getTurnSignalTriggerMode());
+    }
+
+    /**
      * 设置独立补盲悬浮窗位置和大小
      */
     public void setTurnSignalFloatingBounds(int x, int y, int width, int height) {
@@ -1681,7 +1894,17 @@ public class AppConfig {
     public int getMockTurnSignalFloatingY() {
         return prefs.getInt(KEY_MOCK_TURN_SIGNAL_FLOATING_Y, 200);
     }
-    
+
+    // ==================== 悬浮窗动效配置 ====================
+
+    public void setFloatingWindowAnimationEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_FLOATING_WINDOW_ANIMATION_ENABLED, enabled).apply();
+    }
+
+    public boolean isFloatingWindowAnimationEnabled() {
+        return prefs.getBoolean(KEY_FLOATING_WINDOW_ANIMATION_ENABLED, true);
+    }
+
     // ==================== 时间角标配置相关方法 ====================
     
     /**

@@ -18,6 +18,10 @@ import android.widget.Button;
 import android.widget.ImageView;
 import android.widget.TextView;
 
+import android.util.DisplayMetrics;
+import android.view.Window;
+import android.view.WindowManager;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AlertDialog;
@@ -67,7 +71,34 @@ public class BlindSpotDisclaimerDialogFragment extends DialogFragment {
     @Override
     public void onStart() {
         super.onStart();
+        adjustDialogSize();
         startCountdown();
+    }
+
+    private void adjustDialogSize() {
+        Dialog dialog = getDialog();
+        if (dialog == null) return;
+        Window window = dialog.getWindow();
+        if (window == null) return;
+
+        DisplayMetrics dm = requireContext().getResources().getDisplayMetrics();
+        int screenW = dm.widthPixels;
+        int screenH = dm.heightPixels;
+        float density = dm.density;
+        boolean isLandscape = screenW > screenH;
+
+        int dialogW, dialogH;
+        if (isLandscape) {
+            // Landscape (car displays): use most of height with margins, width ~85%
+            dialogH = Math.min((int) (screenH * 0.95), (int) (800 * density));
+            dialogW = (int) (screenW * 0.85);
+        } else {
+            // Portrait: cap at content size (~790dp) to accommodate larger QR code
+            int originalContentPx = (int) (790 * density);
+            dialogH = Math.min(originalContentPx, (int) (screenH * 0.92));
+            dialogW = WindowManager.LayoutParams.MATCH_PARENT;
+        }
+        window.setLayout(dialogW, dialogH);
     }
 
     @Override

@@ -36,6 +36,8 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
     private Spinner rotationSpinner;
     private Spinner orientationSpinner;
     private SwitchMaterial borderSwitch;
+    private SeekBar seekbarAlpha;
+    private TextView tvAlphaValue;
     private Button saveButton;
 
     private AppConfig appConfig;
@@ -79,6 +81,8 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
         rotationSpinner = view.findViewById(R.id.spinner_rotation);
         orientationSpinner = view.findViewById(R.id.spinner_screen_orientation);
         borderSwitch = view.findViewById(R.id.switch_border);
+        seekbarAlpha = view.findViewById(R.id.seekbar_alpha);
+        tvAlphaValue = view.findViewById(R.id.tv_alpha_value);
         saveButton = view.findViewById(R.id.btn_save_apply);
     }
 
@@ -130,6 +134,10 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
         rotationSpinner.setSelection(appConfig.getSecondaryDisplayRotation() / 90);
         orientationSpinner.setSelection(appConfig.getSecondaryDisplayOrientation() / 90);
         borderSwitch.setChecked(appConfig.isSecondaryDisplayBorderEnabled());
+
+        int alpha = appConfig.getSecondaryDisplayAlpha();
+        seekbarAlpha.setProgress(alpha);
+        tvAlphaValue.setText(alpha + "%");
     }
 
     private void setupListeners() {
@@ -250,6 +258,22 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
             BlindSpotService.update(requireContext());
         });
 
+        seekbarAlpha.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                tvAlphaValue.setText(progress + "%");
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                appConfig.setSecondaryDisplayAlpha(seekBar.getProgress());
+                BlindSpotService.update(requireContext());
+            }
+        });
+
         saveButton.setOnClickListener(v -> {
             persistAllAndUpdate();
             Toast.makeText(requireContext(), "配置已保存并应用", Toast.LENGTH_SHORT).show();
@@ -275,6 +299,7 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
         appConfig.setSecondaryDisplayRotation(rotationSpinner.getSelectedItemPosition() * 90);
         appConfig.setSecondaryDisplayOrientation(orientationSpinner.getSelectedItemPosition() * 90);
         appConfig.setSecondaryDisplayBorderEnabled(borderSwitch.isChecked());
+        appConfig.setSecondaryDisplayAlpha(seekbarAlpha.getProgress());
         BlindSpotService.update(requireContext());
     }
 
