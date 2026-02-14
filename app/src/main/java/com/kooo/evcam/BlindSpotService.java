@@ -1448,7 +1448,24 @@ public class BlindSpotService extends Service {
         stopAvmAvoidance();
         if (!appConfig.isAvmAvoidanceEnabled()) return;
 
-        AppLog.d(TAG, "启动全景影像避让检测，目标Activity: " + appConfig.getAvmAvoidanceActivity());
+        String target = appConfig.getAvmAvoidanceActivity();
+        AppLog.d(TAG, "启动全景影像避让检测，目标Activity: " + target);
+
+        // "all" 模式：始终避让，不需要轮询检测前台应用
+        if ("all".equalsIgnoreCase(target)) {
+            isAvmAvoidanceActive = true;
+            AppLog.i(TAG, "全景影像避让：all 模式，主屏补盲窗口始终隐藏");
+            if (mainFloatingWindowView != null) {
+                mainFloatingWindowView.dismiss();
+                mainFloatingWindowView = null;
+            }
+            if (dedicatedBlindSpotWindow != null) {
+                dedicatedBlindSpotWindow.dismiss();
+                dedicatedBlindSpotWindow = null;
+            }
+            return;
+        }
+
         avmCheckRunnable = new Runnable() {
             @Override
             public void run() {
@@ -1485,7 +1502,9 @@ public class BlindSpotService extends Service {
         String targetActivity = appConfig.getAvmAvoidanceActivity();
         if (targetActivity == null || targetActivity.isEmpty()) return;
 
-        boolean isForeground = isActivityInForeground(targetActivity)
+        // "all" 模式始终视为前台，主屏补盲永不显示
+        boolean isForeground = "all".equalsIgnoreCase(targetActivity)
+                || isActivityInForeground(targetActivity)
                 || isPackageInForeground(getPackageName());
 
         if (isForeground && !isAvmAvoidanceActive) {
