@@ -39,12 +39,20 @@ public class BlindSpotSettingsFragment extends Fragment {
     private EditText turnSignalLeftLogEditText;
     private EditText turnSignalRightLogEditText;
     private boolean isUpdatingFromPreset = false; // 防止 TextWatcher 在预设填充时触发
+    
+    // 车门联动UI控件
+    private LinearLayout doorLinkageSectionLayout; // 车门联动区域
+    private SwitchMaterial doorLinkageSwitch; // 车门联动开关
+
+    // 全景影像避让UI控件
+    private SwitchMaterial avmAvoidanceSwitch;
+    private LinearLayout avmAvoidanceDetailLayout;
+    private EditText avmAvoidanceActivityEditText;
 
     // 转向灯触发log预设方案
     private static final String[][] TURN_SIGNAL_PRESETS = {
         // { presetId, leftKeyword, rightKeyword }
         { "xinghan7", "left front turn signal:1", "right front turn signal:1" },
-        { "e5", "PA_GpioTurnLeftLamp, value:1", "PA_GpioTurnRightLamp, value:1" },
     };
 
     private TextView carApiStatusText;
@@ -103,6 +111,15 @@ public class BlindSpotSettingsFragment extends Fragment {
         secondaryBlindSpotSwitch = view.findViewById(R.id.switch_secondary_blind_spot_display);
         adjustSecondaryBlindSpotWindowButton = view.findViewById(R.id.btn_adjust_secondary_blind_spot_window);
         
+        // 车门联动UI初始化
+        doorLinkageSectionLayout = view.findViewById(R.id.ll_door_linkage_section);
+        doorLinkageSwitch = view.findViewById(R.id.switch_door_linkage);
+
+        // 全景影像避让UI初始化
+        avmAvoidanceSwitch = view.findViewById(R.id.switch_avm_avoidance);
+        avmAvoidanceDetailLayout = view.findViewById(R.id.layout_avm_avoidance_detail);
+        avmAvoidanceActivityEditText = view.findViewById(R.id.et_avm_avoidance_activity);
+
         mockFloatingSwitch = view.findViewById(R.id.switch_mock_floating);
         floatingWindowAnimationSwitch = view.findViewById(R.id.switch_floating_window_animation);
 
@@ -180,9 +197,6 @@ public class BlindSpotSettingsFragment extends Fragment {
             if (matchedPreset == 0) {
                 turnSignalPresetGroup.check(R.id.rb_preset_xinghan7);
                 customKeywordsLayout.setVisibility(View.GONE);
-            } else if (matchedPreset == 1) {
-                turnSignalPresetGroup.check(R.id.rb_preset_e5);
-                customKeywordsLayout.setVisibility(View.GONE);
             } else {
                 turnSignalPresetGroup.check(R.id.rb_preset_custom);
                 customKeywordsLayout.setVisibility(View.VISIBLE);
@@ -198,11 +212,45 @@ public class BlindSpotSettingsFragment extends Fragment {
         blindSpotCorrectionSwitch.setChecked(appConfig.isBlindSpotCorrectionEnabled());
 
         mainFloatingAspectRatioLockSwitch.setChecked(appConfig.isMainFloatingAspectRatioLocked());
+        
+        // 车门联动配置加载
+        doorLinkageSwitch.setChecked(appConfig.isDoorLinkageEnabled());
+        
+        // 根据转向联动的车型选择，决定是否显示车门联动区域
+        updateDoorLinkageVisibility();
+
+        // 全景影像避让配置加载
+        boolean avmEnabled = appConfig.isAvmAvoidanceEnabled();
+        avmAvoidanceSwitch.setChecked(avmEnabled);
+        avmAvoidanceDetailLayout.setVisibility(avmEnabled ? View.VISIBLE : View.GONE);
+        avmAvoidanceActivityEditText.setText(appConfig.getAvmAvoidanceActivity());
+
     }
 
     private void updateSubFeaturesVisibility(boolean globalEnabled) {
         // 全局开关关闭时，隐藏所有子功能区域
         subFeaturesContainer.setVisibility(globalEnabled ? View.VISIBLE : View.GONE);
+    }
+    
+    /**
+     * 根据转向联动的车型选择，更新车门联动区域的可见性
+     * 选择了银河L6/L7、博越L或车载API(E5/星舰7)时，显示车门联动开关
+     */
+    private void updateDoorLinkageVisibility() {
+        // 检查车型选择
+        String turnSignalPreset = appConfig.getTurnSignalPresetSelection();
+        boolean supportsDoorLinkage = "l6l7".equals(turnSignalPreset)
+                || "boyue_l".equals(turnSignalPreset)
+                || "car_api".equals(turnSignalPreset);
+
+        // 支持车门联动的车型才显示（不依赖转向联动开关）
+        doorLinkageSectionLayout.setVisibility(supportsDoorLinkage ? View.VISIBLE : View.GONE);
+
+        // 如果不应该显示（切换到其他车型），自动关闭车门联动
+        if (!supportsDoorLinkage && appConfig.isDoorLinkageEnabled()) {
+            appConfig.setDoorLinkageEnabled(false);
+            doorLinkageSwitch.setChecked(false);
+        }
     }
 
     private void setupListeners() {
@@ -270,6 +318,9 @@ public class BlindSpotSettingsFragment extends Fragment {
                     appConfig.setTurnSignalPresetSelection("l6l7");
                 }
                 
+                // 更新车门联动区域可见性
+                updateDoorLinkageVisibility();
+                
                 checkCarSignalManagerConnection();
                 BlindSpotService.update(requireContext());
             } else if (checkedId == R.id.rb_preset_car_api) {
@@ -278,19 +329,35 @@ public class BlindSpotSettingsFragment extends Fragment {
                 carApiStatusText.setVisibility(View.VISIBLE);
                 carApiStatusText.setText("VHAL gRPC 服务状态: 检测中...");
                 appConfig.setTurnSignalTriggerMode(AppConfig.TRIGGER_MODE_VHAL_GRPC);
+                appConfig.setTurnSignalPresetSelection("car_api");
+                
+                // 更新车门联动区域可见性（会自动处理关闭逻辑）
+                updateDoorLinkageVisibility();
+                
                 checkVhalGrpcConnection();
                 BlindSpotService.update(requireContext());
             } else {
                 // Logcat 模式
                 carApiStatusText.setVisibility(View.GONE);
                 appConfig.setTurnSignalTriggerMode(AppConfig.TRIGGER_MODE_LOGCAT);
+                
+                // 保存具体选择的预设
                 if (checkedId == R.id.rb_preset_custom) {
+                    appConfig.setTurnSignalPresetSelection("custom");
                     customKeywordsLayout.setVisibility(View.VISIBLE);
-                } else {
+                } else if (checkedId == R.id.rb_preset_xinghan7) {
+                    appConfig.setTurnSignalPresetSelection("xinghan7");
                     customKeywordsLayout.setVisibility(View.GONE);
-                    int presetIndex = (checkedId == R.id.rb_preset_xinghan7) ? 0 : 1;
-                    applyPreset(presetIndex);
+                    applyPreset(0);
+                } else {
+                    appConfig.setTurnSignalPresetSelection("e5");
+                    customKeywordsLayout.setVisibility(View.GONE);
+                    applyPreset(1);
                 }
+                
+                // 更新车门联动区域可见性（会自动处理关闭逻辑）
+                updateDoorLinkageVisibility();
+                
                 BlindSpotService.update(requireContext());
             }
         });
@@ -344,6 +411,19 @@ public class BlindSpotSettingsFragment extends Fragment {
             BlindSpotService.update(requireContext());
         });
 
+        // ==================== 车门联动监听器 ====================
+        
+        doorLinkageSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (isChecked && !WakeUpHelper.hasOverlayPermission(requireContext())) {
+                doorLinkageSwitch.setChecked(false);
+                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
+                WakeUpHelper.requestOverlayPermission(requireContext());
+                return;
+            }
+            appConfig.setDoorLinkageEnabled(isChecked);
+            BlindSpotService.update(requireContext());
+        });
+
         blindSpotCorrectionSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             appConfig.setBlindSpotCorrectionEnabled(isChecked);
             BlindSpotService.update(requireContext());
@@ -385,6 +465,7 @@ public class BlindSpotSettingsFragment extends Fragment {
             transaction.commit();
         });
 
+        // 调整车门副屏悬浮窗位置按钮
         logcatDebugButton.setOnClickListener(v -> {
             String keyword = logFilterEditText.getText().toString().trim();
             if (keyword.isEmpty()) {
@@ -417,11 +498,35 @@ public class BlindSpotSettingsFragment extends Fragment {
                 ((MainActivity) getActivity()).goToRecordingInterface();
             }
         });
+
+        // ==================== 全景影像避让监听器 ====================
+
+        avmAvoidanceSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            appConfig.setAvmAvoidanceEnabled(isChecked);
+            avmAvoidanceDetailLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+            BlindSpotService.update(requireContext());
+        });
+
+        avmAvoidanceActivityEditText.addTextChangedListener(new android.text.TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(android.text.Editable s) {
+                String activity = s.toString().trim();
+                if (!activity.isEmpty()) {
+                    appConfig.setAvmAvoidanceActivity(activity);
+                    BlindSpotService.update(requireContext());
+                }
+            }
+        });
+
     }
 
     /**
      * 根据当前关键词匹配预设方案
-     * @return 预设索引（0=星舰7, 1=E5），-1 表示自定义
+     * @return 预设索引（0=星舰7），-1 表示自定义
      */
     private int findMatchingPreset(String leftKeyword, String rightKeyword) {
         if (leftKeyword == null || rightKeyword == null) return -1;
@@ -509,4 +614,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         }).start();
     }
 
+    /**
+     * 检查车门API连接状态
+     */
 }

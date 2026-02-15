@@ -61,6 +61,13 @@ public class SettingsFragment extends Fragment {
     private Button resetPreviewCorrectionButton;
     private PreviewCorrectionFloatingWindow previewCorrectionFloatingWindow;
     
+    // 鱼眼矫正相关
+    private SwitchMaterial fisheyeCorrectionSwitch;
+    private LinearLayout fisheyeCorrectionButtonsLayout;
+    private Button openFisheyeCorrectionFloatingButton;
+    private Button resetFisheyeCorrectionButton;
+    private FisheyeCorrectionFloatingWindow fisheyeCorrectionFloatingWindow;
+    
     private AppConfig appConfig;
     
     // 悬浮窗相关
@@ -121,6 +128,13 @@ public class SettingsFragment extends Fragment {
     private TextView currentVersionText;
     private Button checkUpdateButton;
     private VersionUpdateManager versionUpdateManager;
+
+    // 定制键唤醒相关
+    private SwitchMaterial customKeyWakeupSwitch;
+    private LinearLayout customKeyWakeupDetailLayout;
+    private EditText customKeySpeedThresholdEditText;
+    private EditText customKeySpeedPropIdEditText;
+    private EditText customKeyButtonPropIdEditText;
 
     @Nullable
     @Override
@@ -317,6 +331,54 @@ public class SettingsFragment extends Fragment {
             }
         });
 
+        // 初始化鱼眼矫正
+        fisheyeCorrectionSwitch = view.findViewById(R.id.switch_fisheye_correction);
+        fisheyeCorrectionButtonsLayout = view.findViewById(R.id.layout_fisheye_correction_buttons);
+        openFisheyeCorrectionFloatingButton = view.findViewById(R.id.btn_open_fisheye_correction_floating);
+        resetFisheyeCorrectionButton = view.findViewById(R.id.btn_reset_fisheye_correction);
+        if (getContext() != null && appConfig != null) {
+            boolean fisheyeEnabled = appConfig.isFisheyeCorrectionEnabled();
+            fisheyeCorrectionSwitch.setChecked(fisheyeEnabled);
+            fisheyeCorrectionButtonsLayout.setVisibility(fisheyeEnabled ? View.VISIBLE : View.GONE);
+        }
+        fisheyeCorrectionSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (getContext() != null && appConfig != null) {
+                appConfig.setFisheyeCorrectionEnabled(isChecked);
+                fisheyeCorrectionButtonsLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                // 需要重建 session 来切换 Surface（直接 / GL 中间层）
+                MainActivity mainActivity = MainActivity.getInstance();
+                if (mainActivity != null) {
+                    mainActivity.refreshFisheyeCorrection();
+                }
+                String message = isChecked ? "鱼眼矫正已开启" : "鱼眼矫正已关闭";
+                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+            }
+        });
+        openFisheyeCorrectionFloatingButton.setOnClickListener(v -> {
+            if (getContext() == null) return;
+            if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
+                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
+                WakeUpHelper.requestOverlayPermission(requireContext());
+                return;
+            }
+            // 先回到主界面再打开悬浮窗，方便实时预览
+            MainActivity mainActivity = MainActivity.getInstance();
+            if (mainActivity != null) {
+                mainActivity.goToRecordingInterface();
+                mainActivity.showFisheyeCorrectionFloating();
+            }
+        });
+        resetFisheyeCorrectionButton.setOnClickListener(v -> {
+            if (getContext() != null && appConfig != null) {
+                appConfig.resetAllFisheyeCorrection();
+                Toast.makeText(getContext(), "所有鱼眼矫正参数已恢复默认", Toast.LENGTH_SHORT).show();
+                MainActivity mainActivity = MainActivity.getInstance();
+                if (mainActivity != null) {
+                    mainActivity.refreshFisheyeCorrection();
+                }
+            }
+        });
+
         // 初始化开机自启动开关
         autoStartSwitch = view.findViewById(R.id.switch_auto_start);
         if (getContext() != null && appConfig != null) {
@@ -399,6 +461,9 @@ public class SettingsFragment extends Fragment {
 
         // 初始化悬浮窗设置
         initFloatingWindowSettings(view);
+
+        // 初始化定制键唤醒设置
+        initCustomKeyWakeupSettings(view);
         
         // 沉浸式状态栏兼容
         View toolbar = view.findViewById(R.id.toolbar);
@@ -586,6 +651,80 @@ public class SettingsFragment extends Fragment {
         
         // 初始化悬浮窗透明度滑块
         initFloatingWindowAlphaSeekBar();
+    }
+
+    /**
+     * 初始化定制键唤醒设置
+     */
+    private void initCustomKeyWakeupSettings(View view) {
+        customKeyWakeupSwitch = view.findViewById(R.id.switch_custom_key_wakeup);
+        customKeyWakeupDetailLayout = view.findViewById(R.id.layout_custom_key_wakeup_detail);
+        customKeySpeedThresholdEditText = view.findViewById(R.id.et_custom_key_speed_threshold);
+        customKeySpeedPropIdEditText = view.findViewById(R.id.et_custom_key_speed_prop_id);
+        customKeyButtonPropIdEditText = view.findViewById(R.id.et_custom_key_button_prop_id);
+
+        if (customKeyWakeupSwitch == null || getContext() == null || appConfig == null) return;
+
+        // 加载配置
+        boolean enabled = appConfig.isCustomKeyWakeupEnabled();
+        customKeyWakeupSwitch.setChecked(enabled);
+        customKeyWakeupDetailLayout.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        customKeySpeedThresholdEditText.setText(String.valueOf(appConfig.getCustomKeySpeedThreshold()));
+        customKeySpeedPropIdEditText.setText(String.valueOf(appConfig.getCustomKeySpeedPropId()));
+        customKeyButtonPropIdEditText.setText(String.valueOf(appConfig.getCustomKeyButtonPropId()));
+
+        // 开关监听
+        customKeyWakeupSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (getContext() == null || appConfig == null) return;
+            appConfig.setCustomKeyWakeupEnabled(isChecked);
+            customKeyWakeupDetailLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+            BlindSpotService.update(requireContext());
+        });
+
+        // 速度阈值监听
+        customKeySpeedThresholdEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                try {
+                    float threshold = Float.parseFloat(s.toString());
+                    appConfig.setCustomKeySpeedThreshold(threshold);
+                } catch (NumberFormatException ignored) {}
+            }
+        });
+
+        // 速度属性ID监听
+        customKeySpeedPropIdEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                try {
+                    int propId = Integer.parseInt(s.toString());
+                    appConfig.setCustomKeySpeedPropId(propId);
+                } catch (NumberFormatException ignored) {}
+            }
+        });
+
+        // 按钮属性ID监听
+        customKeyButtonPropIdEditText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                try {
+                    int propId = Integer.parseInt(s.toString());
+                    appConfig.setCustomKeyButtonPropId(propId);
+                } catch (NumberFormatException ignored) {}
+            }
+        });
     }
     
     /**

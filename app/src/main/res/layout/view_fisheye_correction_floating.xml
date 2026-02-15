@@ -19,7 +19,7 @@
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="预览画面矫正"
+            android:text="鱼眼矫正"
             android:textColor="@color/text_primary"
             android:textSize="15sp"
             android:textStyle="bold"
@@ -41,7 +41,7 @@
             android:textColor="@color/button_text" />
     </LinearLayout>
 
-    <!-- 摄像头选择（按钮组） -->
+    <!-- 摄像头选择 -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -105,7 +105,7 @@
             android:textColor="@color/button_text" />
     </LinearLayout>
 
-    <!-- ScaleX -->
+    <!-- K1 (主畸变系数) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -114,14 +114,14 @@
         android:layout_marginTop="10dp">
 
         <TextView
-            android:layout_width="64dp"
+            android:layout_width="72dp"
             android:layout_height="wrap_content"
-            android:text="ScaleX"
+            android:text="K1 强度"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
 
         <SeekBar
-            android:id="@+id/seek_scale_x"
+            android:id="@+id/seek_k1"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -130,75 +130,7 @@
             android:paddingEnd="8dp" />
 
         <TextView
-            android:id="@+id/tv_scale_x"
-            android:layout_width="56dp"
-            android:layout_height="wrap_content"
-            android:gravity="end"
-            android:text="1.00"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-    </LinearLayout>
-
-    <!-- ScaleY -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="6dp">
-
-        <TextView
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:text="ScaleY"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <SeekBar
-            android:id="@+id/seek_scale_y"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minWidth="600dp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp" />
-
-        <TextView
-            android:id="@+id/tv_scale_y"
-            android:layout_width="56dp"
-            android:layout_height="wrap_content"
-            android:gravity="end"
-            android:text="1.00"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-    </LinearLayout>
-
-    <!-- TranslateX -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:layout_marginTop="6dp">
-
-        <TextView
-            android:layout_width="64dp"
-            android:layout_height="wrap_content"
-            android:text="TransX"
-            android:textColor="@color/text_primary"
-            android:textSize="14sp" />
-
-        <SeekBar
-            android:id="@+id/seek_translate_x"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:minWidth="600dp"
-            android:paddingStart="8dp"
-            android:paddingEnd="8dp" />
-
-        <TextView
-            android:id="@+id/tv_translate_x"
+            android:id="@+id/tv_k1"
             android:layout_width="56dp"
             android:layout_height="wrap_content"
             android:gravity="end"
@@ -207,7 +139,7 @@
             android:textSize="14sp" />
     </LinearLayout>
 
-    <!-- TranslateY -->
+    <!-- K2 (二次畸变系数) -->
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -216,14 +148,14 @@
         android:layout_marginTop="6dp">
 
         <TextView
-            android:layout_width="64dp"
+            android:layout_width="72dp"
             android:layout_height="wrap_content"
-            android:text="TransY"
+            android:text="K2 细调"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
 
         <SeekBar
-            android:id="@+id/seek_translate_y"
+            android:id="@+id/seek_k2"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
@@ -232,11 +164,113 @@
             android:paddingEnd="8dp" />
 
         <TextView
-            android:id="@+id/tv_translate_y"
+            android:id="@+id/tv_k2"
             android:layout_width="56dp"
             android:layout_height="wrap_content"
             android:gravity="end"
             android:text="0.00"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- Zoom (矫正后缩放) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp">
+
+        <TextView
+            android:layout_width="72dp"
+            android:layout_height="wrap_content"
+            android:text="缩放"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/seek_zoom"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minWidth="600dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tv_zoom"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:text="1.00"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- CenterX (畸变中心X) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp">
+
+        <TextView
+            android:layout_width="72dp"
+            android:layout_height="wrap_content"
+            android:text="中心X"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/seek_center_x"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minWidth="600dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tv_center_x"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:text="0.50"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+    </LinearLayout>
+
+    <!-- CenterY (畸变中心Y) -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginTop="6dp">
+
+        <TextView
+            android:layout_width="72dp"
+            android:layout_height="wrap_content"
+            android:text="中心Y"
+            android:textColor="@color/text_primary"
+            android:textSize="14sp" />
+
+        <SeekBar
+            android:id="@+id/seek_center_y"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:minWidth="600dp"
+            android:paddingStart="8dp"
+            android:paddingEnd="8dp" />
+
+        <TextView
+            android:id="@+id/tv_center_y"
+            android:layout_width="56dp"
+            android:layout_height="wrap_content"
+            android:gravity="end"
+            android:text="0.50"
             android:textColor="@color/text_primary"
             android:textSize="14sp" />
     </LinearLayout>

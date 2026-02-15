@@ -68,6 +68,9 @@ public class SingleCamera {
     private ImageReader imageReader;  // 用于拍照的ImageReader
     private boolean singleOutputMode = false;  // 单一输出模式（用于不支持多路输出的车机平台）
     
+    // 鱼眼矫正
+    private FisheyeCorrector fisheyeCorrector;
+    
     // 亮度/降噪调节相关
     private CaptureRequest.Builder currentRequestBuilder;  // 当前的请求构建器（用于实时更新参数）
     private CameraCharacteristics cameraCharacteristics;  // 摄像头特性（缓存）
@@ -156,6 +159,7 @@ public class SingleCamera {
             }
             previewSurface = null;
         }
+        releaseFisheyeCorrector();
     }
 
     /**
@@ -322,6 +326,15 @@ public class SingleCamera {
      */
     public void setMainFloatingSurface(Surface surface) {
         this.mainFloatingSurface = surface;
+        // 鱼眼模式：清除时立即从 FisheyeCorrector 移除 EGL 输出，
+        // 释放 native window 连接，确保新摄像头的 FisheyeCorrector 能成功连接
+        if (surface == null && fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+            if (backgroundHandler != null) {
+                backgroundHandler.post(() -> {
+                    if (fisheyeCorrector != null) fisheyeCorrector.removeOutputSurface("mainFloating");
+                });
+            }
+        }
         if (surface != null) {
             AppLog.d(TAG, "Main floating surface set for camera " + cameraId + ": " + surface + ", isValid=" + surface.isValid());
         } else {
@@ -334,6 +347,15 @@ public class SingleCamera {
      */
     public void setSecondaryDisplaySurface(Surface surface) {
         this.secondaryDisplaySurface = surface;
+        // 鱼眼模式：清除时立即从 FisheyeCorrector 移除 EGL 输出，
+        // 释放 native window 连接，确保新摄像头的 FisheyeCorrector 能成功连接
+        if (surface == null && fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+            if (backgroundHandler != null) {
+                backgroundHandler.post(() -> {
+                    if (fisheyeCorrector != null) fisheyeCorrector.removeOutputSurface("secondaryDisplay");
+                });
+            }
+        }
         if (surface != null) {
             AppLog.d(TAG, "Secondary display surface set for camera " + cameraId + ": " + surface + ", isValid=" + surface.isValid());
         } else {
@@ -1076,6 +1098,36 @@ public class SingleCamera {
 
         try {
             AppLog.d(TAG, "createCameraPreviewSession: Starting for camera " + cameraId);
+
+            // 【关键】如果旧会话仍在运行，必须先关闭它再准备新的 Surface。
+            // 否则鱼眼矫正的 EGL 无法连接到 TextureView 的 SurfaceTexture（camera 仍作为 producer 连接着）。
+            if (captureSession != null) {
+                final CameraCaptureSession oldSession = captureSession;
+                captureSession = null;
+                try {
+                    synchronized (sessionLock) {
+                        isSessionClosing = true;
+                    }
+                    oldSession.stopRepeating();
+                    oldSession.close();
+                    AppLog.d(TAG, "Camera " + cameraId + " initiated session close (early, before surface prep)");
+                } catch (Exception e) {
+                    AppLog.e(TAG, "Camera " + cameraId + " error closing old session: " + e.getMessage());
+                    synchronized (sessionLock) {
+                        isSessionClosing = false;
+                    }
+                }
+
+                // 通过 onClosed 回调触发重建；设置 300ms 安全兜底
+                if (backgroundHandler != null) {
+                    backgroundHandler.postDelayed(sessionCloseFallbackRunnable, 300);
+                }
+                synchronized (sessionLock) {
+                    isConfiguring = false;
+                }
+                return;
+            }
+
             SurfaceTexture surfaceTexture = null;
             if (textureView != null && textureView.isAvailable()) {
                 surfaceTexture = textureView.getSurfaceTexture();
@@ -1099,8 +1151,30 @@ public class SingleCamera {
                 if (previewSurface == null || !previewSurface.isValid()) {
                     if (previewSurface != null) {
                         try { previewSurface.release(); } catch (Exception e) {}
+                        previewSurface = null;
                     }
-                    previewSurface = new Surface(surfaceTexture);
+
+                    // 鱼眼矫正：通过 GL 中间层渲染到 TextureView
+                    AppConfig fisheyeConfig = new AppConfig(context);
+                    if (fisheyeConfig.isFisheyeCorrectionEnabled()) {
+                        try {
+                            releaseFisheyeCorrector();
+                            int pw = previewSize != null ? previewSize.getWidth() : textureView.getWidth();
+                            int ph = previewSize != null ? previewSize.getHeight() : textureView.getHeight();
+                            fisheyeCorrector = new FisheyeCorrector(cameraId, cameraPosition, pw, ph);
+                            Surface tvSurface = new Surface(surfaceTexture);
+                            previewSurface = fisheyeCorrector.initialize(tvSurface, backgroundHandler);
+                            fisheyeCorrector.loadParams(fisheyeConfig);
+                            AppLog.d(TAG, "Camera " + cameraId + " fisheye corrector active, using intermediate surface");
+                        } catch (Exception e) {
+                            AppLog.e(TAG, "Camera " + cameraId + " fisheye init failed, falling back", e);
+                            releaseFisheyeCorrector();
+                            previewSurface = new Surface(surfaceTexture);
+                        }
+                    } else {
+                        releaseFisheyeCorrector();
+                        previewSurface = new Surface(surfaceTexture);
+                    }
                     AppLog.d(TAG, "Camera " + cameraId + " Created NEW preview surface: " + previewSurface);
                 }
             } else {
@@ -1167,39 +1241,71 @@ public class SingleCamera {
             } else {
                 // 正常模式：使用 OutputConfiguration 实现 Surface Sharing (API 28+)
                 // 将所有预览性质的 Surface (主预览、主悬浮、副悬浮) 组合成一个硬件流
-                AppLog.d(TAG, "Camera " + cameraId + " Using Surface Sharing for preview streams");
+                boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
 
-                if (surface != null && surface.isValid()) {
-                    OutputConfiguration previewSharedConfig = new OutputConfiguration(surface);
-                    previewSharedConfig.enableSurfaceSharing();
-                    activePreviewConfig = previewSharedConfig;
-                    surfaces.add(surface);
-                    previewRequestBuilder.addTarget(surface);
+                if (fisheyeActive) {
+                    // 鱼眼矫正模式：Camera2 只输出到 FisheyeCorrector 的中间 Surface（单路）
+                    // 悬浮窗/副屏由 FisheyeCorrector GL 管线统一输出（矫正后画面）
+                    AppLog.d(TAG, "Camera " + cameraId + " FISHEYE MODE: single output to GL pipeline");
 
-                    if (previewSurface != null && previewSurface.isValid() && previewSurface != surface &&
-                        previewSurface != mainFloatingSurface && previewSurface != secondaryDisplaySurface) {
-                        previewSharedConfig.addSurface(previewSurface);
-                        surfaces.add(previewSurface);
-                        previewRequestBuilder.addTarget(previewSurface);
-                        AppLog.d(TAG, "Added preview surface to SHARED preview stream");
+                    if (surface != null && surface.isValid()) {
+                        OutputConfiguration previewConfig = new OutputConfiguration(surface);
+                        activePreviewConfig = previewConfig;
+                        surfaces.add(surface);
+                        previewRequestBuilder.addTarget(surface);
+                        outputConfigs.add(previewConfig);
                     }
 
-                    if (mainFloatingSurface != null && mainFloatingSurface.isValid() && mainFloatingSurface != surface) {
-                        previewSharedConfig.addSurface(mainFloatingSurface);
-                        surfaces.add(mainFloatingSurface);
-                        previewRequestBuilder.addTarget(mainFloatingSurface);
-                        AppLog.d(TAG, "Added main floating surface to SHARED preview stream");
+                    // 同步 FisheyeCorrector 的附加输出与当前 Surface 状态
+                    // 确保已清除的 Surface 被移除（防止 EGL "already connected" 竞争）
+                    if (mainFloatingSurface != null && mainFloatingSurface.isValid()) {
+                        fisheyeCorrector.addOutputSurface("mainFloating", mainFloatingSurface);
+                        AppLog.d(TAG, "Registered main floating surface to fisheye GL pipeline");
+                    } else {
+                        fisheyeCorrector.removeOutputSurface("mainFloating");
                     }
-
-                    if (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid() &&
-                        secondaryDisplaySurface != surface && secondaryDisplaySurface != mainFloatingSurface) {
-                        previewSharedConfig.addSurface(secondaryDisplaySurface);
-                        surfaces.add(secondaryDisplaySurface);
-                        previewRequestBuilder.addTarget(secondaryDisplaySurface);
-                        AppLog.d(TAG, "Added secondary display surface to SHARED preview stream");
+                    if (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid()) {
+                        fisheyeCorrector.addOutputSurface("secondaryDisplay", secondaryDisplaySurface);
+                        AppLog.d(TAG, "Registered secondary display surface to fisheye GL pipeline");
+                    } else {
+                        fisheyeCorrector.removeOutputSurface("secondaryDisplay");
                     }
+                } else {
+                    // 非鱼眼模式：使用 Surface Sharing
+                    AppLog.d(TAG, "Camera " + cameraId + " Using Surface Sharing for preview streams");
 
-                    outputConfigs.add(previewSharedConfig);
+                    if (surface != null && surface.isValid()) {
+                        OutputConfiguration previewSharedConfig = new OutputConfiguration(surface);
+                        previewSharedConfig.enableSurfaceSharing();
+                        activePreviewConfig = previewSharedConfig;
+                        surfaces.add(surface);
+                        previewRequestBuilder.addTarget(surface);
+
+                        if (previewSurface != null && previewSurface.isValid() && previewSurface != surface &&
+                            previewSurface != mainFloatingSurface && previewSurface != secondaryDisplaySurface) {
+                            previewSharedConfig.addSurface(previewSurface);
+                            surfaces.add(previewSurface);
+                            previewRequestBuilder.addTarget(previewSurface);
+                            AppLog.d(TAG, "Added preview surface to SHARED preview stream");
+                        }
+
+                        if (mainFloatingSurface != null && mainFloatingSurface.isValid() && mainFloatingSurface != surface) {
+                            previewSharedConfig.addSurface(mainFloatingSurface);
+                            surfaces.add(mainFloatingSurface);
+                            previewRequestBuilder.addTarget(mainFloatingSurface);
+                            AppLog.d(TAG, "Added main floating surface to SHARED preview stream");
+                        }
+
+                        if (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid() &&
+                            secondaryDisplaySurface != surface && secondaryDisplaySurface != mainFloatingSurface) {
+                            previewSharedConfig.addSurface(secondaryDisplaySurface);
+                            surfaces.add(secondaryDisplaySurface);
+                            previewRequestBuilder.addTarget(secondaryDisplaySurface);
+                            AppLog.d(TAG, "Added secondary display surface to SHARED preview stream");
+                        }
+
+                        outputConfigs.add(previewSharedConfig);
+                    }
                 }
 
                 // 录制 Surface 作为一个独立的硬件流
@@ -1232,35 +1338,7 @@ public class SingleCamera {
                 AppLog.d(TAG, "Camera " + cameraId + " Surface[" + i + "]: " + s + ", isValid=" + s.isValid());
             }
 
-            // 【优化】手动关闭旧会话，并通过 CLOSED 回调立即重建
-            if (captureSession != null) {
-                final CameraCaptureSession oldSession = captureSession;
-                captureSession = null;
-                try {
-                    synchronized (sessionLock) {
-                        isSessionClosing = true;
-                    }
-                    oldSession.stopRepeating();
-                    // 注册 CLOSED 回调后再 close，确保回调能触发重建
-                    oldSession.close();
-                    AppLog.d(TAG, "Camera " + cameraId + " initiated session close");
-                } catch (Exception e) {
-                    AppLog.e(TAG, "Camera " + cameraId + " error closing old session: " + e.getMessage());
-                    synchronized (sessionLock) {
-                        isSessionClosing = false;
-                    }
-                }
-                
-                // 通过 onClosed 回调触发重建（见下方 sessionCloseCallback）
-                // 同时设置 300ms 安全兜底，防止 CLOSED 回调丢失
-                if (backgroundHandler != null) {
-                    backgroundHandler.postDelayed(sessionCloseFallbackRunnable, 300);
-                }
-                synchronized (sessionLock) {
-                    isConfiguring = false;
-                }
-                return;
-            }
+            // 注：旧会话关闭已提前到方法开头处理（确保 SurfaceTexture 断开连接后再创建 EGL Surface）
 
             // 创建会话 (使用 OutputConfiguration)
             AppLog.d(TAG, "Camera " + cameraId + " Creating capture session with " + outputConfigs.size() + " streams...");
@@ -1332,15 +1410,18 @@ public class SingleCamera {
                     }
                     
                     // 重试逻辑
+                    boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
                     if (recordSurface != null) {
                         // 录制中：丢弃可选 Surface 后重试
+                        // 注意：鱼眼模式下 floating/secondary 由 FisheyeCorrector 管理，
+                        // 不在 Camera2 session 中，清除它们对恢复无帮助
                         boolean droppedOptionalSurface = false;
-                        if (secondaryDisplaySurface != null) {
+                        if (!fisheyeActive && secondaryDisplaySurface != null) {
                             secondaryDisplaySurface = null;
                             droppedOptionalSurface = true;
                             AppLog.w(TAG, "Retrying without secondary display surface...");
                         }
-                        if (!droppedOptionalSurface && mainFloatingSurface != null) {
+                        if (!fisheyeActive && !droppedOptionalSurface && mainFloatingSurface != null) {
                             mainFloatingSurface = null;
                             droppedOptionalSurface = true;
                             AppLog.w(TAG, "Retrying without main floating surface...");
@@ -1370,9 +1451,10 @@ public class SingleCamera {
                             }
                         } else {
                             // 重试耗尽，丢弃副屏 Surface 后尝试只用主 Surface
+                            // 鱼眼模式下 secondary 不在 Camera2 session 中，不需要丢弃
                             AppLog.e(TAG, "Camera " + cameraId + " config retries exhausted (" + configFailRetryCount + "), dropping secondary display surface");
                             configFailRetryCount = 0;
-                            if (secondaryDisplaySurface != null) {
+                            if (!fisheyeActive && secondaryDisplaySurface != null) {
                                 secondaryDisplaySurface = null;
                                 if (backgroundHandler != null) {
                                     backgroundHandler.postDelayed(() -> {
@@ -1424,13 +1506,15 @@ public class SingleCamera {
             String message = e.getMessage();
             if (message != null && message.contains("abandoned")) {
                 AppLog.e(TAG, "Camera " + cameraId + " detected abandoned Surface, attempting recovery...");
+                // 鱼眼模式下 floating/secondary 由 FisheyeCorrector 管理，不在 Camera2 session 中
+                boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
                 boolean cleared = false;
-                if (secondaryDisplaySurface != null) {
+                if (!fisheyeActive && secondaryDisplaySurface != null) {
                     secondaryDisplaySurface = null;
                     cleared = true;
                     AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned secondaryDisplaySurface and retrying");
                 }
-                if (!cleared && mainFloatingSurface != null) {
+                if (!fisheyeActive && !cleared && mainFloatingSurface != null) {
                     mainFloatingSurface = null;
                     cleared = true;
                     AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned mainFloatingSurface and retrying");
@@ -1555,6 +1639,19 @@ public class SingleCamera {
 
         if (surface == null || !surface.isValid()) return;
 
+        // 鱼眼矫正模式：通过 FisheyeCorrector GL 管线输出，无需重建 Camera2 session
+        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+            String tag = isMainFloating ? "mainFloating" : "secondaryDisplay";
+            if (backgroundHandler != null) {
+                backgroundHandler.post(() -> {
+                    if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+                        fisheyeCorrector.addOutputSurface(tag, surface);
+                    }
+                });
+            }
+            return;
+        }
+
         // 2. 如果 Session 正忙，新 Surface 会被进行中的 createCameraPreviewSession 自动包含
         synchronized (sessionLock) {
             if (isConfiguring || isSessionClosing) {
@@ -1597,6 +1694,19 @@ public class SingleCamera {
             surfaceToRemove = this.secondaryDisplaySurface;
             this.secondaryDisplaySurface = null;
             AppLog.d(TAG, "Secondary display surface cleared for camera " + cameraId);
+        }
+
+        // 鱼眼矫正模式：从 GL 管线移除，无需碰 Camera2 session
+        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+            String tag = isMainFloating ? "mainFloating" : "secondaryDisplay";
+            if (backgroundHandler != null) {
+                backgroundHandler.post(() -> {
+                    if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+                        fisheyeCorrector.removeOutputSurface(tag);
+                    }
+                });
+            }
+            return;
         }
 
         // 2. 立即停止推帧，防止 Surface 销毁后 queueBuffer abandoned
@@ -2006,6 +2116,9 @@ public class SingleCamera {
                 cameraDevice = null;
             }
 
+            // 释放鱼眼矫正器
+            releaseFisheyeCorrector();
+
             // 释放预览 Surface
             if (previewSurface != null) {
                 try {
@@ -2052,6 +2165,46 @@ public class SingleCamera {
                 callback.onCameraClosed(cameraId);
             }
         }
+    }
+
+    // ==================== 鱼眼矫正相关方法 ====================
+
+    /**
+     * 释放鱼眼矫正器
+     */
+    private void releaseFisheyeCorrector() {
+        if (fisheyeCorrector != null) {
+            try {
+                fisheyeCorrector.release();
+            } catch (Exception e) {
+                AppLog.d(TAG, "Camera " + cameraId + " ignored exception releasing fisheye corrector: " + e.getMessage());
+            }
+            fisheyeCorrector = null;
+        }
+    }
+
+    /**
+     * 实时更新鱼眼矫正参数（由悬浮窗调参时调用，无需重建 session）
+     */
+    public void updateFisheyeParams(AppConfig appConfig) {
+        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
+            fisheyeCorrector.loadParams(appConfig);
+        }
+    }
+
+    /**
+     * 鱼眼矫正开关切换后需要重建预览 session
+     * 因为需要切换 Surface（直接 / 中间 GL）
+     *
+     * 注意：不能直接 release previewSurface，因为旧 session 可能仍在使用它。
+     * 只需释放 FisheyeCorrector 并置空 previewSurface 引用，
+     * session 关闭时会自然断开 SurfaceTexture 的 producer 连接。
+     */
+    public void recreateForFisheyeToggle() {
+        AppLog.d(TAG, "Camera " + cameraId + " recreating session for fisheye toggle");
+        releaseFisheyeCorrector();
+        previewSurface = null; // 不 release，让 session 关闭时自然断开
+        recreateSession();
     }
 
     /**

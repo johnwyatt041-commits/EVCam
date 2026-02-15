@@ -90,6 +90,7 @@ public class MainActivity extends AppCompatActivity implements WechatRemoteManag
     private AutoFitTextureView textureFront, textureBack, textureLeft, textureRight;
     private final java.util.Map<String, android.graphics.Matrix> previewBaseTransforms = new java.util.HashMap<>();
     private PreviewCorrectionFloatingWindow previewCorrectionFloatingWindow;
+    private FisheyeCorrectionFloatingWindow fisheyeCorrectionFloatingWindow;
 
     // 调试信息覆盖层（连点5下空白处显示）
     private TextView tvDebugOverlay;
@@ -478,10 +479,13 @@ public class MainActivity extends AppCompatActivity implements WechatRemoteManag
             }, 500);
         }
 
-        // 启动补盲选项服务 (副屏/主屏悬浮窗/转向灯联动/模拟按钮)
-        if (appConfig.isBlindSpotGlobalEnabled()
+        // 启动补盲选项服务 (副屏/主屏悬浮窗/转向灯联动/模拟按钮/全景避让)
+        // 定制键唤醒独立于补盲全局开关，单独判断
+        if ((appConfig.isBlindSpotGlobalEnabled()
                 && (appConfig.isSecondaryDisplayEnabled() || appConfig.isMainFloatingEnabled()
-                    || appConfig.isTurnSignalLinkageEnabled() || appConfig.isMockTurnSignalFloatingEnabled())) {
+                    || appConfig.isTurnSignalLinkageEnabled() || appConfig.isMockTurnSignalFloatingEnabled()
+                    || appConfig.isAvmAvoidanceEnabled()))
+                || appConfig.isCustomKeyWakeupEnabled()) {
             BlindSpotService.update(this);
             AppLog.d(TAG, "补盲选项服务已启动");
         }
@@ -3176,6 +3180,45 @@ public class MainActivity extends AppCompatActivity implements WechatRemoteManag
         }
     }
 
+    // ==================== 鱼眼矫正 ====================
+
+    /**
+     * 鱼眼矫正开关切换后刷新所有摄像头预览
+     * 需要重建 Camera session（切换直接 Surface / GL 中间层）
+     */
+    public void refreshFisheyeCorrection() {
+        MultiCameraManager cm = cameraManager;
+        if (cm == null) return;
+        String[] positions = {"front", "back", "left", "right"};
+        for (String pos : positions) {
+            com.kooo.evcam.camera.SingleCamera camera = cm.getCamera(pos);
+            if (camera != null) {
+                camera.recreateForFisheyeToggle();
+            }
+        }
+    }
+
+    /**
+     * 显示鱼眼矫正悬浮窗
+     */
+    public void showFisheyeCorrectionFloating() {
+        if (fisheyeCorrectionFloatingWindow != null && fisheyeCorrectionFloatingWindow.isShowing()) {
+            return;
+        }
+        fisheyeCorrectionFloatingWindow = new FisheyeCorrectionFloatingWindow(this);
+        fisheyeCorrectionFloatingWindow.show();
+    }
+
+    /**
+     * 关闭鱼眼矫正悬浮窗
+     */
+    public void dismissFisheyeCorrectionFloating() {
+        if (fisheyeCorrectionFloatingWindow != null) {
+            fisheyeCorrectionFloatingWindow.dismiss();
+            fisheyeCorrectionFloatingWindow = null;
+        }
+    }
+
     // ==================== 调试信息覆盖层（连点5下显示） ====================
 
     /**
@@ -4783,6 +4826,7 @@ public class MainActivity extends AppCompatActivity implements WechatRemoteManag
     protected void onPause() {
         super.onPause();
         isInBackground = true;
+        BlindSpotService.notifySelfBackground();
         AppLog.d(TAG, "onPause called, isRecording=" + isRecording);
         
         // 暂停心跳推图（进入后台时）
@@ -4846,6 +4890,7 @@ public class MainActivity extends AppCompatActivity implements WechatRemoteManag
         super.onResume();
         boolean wasInBackground = isInBackground;
         isInBackground = false;
+        BlindSpotService.notifySelfForeground();
         
         // 标记 Activity 已经完全恢复过一次（用于区分新创建和已存在的 Activity）
         // 这个标记在 onCreate 后第一次 onResume 时设为 true

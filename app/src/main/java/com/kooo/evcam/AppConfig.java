@@ -77,6 +77,14 @@ public class AppConfig {
     // 转向灯联动配置 (补盲选项新增)
     private static final String KEY_TURN_SIGNAL_LINKAGE_ENABLED = "turn_signal_linkage_enabled"; // 转向灯联动开关
     private static final String KEY_TURN_SIGNAL_TIMEOUT = "turn_signal_timeout";               // 转向灯熄灭后延迟消失时间 (秒)
+    
+    // 车门联动配置
+    private static final String KEY_DOOR_LINKAGE_ENABLED = "door_linkage_enabled";             // 车门联动开关
+    private static final String KEY_DOOR_TIMEOUT = "door_timeout";                             // 车门关闭后延迟消失时间 (秒)
+    private static final String KEY_DOOR_PRESET_SELECTION = "door_preset_selection";           // 车门联动车型选择 (l6l7/boyue_l)
+    private static final String KEY_DOOR_REUSE_MAIN_FLOATING = "door_reuse_main_floating";     // 车门联动是否复用主屏悬浮窗
+    private static final String KEY_DOOR_SECONDARY_DISPLAY_ENABLED = "door_secondary_display_enabled"; // 车门联动副屏显示开关
+    
     private static final String KEY_TURN_SIGNAL_REUSE_MAIN_FLOATING = "turn_signal_reuse_main_floating"; // 是否复用主屏悬浮窗
     private static final String KEY_TURN_SIGNAL_FLOATING_X = "turn_signal_floating_x";          // 独立补盲悬浮窗X
     private static final String KEY_TURN_SIGNAL_FLOATING_Y = "turn_signal_floating_y";          // 独立补盲悬浮窗Y
@@ -89,12 +97,22 @@ public class AppConfig {
     private static final String KEY_TURN_SIGNAL_PRESET_SELECTION = "turn_signal_preset_selection"; // 用户选择的预设选项（博越L/L6L7等）
 
     // 转向灯触发模式常量
-    public static final String TRIGGER_MODE_LOGCAT = "logcat";            // Logcat 日志触发（默认）
-    public static final String TRIGGER_MODE_VHAL_GRPC = "vhal_grpc";      // VHAL gRPC 触发（银河E5）
+    public static final String TRIGGER_MODE_LOGCAT = "logcat";            // Logcat 日志触发
+    public static final String TRIGGER_MODE_VHAL_GRPC = "vhal_grpc";      // VHAL gRPC 触发（银河E5/26款星舰7，默认）
     public static final String TRIGGER_MODE_CAR_SIGNAL_MANAGER = "car_signal_manager"; // CarSignalManager API 触发（银河L6/L7）
     
     // 兼容性别名（保持向后兼容）
     public static final String TRIGGER_MODE_CAR_API = TRIGGER_MODE_VHAL_GRPC;
+
+    // 全景影像避让配置
+    private static final String KEY_AVM_AVOIDANCE_ENABLED = "avm_avoidance_enabled";  // 全景影像避让开关
+    private static final String KEY_AVM_AVOIDANCE_ACTIVITY = "avm_avoidance_activity"; // 全景影像避让的Activity名
+
+    // 定制键唤醒配置
+    private static final String KEY_CUSTOM_KEY_WAKEUP_ENABLED = "custom_key_wakeup_enabled"; // 定制键唤醒开关
+    private static final String KEY_CUSTOM_KEY_SPEED_THRESHOLD = "custom_key_speed_threshold"; // 速度阈值（秒速 m/s）
+    private static final String KEY_CUSTOM_KEY_SPEED_PROP_ID = "custom_key_speed_prop_id"; // 速度属性ID
+    private static final String KEY_CUSTOM_KEY_BUTTON_PROP_ID = "custom_key_button_prop_id"; // 按钮属性ID
 
     // 桌面悬浮模拟按钮 (补盲选项新增)
     private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED = "mock_turn_signal_floating_enabled"; // 悬浮模拟按钮开关
@@ -115,6 +133,10 @@ public class AppConfig {
     // 预览画面矫正配置
     private static final String KEY_PREVIEW_CORRECTION_ENABLED = "preview_correction_enabled";
     private static final String KEY_PREVIEW_CORRECTION_PREFIX = "preview_correction_";
+
+    // 鱼眼矫正配置
+    private static final String KEY_FISHEYE_CORRECTION_ENABLED = "fisheye_correction_enabled";
+    private static final String KEY_FISHEYE_CORRECTION_PREFIX = "fisheye_correction_";
 
     // 时间角标配置
     private static final String KEY_TIMESTAMP_WATERMARK_ENABLED = "timestamp_watermark_enabled";  // 时间角标开关
@@ -1663,6 +1685,96 @@ public class AppConfig {
         AppLog.d(TAG, "所有预览画面矫正参数已重置");
     }
 
+    // ==================== 鱼眼矫正配置相关方法 ====================
+
+    /**
+     * 设置鱼眼矫正开关
+     */
+    public void setFisheyeCorrectionEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_FISHEYE_CORRECTION_ENABLED, enabled).apply();
+        AppLog.d(TAG, "鱼眼矫正设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    /**
+     * 获取鱼眼矫正开关
+     */
+    public boolean isFisheyeCorrectionEnabled() {
+        return prefs.getBoolean(KEY_FISHEYE_CORRECTION_ENABLED, false);
+    }
+
+    private String getFisheyeCorrectionKey(String cameraPos, String suffix) {
+        return KEY_FISHEYE_CORRECTION_PREFIX + cameraPos + "_" + suffix;
+    }
+
+    // --- K1 (主畸变系数) ---
+    public void setFisheyeCorrectionK1(String cameraPos, float k1) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k1"), k1).apply();
+    }
+
+    public float getFisheyeCorrectionK1(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k1"), 0.0f);
+    }
+
+    // --- K2 (二次畸变系数) ---
+    public void setFisheyeCorrectionK2(String cameraPos, float k2) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k2"), k2).apply();
+    }
+
+    public float getFisheyeCorrectionK2(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k2"), 0.0f);
+    }
+
+    // --- Zoom (矫正后缩放) ---
+    public void setFisheyeCorrectionZoom(String cameraPos, float zoom) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), zoom).apply();
+    }
+
+    public float getFisheyeCorrectionZoom(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), 1.0f);
+    }
+
+    // --- CenterX (畸变中心X偏移) ---
+    public void setFisheyeCorrectionCenterX(String cameraPos, float cx) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), cx).apply();
+    }
+
+    public float getFisheyeCorrectionCenterX(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), 0.5f);
+    }
+
+    // --- CenterY (畸变中心Y偏移) ---
+    public void setFisheyeCorrectionCenterY(String cameraPos, float cy) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), cy).apply();
+    }
+
+    public float getFisheyeCorrectionCenterY(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), 0.5f);
+    }
+
+    /**
+     * 重置单路摄像头的鱼眼矫正参数
+     */
+    public void resetFisheyeCorrection(String cameraPos) {
+        prefs.edit()
+                .putFloat(getFisheyeCorrectionKey(cameraPos, "k1"), 0.0f)
+                .putFloat(getFisheyeCorrectionKey(cameraPos, "k2"), 0.0f)
+                .putFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), 1.0f)
+                .putFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), 0.5f)
+                .putFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), 0.5f)
+                .apply();
+    }
+
+    /**
+     * 重置所有摄像头的鱼眼矫正参数
+     */
+    public void resetAllFisheyeCorrection() {
+        resetFisheyeCorrection("front");
+        resetFisheyeCorrection("back");
+        resetFisheyeCorrection("left");
+        resetFisheyeCorrection("right");
+        AppLog.d(TAG, "所有鱼眼矫正参数已重置");
+    }
+
     // ==================== 主屏悬浮窗配置相关方法 ====================
 
     /**
@@ -1807,7 +1919,7 @@ public class AppConfig {
      * 获取转向灯触发模式
      */
     public String getTurnSignalTriggerMode() {
-        return prefs.getString(KEY_TURN_SIGNAL_TRIGGER_MODE, TRIGGER_MODE_LOGCAT);
+        return prefs.getString(KEY_TURN_SIGNAL_TRIGGER_MODE, TRIGGER_MODE_VHAL_GRPC);
     }
 
     /**
@@ -1847,6 +1959,70 @@ public class AppConfig {
      */
     public String getTurnSignalPresetSelection() {
         return prefs.getString(KEY_TURN_SIGNAL_PRESET_SELECTION, "l6l7"); // 默认返回 l6l7
+    }
+
+    // ==================== 车门联动配置 ====================
+    
+    /**
+     * 设置车门联动开关（左右补盲）
+     */
+    public void setDoorLinkageEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_DOOR_LINKAGE_ENABLED, enabled).apply();
+        AppLog.d(TAG, "车门联动设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    public boolean isDoorLinkageEnabled() {
+        return prefs.getBoolean(KEY_DOOR_LINKAGE_ENABLED, false);
+    }
+
+    /**
+     * 设置车门关闭后延迟消失时间
+     */
+    public void setDoorTimeout(int seconds) {
+        prefs.edit().putInt(KEY_DOOR_TIMEOUT, seconds).apply();
+    }
+
+    public int getDoorTimeout() {
+        return prefs.getInt(KEY_DOOR_TIMEOUT, 10); // 默认10秒
+    }
+
+    /**
+     * 保存用户选择的车门联动预设选项（用于恢复具体的 RadioButton 选择）
+     * @param presetName 预设名称，如 "l6l7" 或 "boyue_l"
+     */
+    public void setDoorPresetSelection(String presetName) {
+        prefs.edit().putString(KEY_DOOR_PRESET_SELECTION, presetName).apply();
+        AppLog.d(TAG, "保存车门联动预设选择: " + presetName);
+    }
+
+    /**
+     * 获取用户选择的车门联动预设选项
+     * @return 预设名称，如 "l6l7" 或 "boyue_l"
+     */
+    public String getDoorPresetSelection() {
+        return prefs.getString(KEY_DOOR_PRESET_SELECTION, "l6l7"); // 默认返回 l6l7
+    }
+
+    /**
+     * 设置车门联动是否复用主屏悬浮窗
+     */
+    public void setDoorReuseMainFloating(boolean reuse) {
+        prefs.edit().putBoolean(KEY_DOOR_REUSE_MAIN_FLOATING, reuse).apply();
+    }
+
+    public boolean isDoorReuseMainFloating() {
+        return prefs.getBoolean(KEY_DOOR_REUSE_MAIN_FLOATING, true); // 默认复用
+    }
+
+    /**
+     * 设置车门联动副屏显示开关
+     */
+    public void setDoorSecondaryDisplayEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_DOOR_SECONDARY_DISPLAY_ENABLED, enabled).apply();
+    }
+
+    public boolean isDoorSecondaryDisplayEnabled() {
+        return prefs.getBoolean(KEY_DOOR_SECONDARY_DISPLAY_ENABLED, false); // 默认关闭
     }
 
     /**
@@ -2444,5 +2620,97 @@ public class AppConfig {
      */
     public boolean hasUpdateServerUrl() {
         return getUpdateServerUrl() != null;
+    }
+
+    // ==================== 全景影像避让配置相关方法 ====================
+
+    /**
+     * 设置全景影像避让开关
+     */
+    public void setAvmAvoidanceEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_AVM_AVOIDANCE_ENABLED, enabled).apply();
+        AppLog.d(TAG, "全景影像避让设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    /**
+     * 获取全景影像避让开关状态
+     */
+    public boolean isAvmAvoidanceEnabled() {
+        return prefs.getBoolean(KEY_AVM_AVOIDANCE_ENABLED, false);
+    }
+
+    /**
+     * 设置全景影像避让的Activity名称
+     */
+    public void setAvmAvoidanceActivity(String activityName) {
+        prefs.edit().putString(KEY_AVM_AVOIDANCE_ACTIVITY, activityName).apply();
+        AppLog.d(TAG, "全景影像避让Activity: " + activityName);
+    }
+
+    /**
+     * 获取全景影像避让的Activity名称
+     */
+    public String getAvmAvoidanceActivity() {
+        return prefs.getString(KEY_AVM_AVOIDANCE_ACTIVITY, "com.geely.avm_app.AvmRenderActivity");
+    }
+
+    // ==================== 定制键唤醒配置相关方法 ====================
+
+    /**
+     * 设置定制键唤醒开关
+     */
+    public void setCustomKeyWakeupEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_CUSTOM_KEY_WAKEUP_ENABLED, enabled).apply();
+        AppLog.d(TAG, "定制键唤醒设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    /**
+     * 获取定制键唤醒开关状态
+     */
+    public boolean isCustomKeyWakeupEnabled() {
+        return prefs.getBoolean(KEY_CUSTOM_KEY_WAKEUP_ENABLED, false);
+    }
+
+    /**
+     * 设置速度阈值（秒速 m/s）
+     */
+    public void setCustomKeySpeedThreshold(float threshold) {
+        prefs.edit().putFloat(KEY_CUSTOM_KEY_SPEED_THRESHOLD, threshold).apply();
+        AppLog.d(TAG, "定制键速度阈值: " + threshold + " m/s");
+    }
+
+    /**
+     * 获取速度阈值（秒速 m/s），默认8.34
+     */
+    public float getCustomKeySpeedThreshold() {
+        return prefs.getFloat(KEY_CUSTOM_KEY_SPEED_THRESHOLD, 8.34f);
+    }
+
+    /**
+     * 设置速度属性ID
+     */
+    public void setCustomKeySpeedPropId(int propId) {
+        prefs.edit().putInt(KEY_CUSTOM_KEY_SPEED_PROP_ID, propId).apply();
+    }
+
+    /**
+     * 获取速度属性ID，默认291504647
+     */
+    public int getCustomKeySpeedPropId() {
+        return prefs.getInt(KEY_CUSTOM_KEY_SPEED_PROP_ID, 291504647);
+    }
+
+    /**
+     * 设置按钮属性ID
+     */
+    public void setCustomKeyButtonPropId(int propId) {
+        prefs.edit().putInt(KEY_CUSTOM_KEY_BUTTON_PROP_ID, propId).apply();
+    }
+
+    /**
+     * 获取按钮属性ID，默认557872183
+     */
+    public int getCustomKeyButtonPropId() {
+        return prefs.getInt(KEY_CUSTOM_KEY_BUTTON_PROP_ID, 557872183);
     }
 }

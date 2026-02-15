@@ -390,21 +390,21 @@
                         android:orientation="vertical">
 
                         <RadioButton
-                            android:id="@+id/rb_preset_xinghan7"
+                            android:id="@+id/rb_preset_car_api"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:minHeight="40dp"
-                            android:text="26款星舰7-Logcat触发"
+                            android:text="银河E5/26款星舰7-API触发"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:buttonTint="@color/colorPrimary" />
 
                         <RadioButton
-                            android:id="@+id/rb_preset_e5"
+                            android:id="@+id/rb_preset_xinghan7"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:minHeight="40dp"
-                            android:text="银河E5-Logcat触发"
+                            android:text="26款星舰7-Logcat触发"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:buttonTint="@color/colorPrimary" />
@@ -420,21 +420,11 @@
                             android:buttonTint="@color/colorPrimary" />
 
                         <RadioButton
-                            android:id="@+id/rb_preset_car_api"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:minHeight="40dp"
-                            android:text="银河E5-API触发"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:buttonTint="@color/colorPrimary" />
-
-                        <RadioButton
                             android:id="@+id/rb_preset_l6l7"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:minHeight="40dp"
-                            android:text="银河L6/L7-API触发（由抖音@阿卜IT老师适配）"
+                            android:text="银河L6/L7（由抖音@AbuCoder适配）"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:buttonTint="@color/colorPrimary" />
@@ -444,7 +434,7 @@
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:minHeight="40dp"
-                            android:text="博越L-API触发（涛仔求来的）"
+                            android:text="博越L（涛仔求来的）"
                             android:textColor="@color/text_primary"
                             android:textSize="14sp"
                             android:buttonTint="@color/colorPrimary" />
@@ -606,6 +596,141 @@
                     android:layout_marginTop="12dp"
                     android:backgroundTint="@color/button_accent"
                     android:textColor="@color/white" />
+            </LinearLayout>
+
+            <!-- 车门联动设置 -->
+            <LinearLayout
+                android:id="@+id/ll_door_linkage_section"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:background="@color/card_background"
+                android:layout_marginBottom="16dp"
+                android:visibility="gone">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="车门联动 (左右补盲)"
+                            android:textColor="@color/text_primary"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="开启车门时自动弹出对应侧摄像头画面（复用转向联动的配置）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_door_linkage"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+            </LinearLayout>
+
+            <!-- 全景影像避让 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:background="@color/card_background"
+                android:layout_marginBottom="16dp">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="全景影像避让"
+                            android:textColor="@color/text_primary"
+                            android:textSize="20sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="EVCam本体和指定Activity在前台时自动隐藏主屏补盲窗口"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="14sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_avm_avoidance"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:id="@+id/layout_avm_avoidance_detail"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:layout_marginTop="12dp"
+                    android:visibility="gone">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="避让Activity完整类名"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp"
+                        android:layout_marginBottom="6dp" />
+
+                    <EditText
+                        android:id="@+id/et_avm_avoidance_activity"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:minHeight="48dp"
+                        android:maxLines="2"
+                        android:gravity="center_vertical"
+                        android:background="@drawable/spinner_background"
+                        android:paddingStart="12dp"
+                        android:paddingEnd="12dp"
+                        android:inputType="text"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:hint="com.geely.avm_app.AvmRenderActivity" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="填写 all 则在所有界面上主屏补盲都不显示，仅副屏正常工作"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:layout_marginTop="6dp" />
+                </LinearLayout>
             </LinearLayout>
 
             </LinearLayout> <!-- end blind_spot_sub_features_container -->
