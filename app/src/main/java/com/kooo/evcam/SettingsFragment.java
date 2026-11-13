@@ -291,6 +291,18 @@ public class SettingsFragment extends Fragment {
             }
         });
 
+        // 默认关闭的录像车辆状态水印
+        SwitchMaterial vehicleStatusSwitch = view.findViewById(R.id.switch_vehicle_status_watermark);
+        vehicleStatusSwitch.setChecked(appConfig.isVehicleStatusWatermarkEnabled());
+        vehicleStatusSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
+            appConfig.setVehicleStatusWatermarkEnabled(checked);
+            com.kooo.evcam.camera.MultiCameraManager manager =
+                    com.kooo.evcam.camera.CameraManagerHolder.getInstance().getCameraManager();
+            if (manager != null) manager.setVehicleStatusWatermarkEnabled(checked);
+            Toast.makeText(getContext(), checked ? "车辆状态水印已开启，未读取到的信号显示未知"
+                    : "车辆状态水印已关闭", Toast.LENGTH_SHORT).show();
+        });
+
         // 初始化强制 H.264 编码开关
         forceH264Switch = view.findViewById(R.id.switch_force_h264);
         if (getContext() != null && appConfig != null) {

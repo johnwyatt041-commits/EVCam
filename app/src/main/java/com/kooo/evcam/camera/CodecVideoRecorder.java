@@ -151,6 +151,22 @@ public class CodecVideoRecorder {
 
     // 时间水印设置
     private boolean watermarkEnabled = false;
+    private volatile boolean vehicleStatusWatermarkEnabled;
+
+    public void setVehicleStatusWatermarkEnabled(boolean enabled) {
+        vehicleStatusWatermarkEnabled = enabled;
+        updateVehicleStatusWatermark();
+    }
+
+    private void updateVehicleStatusWatermark() {
+        Handler handler = encoderHandler;
+        if (handler != null) handler.post(() -> {
+            if (eglEncoder != null) {
+                eglEncoder.setVehicleStatusWatermarkEnabled(
+                        vehicleStatusWatermarkEnabled && isRecording.get() && !isReleased);
+            }
+        });
+    }
 
     // 注意：帧同步变量已移除，帧处理现在直接在 onFrameAvailable 回调中完成
 
@@ -514,6 +530,7 @@ public class CodecVideoRecorder {
         lastFileSize = 0;
         
         isRecording.set(true);
+        updateVehicleStatusWatermark();
 
         // 注意：不再使用单独的编码循环
         // 帧的处理直接在 onFrameAvailable 回调中完成（该回调在 encoderHandler 上执行）
@@ -587,6 +604,7 @@ public class CodecVideoRecorder {
             Runnable stopTask = () -> {
                 try {
                     encoderHandler.removeCallbacks(delayedDrain);
+                    if (eglEncoder != null) eglEncoder.setVehicleStatusWatermarkEnabled(false);
                     // 发送结束信号给编码器
                     if (encoder != null) {
                         try {

@@ -24,6 +24,54 @@ import io.grpc.stub.StreamObserver;
 public class VhalSignalObserver {
     private static final String TAG = "VhalSignalObserver";
 
+    /** Optional raw consumer; inactive unless a recording status watermark is enabled. */
+    public interface PropertyListener {
+        void onBatch(byte[] bytes);
+        void onConnectionChanged(boolean connected);
+    }
+    private volatile PropertyListener propertyListener;
+    private static final java.util.List<VhalSignalObserver> liveObservers = new java.util.ArrayList<>();
+    private static volatile Runnable observerLifecycleListener;
+
+    public void setPropertyListener(PropertyListener listener) { propertyListener = listener; }
+
+    public static void setObserverLifecycleListener(Runnable listener) {
+        observerLifecycleListener = listener;
+    }
+
+    public static VhalSignalObserver findRunningObserverExcept(VhalSignalObserver excluded) {
+        synchronized (liveObservers) {
+            for (VhalSignalObserver observer : liveObservers) {
+                if (observer != excluded && observer.running) return observer;
+            }
+        }
+        return null;
+    }
+
+    private void notifyObserverLifecycle() {
+        Runnable callback = observerLifecycleListener;
+        if (callback != null) callback.run();
+    }
+
+    /** One initial snapshot when attaching to a stream already used by blind-spot monitoring. */
+    public void requestPropertySnapshot() {
+        ManagedChannel channel = grpcChannel;
+        if (!running || channel == null) return;
+        new Thread(() -> {
+            try {
+                MethodDescriptor<byte[], byte[]> method = MethodDescriptor.<byte[], byte[]>newBuilder()
+                        .setType(MethodDescriptor.MethodType.UNARY)
+                        .setFullMethodName(VhalNative.getSendAllMethod())
+                        .setRequestMarshaller(ByteMarshaller.INSTANCE)
+                        .setResponseMarshaller(ByteMarshaller.INSTANCE).build();
+                ClientCalls.blockingUnaryCall(channel, method,
+                        CallOptions.DEFAULT.withDeadlineAfter(2, TimeUnit.SECONDS), new byte[0]);
+            } catch (Exception | UnsatisfiedLinkError e) {
+                AppLog.w(TAG, "Optional vehicle snapshot unavailable: " + e.getMessage());
+            }
+        }, "VehicleStatusSnapshot").start();
+    }
+
     /**
      * 转向灯信号回调接口
      */
@@ -60,7 +108,7 @@ public class VhalSignalObserver {
     private volatile float currentSpeed = 0f;
     private volatile int lastButtonState = -1;
 
-    private ManagedChannel grpcChannel;
+    private volatile ManagedChannel grpcChannel;
     private Thread connectThread;
     private volatile boolean running = false;
     private volatile boolean connected = false;
@@ -126,6 +174,8 @@ public class VhalSignalObserver {
         connectThread = new Thread(this::connectLoop, "VehicleApiConnect");
         connectThread.setDaemon(true);
         connectThread.start();
+        synchronized (liveObservers) { liveObservers.add(this); }
+        notifyObserverLifecycle();
     }
 
     /**
@@ -133,11 +183,25 @@ public class VhalSignalObserver {
      */
     public void stop() {
         running = false;
+        synchronized (liveObservers) { liveObservers.remove(this); }
+        notifyObserverLifecycle();
         disconnect();
         if (connectThread != null) {
             connectThread.interrupt();
             connectThread = null;
         }
+    }
+
+    /** Detach immediately; perform bounded channel shutdown away from GL/callback threads. */
+    public void stopAsync() {
+        running = false;
+        propertyListener = null;
+        synchronized (liveObservers) { liveObservers.remove(this); }
+        notifyObserverLifecycle();
+        Thread previous = connectThread;
+        connectThread = null;
+        if (previous != null) previous.interrupt();
+        new Thread(this::disconnect, "VehicleApiShutdown").start();
     }
 
     /**
@@ -355,6 +419,8 @@ public class VhalSignalObserver {
      * 处理一批属性值更新（由 native 层解码）
      */
     private void processPropertyBatch(byte[] data) {
+        PropertyListener consumer = propertyListener;
+        if (running && consumer != null) consumer.onBatch(data);
         if (!VhalNative.isLibraryLoaded()) {
             AppLog.w(TAG, "Native library not loaded, skipping property batch processing");
             return;
@@ -499,6 +565,8 @@ public class VhalSignalObserver {
     }
 
     private void notifyConnectionState(boolean isConnected) {
+        PropertyListener consumer = propertyListener;
+        if (consumer != null) consumer.onConnectionChanged(isConnected);
         mainHandler.post(() -> {
             if (listener != null) {
                 listener.onConnectionStateChanged(isConnected);

@@ -185,6 +185,7 @@ public class AppConfig {
 
     // 时间角标配置
     private static final String KEY_TIMESTAMP_WATERMARK_ENABLED = "timestamp_watermark_enabled";  // 时间角标开关
+    private static final String KEY_VEHICLE_STATUS_WATERMARK = "vehicle_status_watermark";
 
     // 视频编码器配置
     private static final String KEY_FORCE_H264_ENCODING = "force_h264_encoding";  // 强制使用 H.264 编码器（关闭默认使用 H.265/HEVC）
@@ -2531,6 +2532,14 @@ public class AppConfig {
     public void setTimestampWatermarkEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_TIMESTAMP_WATERMARK_ENABLED, enabled).apply();
         AppLog.d(TAG, "时间角标设置: " + (enabled ? "启用" : "禁用"));
+    }
+
+    public boolean isVehicleStatusWatermarkEnabled() {
+        return prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false);
+    }
+
+    public void setVehicleStatusWatermarkEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_VEHICLE_STATUS_WATERMARK, enabled).apply();
     }
     
     /**

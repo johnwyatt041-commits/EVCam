@@ -140,6 +140,27 @@ public class EglSurfaceEncoder {
 
     // 时间水印相关
     private boolean watermarkEnabled = false;
+    private VehicleStatusWatermark vehicleStatusWatermark;
+
+    /** Must be called on the encoder thread with this EGL context current. */
+    public void setVehicleStatusWatermarkEnabled(boolean enabled) {
+        if (isReleased || !isInitialized) return;
+        if (!enabled && vehicleStatusWatermark == null) return;
+        if (!enabled) {
+            VehicleStatusWatermark previous = vehicleStatusWatermark;
+            vehicleStatusWatermark = null;
+            try { makeCurrent(); }
+            catch (RuntimeException e) { AppLog.w(TAG, "Closing status watermark after EGL loss"); }
+            finally { previous.close(); }
+        } else if (vehicleStatusWatermark == null) {
+            try {
+                makeCurrent();
+                vehicleStatusWatermark = new VehicleStatusWatermark();
+            } catch (RuntimeException e) {
+                AppLog.e(TAG, "Vehicle status watermark unavailable; recording continues", e);
+            }
+        }
+    }
     private int watermarkProgram;
     private int watermarkTextureId;
     private int watermarkTextureHandle;
@@ -262,6 +283,16 @@ public class EglSurfaceEncoder {
                 drawFrameWithWatermark();
             } else {
                 drawFrameWithoutWatermark();
+            }
+            if (vehicleStatusWatermark != null) {
+                try { vehicleStatusWatermark.draw(width, height); }
+                catch (RuntimeException e) {
+                    AppLog.e(TAG, "Disabling failed vehicle overlay; recording continues", e);
+                    vehicleStatusWatermark.close();
+                    vehicleStatusWatermark = null;
+                    GLES20.glDisable(GLES20.GL_BLEND);
+                    GLES20.glViewport(0, 0, width, height);
+                }
             }
             EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs);
             return EGL14.eglSwapBuffers(eglDisplay, eglSurface);
@@ -438,6 +469,11 @@ public class EglSurfaceEncoder {
         }
 
         AppLog.d(TAG, "Camera " + cameraId + " Releasing EglSurfaceEncoder");
+
+        if (vehicleStatusWatermark != null) {
+            vehicleStatusWatermark.close();
+            vehicleStatusWatermark = null;
+        }
 
         isReleased = true;
         isInitialized = false;

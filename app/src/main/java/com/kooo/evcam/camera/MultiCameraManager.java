@@ -37,7 +37,22 @@ public class MultiCameraManager {
     private final Context context;
     private final Map<String, SingleCamera> cameras = new LinkedHashMap<>();
     private final Map<String, VideoRecorder> recorders = new LinkedHashMap<>();
-    private final Map<String, CodecVideoRecorder> codecRecorders = new LinkedHashMap<>();  // 软编码录制器
+    private final Map<String, CodecVideoRecorder> codecRecorders = new java.util.concurrent.ConcurrentHashMap<>();
+    private volatile Boolean vehicleStatusWatermarkOverride;
+
+    /** Applies on each recorder's own GL thread; never rebuilds a camera session. */
+    public synchronized void setVehicleStatusWatermarkEnabled(boolean enabled) {
+        vehicleStatusWatermarkOverride = enabled;
+        for (CodecVideoRecorder recorder : codecRecorders.values()) {
+            recorder.setVehicleStatusWatermarkEnabled(enabled);
+        }
+    }
+
+    private synchronized void registerCodecRecorder(String key, CodecVideoRecorder recorder) {
+        codecRecorders.put(key, recorder);
+        Boolean override = vehicleStatusWatermarkOverride;
+        if (override != null) recorder.setVehicleStatusWatermarkEnabled(override);
+    }
     private final List<String> activeCameraKeys = new ArrayList<>();
     private int maxOpenCameras = DEFAULT_MAX_OPEN_CAMERAS;
 
@@ -1290,6 +1305,7 @@ public class MultiCameraManager {
 
             // 设置时间水印（从配置读取，使用方法开头已创建的 appConfig）
             codecRecorder.setWatermarkEnabled(appConfig.isTimestampWatermarkEnabled());
+            codecRecorder.setVehicleStatusWatermarkEnabled(appConfig.isVehicleStatusWatermarkEnabled());
 
             // 设置回调
             codecRecorder.setCallback(new RecordCallback() {
@@ -1380,7 +1396,7 @@ public class MultiCameraManager {
             android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
             camera.setRecordSurface(recordSurface, true);  // Codec 模式
 
-            codecRecorders.put(key, codecRecorder);
+            registerCodecRecorder(key, codecRecorder);
         }
 
         if (!prepareSuccess) {
@@ -1621,6 +1637,7 @@ public class MultiCameraManager {
             codecRecorder.setQualityLevel(3);  // 设置最高画质
             codecRecorder.setForceH264(appConfig.isForceH264Encoding());
             codecRecorder.setWatermarkEnabled(appConfig.isTimestampWatermarkEnabled());
+            codecRecorder.setVehicleStatusWatermarkEnabled(appConfig.isVehicleStatusWatermarkEnabled());
 
             // 准备录制
             String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
@@ -1635,7 +1652,7 @@ public class MultiCameraManager {
             android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
             camera.setRecordSurface(recordSurface, true);
 
-            codecRecorders.put(key, codecRecorder);
+            registerCodecRecorder(key, codecRecorder);
         }
 
         if (!prepareSuccess) {
