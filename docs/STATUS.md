@@ -11,6 +11,10 @@
 - Android 11 x86 模拟器实际三色 Surface→GL→codec→MP4，覆盖 A 三编码器与 B 合成单编码器、多次关键帧分段、首帧关键帧、PTS 从零严格递增、停止完成无 pending；每版另做车辆状态水印实际 GPU 绘制。UI 检查 A/B 设置说明、状态水印默认关闭及 B 合成文件回放/双击保持单视频。证据 `work/recording-ab/`。
 - Release 保留原 ARM64 库。模拟器仅使用去掉不兼容库的 Debug 副本和低分辨率软件 H.264；**没有实车帧率/CPU/PSS/温度数据，不能称卡顿已经消失**。真实 Camera2 多路、长时间存储、飞书端到端、补盲/HUD、VHAL 踏板字段仍需实车验证。
 - 测试步骤与架构限制见 [A/B 试录说明](RECORDING_AB_TEST.md)，交付清单与哈希见 `outputs/EVCam-Recording-AB-notes.md`。旧 GitHub 发布不变；上次外部推送自动审批拒绝未获新授权，本次仅交付本地 APK。
+- 应用源码提交 `f8a8e6ee60279925f575931da67497c737ce6a79`，提交后重建日志 `work/verification/recording-ab-source-commit-release.log`，两 APK 内嵌 revision 与此一致。后续交付文档提交不改变 APK 代码。
+- A：`outputs/EVCam-A-Independent-1.6.6-test-11140403.apk`，25,032,954 字节，SHA-256 `9914ae269b957cf9659b72f9033f417c6cedee3dfb27f982e607623c7d25550e`。
+- B：`outputs/EVCam-B-Composite-1.6.6-test-11140403.apk`，25,032,954 字节，SHA-256 `cecf479f981564e3bc69dc08b9fd99ef8aa919a18d9633a174157fbda1a69a21`。
+- 两 APK v2 签名通过，原 ARM64 库字节一致，无已删除宣传资产；哈希、清单和从 UI 基线起的源码补丁已导出。专用模拟器及 5039 adb 服务已停止，没有操作物理设备。
 
 ## 当前基线
 
