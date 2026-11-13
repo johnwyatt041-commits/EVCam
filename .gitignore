@@ -10,3 +10,8 @@ local.properties
 *.log
 captures/
 .trae/
+
+# Local project workspace (migrated from the previous chat folder)
+/outputs/
+/work/
+/.worktrees/

@@ -1,5 +1,14 @@
 # AGENTS.md
 
+## E5 项目交接入口（2026-11-14）
+
+- 当前独立项目根目录：`E:\GPT\EVCam`，本文件与 `.git`、`app/` 同级。先读 `START_HERE.md`、`docs/REQUIREMENTS.md`、`docs/STATUS.md`，按任务再读 `docs/DEVELOPMENT.md` 与 `docs/ARCHITECTURE.md`。
+- 多个对话并行修改必须遵守 `docs/COLLABORATION.md`：不同工作树和任务分支，明确负责范围；共享同一工作目录不等于不同对话自动知道彼此进度。
+- 本用户的范围是 E5 日常三路录像、飞书四路远程控制、转向补盲和 HUD。不要恢复已停用的功能、个人二维码或联系方式；不要删除 HUD 的副屏/EVCC 或 Wi-Fi/ESP32 输出。
+- 本次迁移仅整理文档和本地开发路径，已发布应用仍为 `1.6.6-test-11140102`。纯文档/搬迁不改应用版本；后续应用代码变更仍按下文更新时间戳。
+- `outputs/` 是保留的交付文件，`work/` 是本机工具、历史脚本和证据，均不纳入 Git。历史改写源码脚本不是可重复执行的构建步骤，不要重新运行。
+- 下文保留上游架构说明；其中钉钉/Telegram 等是历史能力，本 E5 分支以 `AppFeatures.java` 和需求文档为准。MediaCodec 路径也可以使用硬件编码器，不能仅据此判定 CPU 软件编码或处理器性能不足。
+
 This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
 
 ## Project Overview
