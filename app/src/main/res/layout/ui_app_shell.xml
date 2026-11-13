@@ -1,0 +1,140 @@
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="horizontal"
+    android:background="@color/page_background">
+    <LinearLayout
+        android:layout_width="@dimen/ui_rail_width"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:padding="8dp"
+        android:background="@color/nav_background">
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:gravity="center"
+            android:text="EV"
+            android:fontFamily="sans-serif-medium"
+            android:textSize="24sp"
+            android:textColor="@color/button_accent" />
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:fillViewport="false"
+            android:scrollbars="none">
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical">
+                <TextView
+                    android:id="@+id/ui_nav_recording"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="录制"
+                    android:drawableTop="@drawable/ic_nav_recording"
+                    android:contentDescription="录制" />
+                <TextView
+                    android:id="@+id/ui_nav_playback"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="视频"
+                    android:drawableTop="@drawable/ic_nav_playback"
+                    android:contentDescription="视频" />
+                <TextView
+                    android:id="@+id/ui_nav_photo"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="照片"
+                    android:drawableTop="@drawable/ic_nav_photo"
+                    android:contentDescription="照片" />
+                <TextView
+                    android:id="@+id/ui_nav_blind_spot"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="补盲"
+                    android:drawableTop="@drawable/ic_nav_remote"
+                    android:contentDescription="补盲" />
+                <TextView
+                    android:id="@+id/ui_nav_feishu"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="飞书"
+                    android:drawableTop="@drawable/ic_nav_feishu"
+                    android:contentDescription="飞书" />
+                <TextView
+                    android:id="@+id/ui_nav_settings"
+                    style="@style/Widget.EVCam.Navigation"
+                    android:text="设置"
+                    android:drawableTop="@drawable/ic_nav_settings"
+                    android:contentDescription="设置" />
+            </LinearLayout>
+        </ScrollView>
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="36dp"
+            android:gravity="center"
+            android:text="EVCam"
+            android:textSize="11sp"
+            android:textColor="@color/text_hint" />
+    </LinearLayout>
+    <View
+        android:layout_width="1dp"
+        android:layout_height="match_parent"
+        android:background="@color/ui_border" />
+    <LinearLayout
+        android:layout_width="0dp"
+        android:layout_weight="1"
+        android:layout_height="match_parent"
+        android:orientation="vertical">
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="64dp"
+            android:paddingStart="@dimen/ui_page_padding"
+            android:paddingEnd="@dimen/ui_page_padding"
+            android:gravity="center_vertical">
+            <Button
+                android:id="@+id/ui_back"
+                android:layout_width="wrap_content"
+                android:minWidth="80dp"
+                android:paddingStart="16dp"
+                android:paddingEnd="16dp"
+                android:singleLine="true"
+                android:layout_height="48dp"
+                android:text="返回"
+                android:visibility="gone"
+                android:layout_marginEnd="12dp" />
+            <TextView
+                android:id="@+id/ui_page_title"
+                android:layout_width="0dp"
+                android:layout_weight="1"
+                android:layout_height="wrap_content"
+                android:text="录制"
+                android:textColor="@color/text_primary"
+                android:textSize="22sp"
+                android:fontFamily="sans-serif-medium"
+                android:maxLines="1"
+                android:ellipsize="end" />
+            <Button
+                android:id="@+id/ui_edit_layout"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:layout_marginEnd="10dp"
+                android:text="编辑布局" />
+            <Button
+                android:id="@+id/ui_preview_toggle"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="开启预览"
+                android:layout_marginEnd="10dp" />
+            <Button
+                android:id="@+id/ui_theme"
+                android:layout_width="wrap_content"
+                android:layout_height="48dp"
+                android:text="外观"
+                android:contentDescription="切换深色或浅色外观" />
+        </LinearLayout>
+        <FrameLayout
+            android:id="@+id/ui_content"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+    </LinearLayout>
+</LinearLayout>

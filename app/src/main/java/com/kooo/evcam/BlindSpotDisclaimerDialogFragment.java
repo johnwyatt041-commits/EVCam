@@ -1,8 +1,6 @@
 package com.kooo.evcam;
 
 import android.app.Dialog;
-import android.content.res.AssetManager;
-import android.graphics.BitmapFactory;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -15,7 +13,6 @@ import android.text.style.StyleSpan;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
-import android.widget.ImageView;
 import android.widget.TextView;
 
 import android.util.DisplayMetrics;
@@ -43,14 +40,12 @@ public class BlindSpotDisclaimerDialogFragment extends DialogFragment {
 
         TextView tvDisclaimer = view.findViewById(R.id.tv_disclaimer);
         TextView tvCountdown = view.findViewById(R.id.tv_countdown);
-        ImageView img = view.findViewById(R.id.img_douyin);
         Button btnAccept = view.findViewById(R.id.btn_accept);
 
         String markdown = readRawText(R.raw.blind_spot_disclaimer);
         SpannableString styled = buildStyledText(markdown);
         tvDisclaimer.setText(styled);
 
-        loadAssetImage(img, "douyin.jpg");
 
         btnAccept.setEnabled(false);
         updateCountdownViews(tvCountdown, btnAccept);
@@ -182,15 +177,6 @@ public class BlindSpotDisclaimerDialogFragment extends DialogFragment {
         return ss;
     }
 
-    private void loadAssetImage(ImageView imageView, String assetName) {
-        try {
-            AssetManager am = requireContext().getAssets();
-            try (InputStream is = am.open(assetName)) {
-                imageView.setImageBitmap(BitmapFactory.decodeStream(is));
-            }
-        } catch (Exception e) {
-            imageView.setVisibility(View.GONE);
-        }
-    }
+
 }
 

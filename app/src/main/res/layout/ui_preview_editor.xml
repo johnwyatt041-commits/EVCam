@@ -1,0 +1,50 @@
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:padding="12dp"
+    android:layout_marginBottom="8dp"
+    android:background="@drawable/ui_card">
+<TextView
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:text="拖动画面移动位置，拖动右下角调整大小；保存后下次自动使用。"
+    android:textSize="14sp"
+    android:textColor="@color/text_secondary"
+    android:layout_marginBottom="8dp" />
+<LinearLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="horizontal"
+    android:gravity="end|center_vertical">
+<Button
+    android:id="@+id/ui_layout_presets"
+    android:layout_width="wrap_content"
+    android:layout_height="48dp"
+    android:text="选择排版"
+    android:layout_marginEnd="8dp" />
+<Button
+    android:id="@+id/ui_layout_reset"
+    android:layout_width="wrap_content"
+    android:layout_height="48dp"
+    android:text="恢复默认"
+    android:layout_marginEnd="8dp" />
+<Space
+    android:layout_width="0dp"
+    android:layout_height="1dp"
+    android:layout_weight="1" />
+<Button
+    android:id="@+id/ui_layout_cancel"
+    android:layout_width="wrap_content"
+    android:layout_height="48dp"
+    android:text="取消"
+    android:layout_marginEnd="8dp" />
+<Button
+    android:id="@+id/ui_layout_save"
+    android:layout_width="wrap_content"
+    android:layout_height="48dp"
+    android:text="保存布局"
+    android:backgroundTint="@color/button_accent"
+    android:textColor="@color/ui_on_accent" />
+</LinearLayout></LinearLayout>

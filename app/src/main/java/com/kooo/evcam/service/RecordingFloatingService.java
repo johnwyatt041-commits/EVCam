@@ -278,6 +278,11 @@ public class RecordingFloatingService extends Service {
     // ========== 悬浮窗管理 ==========
 
     private void showFloatingWindow() {
+        MainActivity main = MainActivity.getInstance();
+        if (main != null && main.isInterfaceInForeground()) {
+            hideFloatingWindow();
+            return;
+        }
         if (floatingContainer != null) {
             return; // 已经显示
         }

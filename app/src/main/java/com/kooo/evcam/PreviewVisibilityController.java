@@ -19,11 +19,11 @@ final class PreviewVisibilityController {
             if (texture == null || !(texture.getParent() instanceof ViewGroup)) continue;
             ViewGroup parent = (ViewGroup) texture.getParent();
             TextView placeholder = new TextView(texture.getContext());
-            placeholder.setText("实时预览已关闭\n点按开启预览");
-            placeholder.setTextColor(Color.LTGRAY);
-            placeholder.setTextSize(16);
+            placeholder.setText("预览已关闭\n点按查看画面");
+            placeholder.setTextColor(androidx.core.content.ContextCompat.getColor(texture.getContext(), R.color.preview_placeholder_text));
+            placeholder.setTextSize(14);
             placeholder.setGravity(Gravity.CENTER);
-            placeholder.setBackgroundColor(Color.BLACK);
+            placeholder.setBackgroundColor(androidx.core.content.ContextCompat.getColor(texture.getContext(), R.color.preview_background));
             placeholder.setOnClickListener(v -> enablePreview.run());
             parent.addView(placeholder, parent.indexOfChild(texture) + 1,
                     new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,

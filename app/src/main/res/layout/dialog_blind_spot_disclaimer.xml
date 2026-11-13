@@ -1,11 +1,11 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:padding="18dp"
     android:background="@color/card_background">
-
     <TextView
         android:id="@+id/tv_title"
         android:layout_width="match_parent"
@@ -17,18 +17,15 @@
         android:textAlignment="center"
         android:gravity="center"
         android:layout_marginBottom="12dp" />
-
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
         android:fillViewport="true">
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical">
-
             <TextView
                 android:id="@+id/tv_disclaimer"
                 android:layout_width="match_parent"
@@ -38,16 +35,8 @@
                 android:textAlignment="center"
                 android:gravity="center"
                 android:lineSpacingExtra="4dp" />
-
-            <ImageView
-                android:id="@+id/img_douyin"
-                android:layout_width="match_parent"
-                android:layout_height="360dp"
-                android:layout_marginTop="14dp"
-                android:scaleType="fitCenter" />
         </LinearLayout>
     </ScrollView>
-
     <TextView
         android:id="@+id/tv_countdown"
         android:layout_width="match_parent"
@@ -58,7 +47,6 @@
         android:textAlignment="center"
         android:gravity="center"
         android:layout_marginTop="12dp" />
-
     <Button
         android:id="@+id/btn_accept"
         android:layout_width="match_parent"
@@ -70,6 +58,4 @@
         android:enabled="false"
         android:backgroundTint="@color/button_background"
         android:textColor="@color/button_text" />
-
 </LinearLayout>
-

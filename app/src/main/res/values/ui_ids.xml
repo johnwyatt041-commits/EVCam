@@ -1,0 +1,11 @@
+<resources>
+    <item
+        name="ui_screen_title"
+        type="id" />
+    <item
+        name="btn_playback"
+        type="id" />
+    <item
+        name="btn_photos"
+        type="id" />
+</resources>

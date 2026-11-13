@@ -2216,6 +2216,11 @@ public class MultiCameraManager {
         return isRecording;
     }
 
+    /** UI recreation must also wait for final frame draining and file finalization. */
+    public boolean isStoppingRecording() {
+        return stoppingRecording;
+    }
+
     /**
      * 拍照（所有活动的摄像头顺序拍照，避免资源耗尽）
      */

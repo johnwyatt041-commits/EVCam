@@ -1,317 +1,209 @@
-<?xml version="1.0" encoding="utf-8"?>
-<androidx.drawerlayout.widget.DrawerLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version='1.0' encoding='utf-8'?>
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/drawer_layout"
     android:layout_width="match_parent"
-    android:layout_height="match_parent"
-    tools:context=".MainActivity">
-
-    <!-- Main content container -->
+    android:layout_height="match_parent">
     <FrameLayout
         android:layout_width="match_parent"
         android:layout_height="match_parent">
-
-        <!-- Recording interface -->
         <LinearLayout
             android:id="@+id/main"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
-            android:orientation="horizontal"
-            android:background="@color/menu_background">
-
-    <!-- 左侧：前后摄像头垂直排列 (横向1280x800) -->
-    <LinearLayout
-        android:layout_width="215dp"
-        android:layout_height="match_parent"
-        android:layout_weight="16"
-        android:orientation="vertical">
-
-            <!-- 前摄像头 -->
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_marginStart="0dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginEnd="16dp"
-                android:layout_marginBottom="8dp"
-                android:layout_weight="1.0"
-                android:gravity="center">
-
-                <com.kooo.evcam.AutoFitTextureView
-                    android:id="@+id/texture_front"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="center" />
-
-                <TextView
-                    android:id="@+id/label_front"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_gravity="top|start"
-                    android:layout_marginStart="15dp"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/camera_label_background"
-                    android:gravity="center"
-                    android:text="前"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp" />
-            </FrameLayout>
-
-            <!-- 后摄像头 -->
-            <FrameLayout
-                android:layout_width="match_parent"
-                android:layout_height="0dp"
-                android:layout_marginStart="0dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginEnd="16dp"
-                android:layout_marginBottom="2dp"
-                android:layout_weight="1.0"
-                android:clipChildren="true"
-                android:gravity="center">
-
-                <com.kooo.evcam.AutoFitTextureView
-                    android:id="@+id/texture_back"
-                    android:layout_width="match_parent"
-                    android:layout_height="match_parent"
-                    android:layout_gravity="top"
-                    android:layout_marginBottom="-16dp" />
-
-                <TextView
-                    android:id="@+id/label_back"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_gravity="top|start"
-                    android:layout_marginStart="15dp"
-                    android:layout_marginTop="8dp"
-                    android:background="@drawable/camera_label_background"
-                    android:gravity="center"
-                    android:text="后"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp" />
-            </FrameLayout>
-        </LinearLayout>
-
-        <!-- 右侧：上方按钮区域，下方左右摄像头 -->
-        <LinearLayout
-            android:layout_width="0dp"
-            android:layout_height="match_parent"
-            android:layout_weight="24"
-            android:orientation="vertical">
-
-            <!-- 按钮区域 -->
+            android:orientation="vertical"
+            android:paddingHorizontal="@dimen/ui_page_padding"
+            android:paddingBottom="16dp"
+            android:background="@color/page_background">
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="8dp"
-                android:layout_marginTop="2dp"
-                android:gravity="center">
-
+                android:orientation="horizontal"
+                android:gravity="center_vertical"
+                android:padding="16dp"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/ui_card">
                 <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_weight="1"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical">
+                    <TextView
+                        android:id="@+id/ui_recording_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="待机"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:fontFamily="sans-serif-medium" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="预览与录像独立控制"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp" />
+                </LinearLayout>
+                <TextView
+                    android:id="@+id/tv_recording_stats"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:orientation="horizontal"
-                    android:gravity="center">
-
-                    <Button
-                        android:id="@+id/btn_menu"
-                        android:layout_width="120dp"
-                        android:layout_height="120dp"
-                        android:layout_margin="20dp"
-                        android:text="☰"
-                        android:textSize="40sp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text"
-                        android:elevation="4dp"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        app:cornerRadius="12dp" />
-
-                    <Button
-                        android:id="@+id/btn_start_record"
-                        android:layout_width="120dp"
-                        android:layout_height="120dp"
-                        android:layout_margin="20dp"
-                        android:text="○"
-                        android:textSize="52sp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="#FF0000"
-                        android:elevation="4dp"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        app:cornerRadius="12dp" />
-
-                    <Button
-                        android:id="@+id/btn_take_photo"
-                        android:layout_width="120dp"
-                        android:layout_height="120dp"
-                        android:layout_margin="20dp"
-                        android:text="◉"
-                        android:textSize="48sp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text"
-                        android:elevation="4dp"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        app:cornerRadius="12dp" />
-
-                    <Button
-                        android:id="@+id/btn_exit"
-                        android:layout_width="120dp"
-                        android:layout_height="120dp"
-                        android:layout_margin="20dp"
-                        android:text="✕"
-                        android:textSize="48sp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text"
-                        android:elevation="4dp"
-                        android:insetTop="0dp"
-                        android:insetBottom="0dp"
-                        app:cornerRadius="12dp" />
-                </LinearLayout>
+                    android:layout_marginEnd="16dp"
+                    android:text="00:00 / 1"
+                    android:textColor="@color/text_primary"
+                    android:textSize="16sp"
+                    android:fontFamily="monospace"
+                    android:visibility="gone" />
+                <Button
+                    android:id="@+id/btn_take_photo"
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:text="拍照"
+                    android:layout_marginEnd="10dp" />
+                <Button
+                    android:id="@+id/btn_start_record"
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:minWidth="128dp"
+                    android:text="开始录制"
+                    android:backgroundTint="@color/ui_danger"
+                    android:textColor="#FFFFFF"
+                    android:layout_marginEnd="10dp" />
+                <Button
+                    android:id="@+id/btn_exit"
+                    android:layout_width="wrap_content"
+                    android:layout_height="52dp"
+                    android:text="退出" />
             </LinearLayout>
-
-            <!-- 左右摄像头水平排列 -->
-            <LinearLayout
+            <FrameLayout
+                android:id="@+id/ui_preview_editor_host"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:visibility="gone" />
+            <com.kooo.evcam.ui.EditablePreviewLayout
+                android:id="@+id/ui_preview_layout"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
-                android:layout_weight="1"
-                android:orientation="horizontal">
-
-            <!-- 左摄像头（逆时针旋转90度） -->
-            <FrameLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_marginStart="12dp"
-                android:layout_marginEnd="8dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="0dp"
-                android:gravity="center">
-
-                <com.kooo.evcam.AutoFitTextureView
-                    android:id="@+id/texture_left"
+                android:layout_weight="1">
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:layout_gravity="bottom" />
-
-                <TextView
-                    android:id="@+id/label_left"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_gravity="bottom|start"
-                    android:layout_marginStart="15dp"
-                    android:layout_marginBottom="8dp"
-                    android:background="@drawable/camera_label_background"
-                    android:gravity="center"
-                    android:text="左"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp" />
-            </FrameLayout>
-
-            <!-- 右摄像头（顺时针旋转90度） -->
-            <FrameLayout
-                android:layout_width="0dp"
-                android:layout_height="match_parent"
-                android:layout_weight="1"
-                android:layout_marginStart="8dp"
-                android:layout_marginEnd="0dp"
-                android:layout_marginTop="2dp"
-                android:layout_marginBottom="0dp"
-                android:gravity="center">
-
-                <com.kooo.evcam.AutoFitTextureView
-                    android:id="@+id/texture_right"
+                    android:background="@drawable/ui_card"
+                    android:id="@+id/ui_preview_frame_left"
+                    android:tag="left">
+                    <com.kooo.evcam.AutoFitTextureView
+                        android:id="@+id/texture_left"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center" />
+                    <TextView
+                        android:id="@+id/label_left"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="6dp"
+                        android:background="@drawable/camera_label_background"
+                        android:text="左侧"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </FrameLayout>
+                <FrameLayout
                     android:layout_width="match_parent"
                     android:layout_height="match_parent"
-                    android:layout_gravity="bottom" />
-
-                <TextView
-                    android:id="@+id/label_right"
-                    android:layout_width="40dp"
-                    android:layout_height="40dp"
-                    android:layout_gravity="bottom|start"
-                    android:layout_marginStart="15dp"
-                    android:layout_marginBottom="8dp"
-                    android:background="@drawable/camera_label_background"
-                    android:gravity="center"
-                    android:text="右"
-                    android:textColor="#FFFFFF"
-                    android:textSize="16sp" />
-            </FrameLayout>
-            </LinearLayout>
+                    android:background="@drawable/ui_card"
+                    android:id="@+id/ui_preview_frame_front"
+                    android:tag="front">
+                    <com.kooo.evcam.AutoFitTextureView
+                        android:id="@+id/texture_front"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center" />
+                    <TextView
+                        android:id="@+id/label_front"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="6dp"
+                        android:background="@drawable/camera_label_background"
+                        android:text="前方"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </FrameLayout>
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/ui_card"
+                    android:id="@+id/ui_preview_frame_back"
+                    android:tag="back">
+                    <com.kooo.evcam.AutoFitTextureView
+                        android:id="@+id/texture_back"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center" />
+                    <TextView
+                        android:id="@+id/label_back"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="6dp"
+                        android:background="@drawable/camera_label_background"
+                        android:text="后方"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </FrameLayout>
+                <FrameLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:background="@drawable/ui_card"
+                    android:id="@+id/ui_preview_frame_right"
+                    android:tag="right">
+                    <com.kooo.evcam.AutoFitTextureView
+                        android:id="@+id/texture_right"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center" />
+                    <TextView
+                        android:id="@+id/label_right"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="top|start"
+                        android:layout_margin="12dp"
+                        android:paddingHorizontal="12dp"
+                        android:paddingVertical="6dp"
+                        android:background="@drawable/camera_label_background"
+                        android:text="右侧"
+                        android:textColor="#FFFFFF"
+                        android:textSize="13sp" />
+                </FrameLayout>
+            </com.kooo.evcam.ui.EditablePreviewLayout>
         </LinearLayout>
-    </LinearLayout>
-
-        <!-- 录制状态显示（右上角） -->
-        <TextView
-            android:id="@+id/tv_recording_stats"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_gravity="top|end"
-            android:layout_marginTop="15dp"
-            android:layout_marginEnd="16dp"
-            android:background="@drawable/camera_label_background"
-            android:paddingStart="12dp"
-            android:paddingEnd="12dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:text="00:00 / 1"
-            android:textColor="#FFFFFF"
-            android:textSize="18sp"
-            android:visibility="gone" />
-
-        <!-- 调试信息覆盖层（左上角，连点5下空白处显示） -->
         <TextView
             android:id="@+id/tv_debug_overlay"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="top|start"
-            android:layout_marginTop="15dp"
-            android:layout_marginStart="16dp"
-            android:background="@drawable/camera_label_background"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="6dp"
-            android:paddingBottom="6dp"
-            android:text=""
-            android:textColor="#AAFFFFFF"
-            android:textSize="12sp"
-            android:fontFamily="monospace"
-            android:visibility="gone" />
-
-        <!-- Fragment container for playback -->
+            android:visibility="gone"
+            android:textColor="@color/text_secondary"
+            android:textSize="12sp" />
         <FrameLayout
             android:id="@+id/fragment_container"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:visibility="gone" />
-
     </FrameLayout>
-
-    <!-- Navigation drawer - Modern styled -->
     <com.google.android.material.navigation.NavigationView
         android:id="@+id/nav_view"
         android:layout_width="300dp"
         android:layout_height="match_parent"
         android:layout_gravity="start"
-        android:fitsSystemWindows="false"
         android:background="@color/nav_background"
-        android:elevation="8dp"
         app:headerLayout="@layout/nav_header"
         app:menu="@menu/navigation_menu"
-        app:itemTextAppearance="@style/NavigationMenuTextAppearance"
-        app:subheaderTextAppearance="@style/NavigationSubheaderTextAppearance"
-        app:itemBackground="@drawable/nav_item_background"
-        app:itemIconTint="@color/nav_icon_color_selector"
-        app:itemTextColor="@color/nav_text_color_selector"
-        app:itemIconSize="24dp"
-        app:itemIconPadding="16dp"
-        app:itemHorizontalPadding="16dp"
-        app:itemVerticalPadding="16dp"
-        app:dividerInsetStart="16dp"
-        app:dividerInsetEnd="16dp"
-        app:subheaderInsetStart="16dp" />
-
+        app:itemTextAppearance="@style/NavigationMenuTextAppearance" />
 </androidx.drawerlayout.widget.DrawerLayout>

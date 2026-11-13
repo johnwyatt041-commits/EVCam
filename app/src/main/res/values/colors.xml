@@ -1,68 +1,62 @@
-<?xml version="1.0" encoding="utf-8"?>
+<?xml version='1.0' encoding='utf-8'?>
 <resources>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
     <color name="colorPrimary">#FF4A90D9</color>
-
-    <!-- 深灰色配色方案 -->
     <color name="dark_gray_primary">#424242</color>
     <color name="dark_gray_secondary">#616161</color>
     <color name="dark_gray_background">#1A1A1A</color>
     <color name="dark_gray_surface">#2A2A2A</color>
-
-    <!-- 日间模式配色 -->
-    <color name="menu_background">#FFD4DBE6</color>
-    <color name="button_background">#FFF9FAFB</color>
-    <color name="button_accent">#FF4A90D9</color>
-    <color name="button_text">#FF1A1A1A</color>
-    <color name="page_background">#FFD4DBE6</color>
-    <color name="card_background">#FFF9FAFB</color>
-    <color name="text_primary">#FF1A1A1A</color>
-    <color name="text_secondary">#FF666666</color>
-    <color name="text_hint">#FF999999</color>
-    <color name="input_background">#FFEAEEF3</color>
-    <color name="nav_header_background">#FFD4DBE6</color>
-
-    <!-- 导航菜单配色 - 日间模式（与主界面一致） -->
-    <color name="nav_background">#FFF9FAFB</color>
-    <color name="nav_header_gradient_start">#FFB8C4D4</color>
-    <color name="nav_header_gradient_center">#FFC4CFE0</color>
-    <color name="nav_header_gradient_end">#FFD4DBE6</color>
-    <color name="nav_header_text">#FF1A1A1A</color>
-    <color name="nav_header_text_secondary">#FF424242</color>
-    <color name="nav_item_selected_background">#20000000</color>
-    <color name="nav_item_pressed_background">#10000000</color>
+    <color name="menu_background">#F4F6FA</color>
+    <color name="button_background">#E9EEF5</color>
+    <color name="button_accent">#2563EB</color>
+    <color name="button_text">#243247</color>
+    <color name="page_background">#F4F6FA</color>
+    <color name="card_background">#FFFFFF</color>
+    <color name="text_primary">#172338</color>
+    <color name="text_secondary">#596A80</color>
+    <color name="text_hint">#78879B</color>
+    <color name="input_background">#EDF1F7</color>
+    <color name="nav_header_background">#FFFFFF</color>
+    <color name="nav_background">#FFFFFF</color>
+    <color name="nav_header_gradient_start">@color/nav_background</color>
+    <color name="nav_header_gradient_center">@color/nav_background</color>
+    <color name="nav_header_gradient_end">@color/nav_background</color>
+    <color name="nav_header_text">@color/text_primary</color>
+    <color name="nav_header_text_secondary">@color/text_secondary</color>
+    <color name="nav_item_selected_background">#E8EFFF</color>
+    <color name="nav_item_pressed_background">#DCE7FC</color>
     <color name="nav_ripple_color">#30000000</color>
-    <color name="nav_divider_color">#1A1A1A1A</color>
+    <color name="nav_divider_color">@color/ui_border</color>
     <color name="nav_icon_background">#15000000</color>
-    <color name="nav_icon_tint">#FF424242</color>
-    <color name="nav_icon_tint_selected">#FF1A1A1A</color>
-    <color name="nav_text_primary">#FF1A1A1A</color>
-    <color name="nav_text_secondary">#FF666666</color>
+    <color name="nav_icon_tint">#64748B</color>
+    <color name="nav_icon_tint_selected">#2563EB</color>
+    <color name="nav_text_primary">#172338</color>
+    <color name="nav_text_secondary">#64748B</color>
     <color name="nav_logo_background">#FF424242</color>
     <color name="nav_logo_foreground">#FFFFFFFF</color>
     <color name="nav_logo_accent">#FF424242</color>
-    <color name="nav_section_title">#FF888888</color>
+    <color name="nav_section_title">#64748B</color>
     <color name="nav_version_text">#FF999999</color>
-
-    <!-- 多选模式选中背景 - 日间模式 -->
-    <color name="item_selected_background">#E3F2FD</color>  <!-- 改为浅蓝色背景 -->
-
-    <!-- 视频预览区配色 - 日间模式（使用页面底色） -->
-    <color name="preview_background">@color/page_background</color>
-    <color name="preview_frame_background">#FFC0C8D0</color>
+    <color name="item_selected_background">#E8EFFF</color>
+    <color name="preview_background">#131D2B</color>
+    <color name="preview_frame_background">#1B293B</color>
     <color name="preview_grid_divider">@color/page_background</color>
-    <color name="preview_placeholder_text">#FF666666</color>
-    <color name="preview_controls_background">@color/page_background</color>
-
-    <!-- 使用提示对话框配色 - 日间模式 -->
-    <color name="dialog_guide_background">#FFFFFF</color>
-    <color name="dialog_guide_title">#1A1A1A</color>
-    <color name="dialog_guide_content">#333333</color>
-    <color name="dialog_guide_accent">#1976D2</color>
-    <color name="dialog_guide_secondary">#666666</color>
-    <color name="dialog_guide_divider">#E0E0E0</color>
+    <color name="preview_placeholder_text">#AABAD0</color>
+    <color name="preview_controls_background">#FFFFFF</color>
+    <color name="dialog_guide_background">@color/card_background</color>
+    <color name="dialog_guide_title">@color/text_primary</color>
+    <color name="dialog_guide_content">@color/text_primary</color>
+    <color name="dialog_guide_accent">@color/button_accent</color>
+    <color name="dialog_guide_secondary">@color/text_secondary</color>
+    <color name="dialog_guide_divider">@color/ui_border</color>
     <color name="dialog_guide_button_bg">#1976D2</color>
     <color name="dialog_guide_button_text">#FFFFFF</color>
     <color name="dialog_guide_button_ripple">#30000000</color>
+    <color name="ui_border">#DEE5EF</color>
+    <color name="ui_accent_soft">#E8EFFF</color>
+    <color name="ui_on_accent">#FFFFFF</color>
+    <color name="ui_success">#16856B</color>
+    <color name="ui_warning">#A85A16</color>
+    <color name="ui_danger">#CB3D52</color>
 </resources>

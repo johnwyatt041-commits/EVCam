@@ -1,22 +1,18 @@
 package com.kooo.evcam;
 
 import android.content.Context;
-import android.content.res.AssetManager;
-import android.graphics.BitmapFactory;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.EditText;
-import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.RadioGroup;
 import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.io.InputStream;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -96,7 +92,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         initViews(view);
         loadSettings();
         setupListeners();
-        view.findViewById(R.id.btn_open_lab).setVisibility(View.GONE);
+        OptionalFeatureViews.hideCard(view, R.id.btn_open_lab);
         OptionalFeatureViews.hideRow(view, R.id.switch_long_view_mode);
         OptionalFeatureViews.hideRow(view, R.id.switch_mock_floating);
         view.findViewById(R.id.btn_long_view_adjust).setVisibility(View.GONE);
@@ -181,25 +177,23 @@ public class BlindSpotSettingsFragment extends Fragment {
         menuButton = view.findViewById(R.id.btn_menu);
         homeButton = view.findViewById(R.id.btn_home);
 
-        // 加载抖音二维码
-        ImageView douyinQrCode = view.findViewById(R.id.img_douyin_qrcode);
-        loadAssetImage(douyinQrCode, "douyin.jpg");
+        bindDisclosure(view, R.id.ui_debug_toggle, R.id.ui_debug_section, "高级调试", null);
 
-        // 加载第二个抖音二维码（阿卜IT老师）
-        ImageView douyinQrCode2 = view.findViewById(R.id.img_douyin_qrcode2);
-        loadAssetImage(douyinQrCode2, "douyin2.png");
     }
 
-    private void loadAssetImage(ImageView imageView, String assetName) {
-        try {
-            AssetManager am = requireContext().getAssets();
-            try (InputStream is = am.open(assetName)) {
-                imageView.setImageBitmap(BitmapFactory.decodeStream(is));
-            }
-        } catch (Exception e) {
-            imageView.setVisibility(View.GONE);
-        }
+    private void bindDisclosure(View root, int buttonId, int panelId, String title, Runnable onExpand) {
+        Button button = root.findViewById(buttonId);
+        View panel = root.findViewById(panelId);
+        button.setOnClickListener(v -> {
+            boolean expanded = panel.getVisibility() != View.VISIBLE;
+            panel.setVisibility(expanded ? View.VISIBLE : View.GONE);
+            button.setText(title + (expanded ? " · 收起" : " · 展开"));
+            if (expanded && onExpand != null) onExpand.run();
+
+        });
     }
+
+
 
     private void loadSettings() {
         // 全局开关

@@ -1,11 +1,10 @@
-<?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<?xml version='1.0' encoding='utf-8'?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/page_background">
-
-    <!-- Toolbar -->
     <LinearLayout
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
@@ -17,66 +16,59 @@
         android:paddingEnd="8dp"
         android:gravity="center_vertical"
         android:background="@color/menu_background">
-
         <Button
             android:id="@+id/btn_back"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="←"
-            android:textSize="20sp"
+            android:textSize="16sp"
             android:minWidth="48dp"
             android:minHeight="48dp"
             android:layout_marginEnd="8dp"
             android:backgroundTint="@color/button_background"
-            android:textColor="@color/button_text" />
-
+            android:textColor="@color/button_text"
+            android:elevation="0dp"
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false" />
         <TextView
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
             android:text="画质设置"
             android:textColor="@color/text_primary"
-            android:textSize="24sp"
-            android:textStyle="bold" />
+            android:textSize="22sp"
+            android:fontFamily="sans-serif-medium" />
     </LinearLayout>
-
-    <!-- Settings content -->
     <ScrollView
         android:layout_width="match_parent"
         android:layout_height="match_parent">
-
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
             android:padding="16dp">
-
-            <!-- 分辨率选择 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="目标分辨率"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="选择视频预览和录制的目标分辨率"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
                 <Spinner
                     android:id="@+id/spinner_resolution"
                     android:layout_width="match_parent"
@@ -85,7 +77,6 @@
                     android:popupBackground="@color/card_background"
                     android:paddingStart="16dp"
                     android:paddingEnd="16dp" />
-
                 <TextView
                     android:id="@+id/tv_resolution_desc"
                     android:layout_width="match_parent"
@@ -95,33 +86,28 @@
                     android:textSize="12sp"
                     android:layout_marginTop="8dp" />
             </LinearLayout>
-
-            <!-- 码率选择 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="录制码率"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="码率越高画质越清晰，但文件体积越大"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
                 <Spinner
                     android:id="@+id/spinner_bitrate"
                     android:layout_width="match_parent"
@@ -130,7 +116,6 @@
                     android:popupBackground="@color/card_background"
                     android:paddingStart="16dp"
                     android:paddingEnd="16dp" />
-
                 <TextView
                     android:id="@+id/tv_bitrate_desc"
                     android:layout_width="match_parent"
@@ -140,33 +125,28 @@
                     android:textSize="12sp"
                     android:layout_marginTop="8dp" />
             </LinearLayout>
-
-            <!-- 帧率选择 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="录制帧率"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="帧率越高画面越流畅，但文件体积越大"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
                 <Spinner
                     android:id="@+id/spinner_framerate"
                     android:layout_width="match_parent"
@@ -175,7 +155,6 @@
                     android:popupBackground="@color/card_background"
                     android:paddingStart="16dp"
                     android:paddingEnd="16dp" />
-
                 <TextView
                     android:id="@+id/tv_framerate_desc"
                     android:layout_width="match_parent"
@@ -185,83 +164,77 @@
                     android:textSize="12sp"
                     android:layout_marginTop="8dp" />
             </LinearLayout>
-
-            <!-- 亮度/降噪调节 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="亮度/降噪调节"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="调整相机的曝光、白平衡等参数（实时生效）"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
-                <!-- 按钮区域 -->
                 <LinearLayout
                     android:id="@+id/layout_image_adjust_buttons"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="horizontal">
-
                     <Button
                         android:id="@+id/btn_open_adjust_window"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="打开调节悬浮窗"
-                        android:textSize="14sp"
+                        android:textSize="16sp"
                         android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/button_text" />
-
+                        android:textColor="@color/button_text"
+                        android:minHeight="48dp"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
                     <View
                         android:layout_width="8dp"
                         android:layout_height="0dp" />
-
                     <Button
                         android:id="@+id/btn_reset_adjust"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:text="恢复默认"
-                        android:textSize="14sp"
+                        android:textSize="16sp"
                         android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text" />
+                        android:textColor="@color/button_text"
+                        android:minHeight="48dp"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
                 </LinearLayout>
-
-                <!-- 当前参数显示区域 -->
                 <LinearLayout
                     android:id="@+id/layout_image_adjust_params"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
                     android:layout_marginTop="12dp">
-
-                    <!-- 当前设置 -->
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="【当前设置】"
                         android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:layout_marginTop="4dp" />
-
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp"
+                        android:fontFamily="sans-serif-medium" />
                     <TextView
                         android:id="@+id/tv_image_adjust_current"
                         android:layout_width="match_parent"
@@ -271,17 +244,14 @@
                         android:textSize="13sp"
                         android:lineSpacingExtra="2dp"
                         android:layout_marginTop="4dp" />
-
-                    <!-- 设备支持的参数 -->
                     <TextView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:text="【设备支持】"
                         android:textColor="@color/text_primary"
-                        android:textSize="14sp"
-                        android:textStyle="bold"
-                        android:layout_marginTop="12dp" />
-
+                        android:textSize="13sp"
+                        android:layout_marginTop="12dp"
+                        android:fontFamily="sans-serif-medium" />
                     <TextView
                         android:id="@+id/tv_image_adjust_supported"
                         android:layout_width="match_parent"
@@ -293,70 +263,60 @@
                         android:layout_marginTop="4dp" />
                 </LinearLayout>
             </LinearLayout>
-
-            <!-- 当前参数信息 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="当前录制参数"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="实际应用的分辨率、帧率、码率（重启应用后更新）"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
                 <TextView
                     android:id="@+id/tv_current_params"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="正在获取..."
                     android:textColor="@color/text_primary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:fontFamily="monospace"
                     android:lineSpacingExtra="4dp" />
             </LinearLayout>
-
-            <!-- 摄像头硬件信息 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="摄像头硬件信息"
                     android:textColor="@color/text_primary"
-                    android:textSize="20sp"
-                    android:textStyle="bold" />
-
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="各摄像头支持的帧率和分辨率"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:layout_marginTop="4dp"
                     android:layout_marginBottom="12dp" />
-
                 <TextView
                     android:id="@+id/tv_hardware_info"
                     android:layout_width="match_parent"
@@ -367,36 +327,29 @@
                     android:fontFamily="monospace"
                     android:lineSpacingExtra="2dp" />
             </LinearLayout>
-
-            <!-- 说明 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
                 android:padding="16dp"
-                android:background="@color/card_background"
+                android:background="@drawable/ui_card"
                 android:layout_marginBottom="16dp">
-
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="说明"
                     android:textColor="@color/text_primary"
-                    android:textSize="18sp"
-                    android:textStyle="bold"
-                    android:layout_marginBottom="8dp" />
-
+                    android:textSize="16sp"
+                    android:layout_marginBottom="8dp"
+                    android:fontFamily="sans-serif-medium" />
                 <TextView
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="• 默认选项：优先匹配 1280×800，如果摄像头不支持则自动选择最接近的分辨率\n\n• 指定分辨率：优先精确匹配所选分辨率，如果某个摄像头不支持则选择最接近的\n\n• 分辨率越高，画质越清晰，但占用更多存储空间和性能\n\n• 修改分辨率后需要重启应用才会生效"
                     android:textColor="@color/text_secondary"
-                    android:textSize="14sp"
+                    android:textSize="13sp"
                     android:lineSpacingExtra="2dp" />
             </LinearLayout>
-
-
         </LinearLayout>
     </ScrollView>
-
 </LinearLayout>
