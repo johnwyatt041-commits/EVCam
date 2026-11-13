@@ -24,6 +24,8 @@
 
 ## 新增的本地待发布版本
 
+当前交付 **录像整改 A/B `1.6.6-test-11140403`**，分支 `codex/recording-ab-comparison`。A 保留日常三路独立文件，B 参考 Smartcam 思路合成单个 H.264 视频；两版同包名顺序覆盖安装，飞书四路都仍独立。详见 [对照试录说明](docs/RECORDING_AB_TEST.md) 和 `docs/STATUS.md`；旧 GitHub 发布尚未更新。
+
 - `1.6.6-test-11140245`：默认关闭的录像车辆状态水印，显示车速、刹车踏板、左右转向；未收到信号显示未知，E5 刹车字段可用性尚待实车确认。
 - 源码 `03a261e04474e2bce3eda834e87665e6d6da6ddc`，分支 `codex/vehicle-status-watermark`。
 - 本地 APK：`outputs/EVCam-E5-Status-1.6.6-test-11140245.apk`；64 项 JVM 测试、Debug/Release/必要 Lint、1 项模拟器 GPU 测试与设置开关验证通过。

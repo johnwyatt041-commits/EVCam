@@ -63,6 +63,12 @@ public class SingleCamera {
 
     private Size previewSize;
     private Surface recordSurface;  // 录制Surface
+    private int recordingFrameRate = 25;
+
+    public void setRecordingFrameRate(int fps) {
+        recordingFrameRate = Math.max(1, fps);
+        lastRecordingSensorNs = maxRecordingSensorGapNs = recordingSensorGapsOver100Ms = 0;
+    }
     private Surface mainFloatingSurface; // 主屏悬浮窗Surface
     private android.graphics.SurfaceTexture mainFloatingSurfaceTexture; // 主屏悬浮窗SurfaceTexture（用于设置buffer尺寸）
     private Surface secondaryDisplaySurface; // 副屏预览Surface
@@ -99,6 +105,9 @@ public class SingleCamera {
     // 调试：帧捕获监控
     private long frameCount = 0;  // 总帧数
     private long lastFrameLogTime = 0;  // 上次输出帧计数的时间
+    private long lastRecordingSensorNs;
+    private long maxRecordingSensorGapNs;
+    private long recordingSensorGapsOver100Ms;
     private static final long FRAME_LOG_INTERVAL_MS = 5000;  // 每5秒输出一次帧计数
 
     // 实时 FPS（1秒滚动窗口，供调试信息展示）
@@ -1466,7 +1475,28 @@ public class SingleCamera {
 
             AppLog.d(TAG, "Camera " + cameraId + " Creating capture request...");
             int template = (recordSurface != null) ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW;
-            final CaptureRequest.Builder previewRequestBuilder = cameraDevice.createCaptureRequest(template);
+            CaptureRequest.Builder requestBuilder;
+            try { requestBuilder = cameraDevice.createCaptureRequest(template); }
+            catch (IllegalArgumentException unsupported) {
+                if (template != CameraDevice.TEMPLATE_RECORD) throw unsupported;
+                requestBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+                AppLog.w(TAG, "RECORD template unsupported; retaining PREVIEW template with recording target");
+            }
+            final CaptureRequest.Builder previewRequestBuilder = requestBuilder;
+            if (recordSurface != null) {
+                try {
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
+                            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), recordingFrameRate);
+                    if (range != null) {
+                        previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
+                        AppLog.i(TAG, "Recording source camera=" + cameraId + ", requestedFps="
+                                + recordingFrameRate + ", supportedRange=" + range);
+                    }
+                } catch (Exception e) {
+                    AppLog.w(TAG, "Camera rejected optional FPS range; retaining HAL default: " + e.getMessage());
+                }
+            }
             
             // 保存请求构建器引用（用于实时更新亮度/降噪参数）
             currentRequestBuilder = previewRequestBuilder;
@@ -1689,7 +1719,15 @@ public class SingleCamera {
                         lastFrameLogTime = System.currentTimeMillis();
 
                         if (captureSession != session) return;
-                        captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
+                        try {
+                            captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
+                        } catch (IllegalArgumentException rejectedRange) {
+                            if (recordSurface == null || previewRequestBuilder.get(
+                                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) == null) throw rejectedRange;
+                            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
+                            captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
+                            AppLog.w(TAG, "Recording FPS range rejected by active stream combination; using HAL default");
+                        }
                         AppLog.d(TAG, "Camera " + cameraId + " preview started!");
                         lastFrameTimestampMs = System.currentTimeMillis();
                         stallRecoveryLevel = 0;
@@ -1700,6 +1738,9 @@ public class SingleCamera {
                         AppLog.e(TAG, "Failed to start preview", e);
                     } catch (IllegalStateException e) {
                         AppLog.w(TAG, "Session closed: " + e.getMessage());
+                    } catch (IllegalArgumentException e) {
+                        AppLog.e(TAG, "Capture request rejected for camera " + cameraId, e);
+                        if (callback != null) callback.onCameraError(cameraId,-3);
                     }
                 }
 
@@ -1888,6 +1929,17 @@ public class SingleCamera {
         public void onCaptureCompleted(@NonNull CameraCaptureSession session,
                                       @NonNull CaptureRequest request,
                                       @NonNull TotalCaptureResult result) {
+            if (recordSurface != null) {
+                Long sensor = result.get(TotalCaptureResult.SENSOR_TIMESTAMP);
+                if (sensor != null) {
+                    long gap = sensor - lastRecordingSensorNs;
+                    if (lastRecordingSensorNs > 0 && gap > 0) {
+                        maxRecordingSensorGapNs = Math.max(maxRecordingSensorGapNs,gap);
+                        if (gap > 100_000_000L) recordingSensorGapsOver100Ms++;
+                    }
+                    lastRecordingSensorNs = sensor;
+                }
+            }
             frameCount++;
             long now = System.currentTimeMillis();
             lastFrameTimestampMs = now;
@@ -1907,6 +1959,10 @@ public class SingleCamera {
                 long elapsed = now - lastFrameLogTime;
                 float fps = frameCount * 1000f / elapsed;
                 AppLog.d(TAG, "Camera " + cameraId + " FPS: " + String.format("%.1f", fps));
+                if (recordSurface != null) AppLog.i(TAG, "Camera source stats id=" + cameraId
+                        + ", captureFps=" + String.format(Locale.US,"%.2f",fps)
+                        + ", sensorMaxGapMs=" + maxRecordingSensorGapNs / 1_000_000
+                        + ", sensorGapsOver100Ms=" + recordingSensorGapsOver100Ms);
                 frameCount = 0;
                 lastFrameLogTime = now;
             }

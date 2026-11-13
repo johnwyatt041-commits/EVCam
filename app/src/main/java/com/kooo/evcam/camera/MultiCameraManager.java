@@ -39,6 +39,7 @@ public class MultiCameraManager {
     private final Map<String, VideoRecorder> recorders = new LinkedHashMap<>();
     private final Map<String, CodecVideoRecorder> codecRecorders = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile Boolean vehicleStatusWatermarkOverride;
+    private volatile CompositeRecording compositeRecording;
 
     /** Applies on each recorder's own GL thread; never rebuilds a camera session. */
     public synchronized void setVehicleStatusWatermarkEnabled(boolean enabled) {
@@ -1247,7 +1248,28 @@ public class MultiCameraManager {
 
         // 为每个摄像头创建软编码录制器并准备
         boolean prepareSuccess = true;
-        for (String key : keys) {
+        if (RecordingExperiment.compositeDaily(keys)) {
+            try {
+                Map<String,Size> sourceSizes = new LinkedHashMap<>();
+                for (String key : keys) {
+                    SingleCamera camera = cameras.get(key);
+                    if (camera == null || camera.getPreviewSize() == null) throw new IllegalStateException("Missing camera size: "+key);
+                    sourceSizes.put(key,camera.getPreviewSize());
+                }
+                compositeRecording = CompositeRecording.prepare(sourceSizes,saveDir,timestamp,appConfig,
+                        segmentDurationMs,compositeCallback(),segmentTimestampProvider);
+                registerCodecRecorder("combined",compositeRecording.recorder);
+                for (String key : keys) {
+                    SingleCamera camera = cameras.get(key);
+                    camera.setRecordingFrameRate(targetFrameRate);
+                    camera.setRecordSurface(compositeRecording.surface(key),true);
+                }
+            } catch (Exception e) {
+                AppLog.e(TAG,"Composite recording could not be prepared",e);
+                prepareSuccess=false;
+            }
+        }
+        for (String key : RecordingExperiment.compositeDaily(keys) ? java.util.Collections.<String>emptyList() : keys) {
             SingleCamera camera = cameras.get(key);
             if (camera == null) {
                 continue;
@@ -1296,6 +1318,7 @@ public class MultiCameraManager {
             codecRecorder.setSegmentDuration(segmentDurationMs);
             codecRecorder.setBitRate(bitrate);
             codecRecorder.setFrameRate(targetFrameRate);
+            camera.setRecordingFrameRate(targetFrameRate);
             codecRecorder.setQualityLevel(3);  // 设置最高画质
             codecRecorder.setForceH264(appConfig.isForceH264Encoding());
 
@@ -1400,6 +1423,11 @@ public class MultiCameraManager {
         }
 
         if (!prepareSuccess) {
+            closeCompositeInputs();
+            for (String key : keys) {
+                SingleCamera camera = cameras.get(key);
+                if (camera != null) camera.clearRecordSurface();
+            }
             AppLog.e(TAG, "Failed to prepare codec recording");
             // 清理已准备的录制器
             for (CodecVideoRecorder recorder : codecRecorders.values()) {
@@ -1536,7 +1564,7 @@ public class MultiCameraManager {
                 AppLog.w(TAG, "Camera " + key + " frame not stable, skipping (forcedReopen=" + forcedReopen + ")");
                 continue;
             }
-            CodecVideoRecorder codecRecorder = codecRecorders.get(key);
+            CodecVideoRecorder codecRecorder = codecRecorders.get(compositeRecording == null ? key : "combined");
             if (codecRecorder == null) {
                 AppLog.e(TAG, "Camera " + key + " codecRecorder is null");
                 continue;
@@ -1565,6 +1593,7 @@ public class MultiCameraManager {
         } else {
             AppLog.e(TAG, "Failed to start codec recording on all cameras");
             isRecording = false;
+            closeCompositeInputs();
             for (CodecVideoRecorder recorder : codecRecorders.values()) {
                 recorder.release();
             }
@@ -1589,6 +1618,17 @@ public class MultiCameraManager {
      * 用于强制重新打开后，只为实际可用的摄像头准备录制
      */
     private void reprepareCodecRecordingForCameras(List<String> cameraKeys) {
+        if (compositeRecording != null) {
+            synchronized (sessionLock) {
+                sessionConfiguredCount=0; expectedSessionCount=cameraKeys.size(); cameraSessionReady.clear();
+                pendingRecordingStart=() -> executeCodecRecordingStart(cameraKeys,0,true);
+            }
+            for (String key : cameraKeys) {
+                SingleCamera camera=cameras.get(key);
+                if (camera!=null) { camera.setRecordSurface(compositeRecording.surface(key),true); camera.recreateSession(); }
+            }
+            return;
+        }
         AppLog.d(TAG, "Re-preparing codec recording for cameras: " + cameraKeys);
 
         // 清理之前的录制器（只保留指定摄像头的）
@@ -1634,6 +1674,7 @@ public class MultiCameraManager {
             codecRecorder.setSegmentDuration(appConfig.getSegmentDurationMs());
             codecRecorder.setBitRate(appConfig.getActualBitrate(previewSize.getWidth(), previewSize.getHeight(), 25));  // 使用25fps降低CPU占用
             codecRecorder.setFrameRate(appConfig.getActualFrameRate(25));  // 使用25fps降低CPU占用
+            camera.setRecordingFrameRate(appConfig.getActualFrameRate(25));
             codecRecorder.setQualityLevel(3);  // 设置最高画质
             codecRecorder.setForceH264(appConfig.isForceH264Encoding());
             codecRecorder.setWatermarkEnabled(appConfig.isTimestampWatermarkEnabled());
@@ -1727,10 +1768,13 @@ public class MultiCameraManager {
         // 立即标记停止状态，防止新的录制请求
         final boolean wasRecording = isRecording;
         isRecording = false;
+        for (CodecVideoRecorder recorder : codecRecorders.values()) recorder.requestStop();
 
         // 在后台线程执行停止操作，避免阻塞主线程
         new Thread(() -> {
             try {
+                CompositeRecording composite = compositeRecording;
+                if (composite != null) composite.pause();
                 // 清理待处理的录制启动任务和会话计数器（线程安全处理）
                 synchronized (sessionLock) {
                     if (pendingRecordingStart != null) {
@@ -1772,6 +1816,7 @@ public class MultiCameraManager {
                             AppLog.e(TAG, "Error releasing codec recorder for " + key, e);
                         }
                     }
+                    for (CodecVideoRecorder recorder : codecRecorders.values()) recorder.release();
                     codecRecorders.clear();
                     return;
                 }
@@ -1834,6 +1879,7 @@ public class MultiCameraManager {
             } catch (Exception e) {
                 AppLog.e(TAG, "Error in stopRecording", e);
             } finally {
+                closeCompositeInputs();
                 mainHandler.post(() -> finishStoppingRecording(stoppingKeys));
             }
         }, "StopRecording-" + System.currentTimeMillis()).start();
@@ -1859,6 +1905,7 @@ public class MultiCameraManager {
                 AppLog.w(TAG, "Error clearing stopped recording output", e);
             }
         }
+        closeCompositeInputs();
         List<Runnable> callbacks;
         synchronized (this) {
             stoppingRecording = false;
@@ -2207,6 +2254,7 @@ public class MultiCameraManager {
         } catch (Exception e) {
             AppLog.e(TAG, "Unexpected error during release", e);
         } finally {
+            closeCompositeInputs();
             // 8. 清理集合（确保执行）
             cameras.clear();
             recorders.clear();
@@ -2236,6 +2284,44 @@ public class MultiCameraManager {
     /** UI recreation must also wait for final frame draining and file finalization. */
     public boolean isStoppingRecording() {
         return stoppingRecording;
+    }
+
+    private void closeCompositeInputs() {
+        CompositeRecording composite;
+        synchronized (this) {
+            composite = compositeRecording;
+            compositeRecording = null;
+        }
+        if (composite != null) {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                new Thread(composite::close,"CloseRecordingCompositor").start();
+            } else composite.close();
+        }
+    }
+
+    private RecordCallback compositeCallback() {
+        return new RecordCallback() {
+            @Override public void onRecordStart(String id) {}
+            @Override public void onRecordStop(String id) {}
+            @Override public void onRecordError(String id,String error) { AppLog.e(TAG,"Composite: "+error); }
+            @Override public void onPrepareSegmentSwitch(String id,int index) {}
+            @Override public void onSegmentSwitch(String id,int index,String path) {
+                if (useRelayWrite && finalSaveDir!=null && path!=null) scheduleRelayTransfer(path);
+                if (segmentSwitchCallback!=null && index>lastNotifiedSegmentIndex) {
+                    lastNotifiedSegmentIndex=index; segmentSwitchCallback.onSegmentSwitch(index);
+                }
+            }
+            @Override public void onCorruptedFilesDeleted(String id,List<String> files) {
+                if (corruptedFilesCallback!=null) mainHandler.post(() -> corruptedFilesCallback.onCorruptedFilesDeleted(files));
+            }
+            @Override public void onRecordingRebuildRequested(String id,String reason) { AppLog.w(TAG,"Composite recovery: "+reason); }
+            @Override public void onFirstDataWritten(String id) {
+                if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback!=null) {
+                    hasNotifiedFirstDataWritten=true;
+                    mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
+                }
+            }
+        };
     }
 
     /**

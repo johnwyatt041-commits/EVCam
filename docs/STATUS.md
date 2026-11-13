@@ -2,12 +2,22 @@
 
 更新：2026-11-14，Asia/Hong_Kong。后续每个任务结束时更新；读取时同时执行 `git status --short`、`git log -5 --oneline`，避免文档落后于代码。
 
+## 本地录像整改 A/B（2026-11-14）
+
+- 分支 `codex/recording-ab-comparison`，版本 `1.6.6-test-11140403`。A 保留 GL/MediaCodec 多路独立文件；B 日常三路横排合成、硬件 H.264 单文件，飞书四路仍独立。两版同包名同签名，顺序覆盖安装，桌面名称区分。
+- 共用整改：独立 drain/有界异步 writer、pending 成功封装后发布、关键帧仅切 muxer、停止尾部/EOS 和恢复竞态、FPS 支持范围选择与 HAL 回退、按实际尺寸/FPS configure 和 MIME 码率、低频源帧/GL/编码/写盘统计。
+- B 全尺寸优先，硬件无法配置时尝试 0.75/0.5 尺寸；增加合成 GL 和中间缓冲，不能承诺更省内存或更快。已接入合成图库/回放及双击保护。未复制 Smartcam 源码或素材。
+- 每 flavor **73 项 JVM 测试通过**，合计 146，零失败/跳过；两版 Debug/Release 与必要 Lint 通过，日志 `work/verification/build-20261114-040318-731.log`。
+- Android 11 x86 模拟器实际三色 Surface→GL→codec→MP4，覆盖 A 三编码器与 B 合成单编码器、多次关键帧分段、首帧关键帧、PTS 从零严格递增、停止完成无 pending；每版另做车辆状态水印实际 GPU 绘制。UI 检查 A/B 设置说明、状态水印默认关闭及 B 合成文件回放/双击保持单视频。证据 `work/recording-ab/`。
+- Release 保留原 ARM64 库。模拟器仅使用去掉不兼容库的 Debug 副本和低分辨率软件 H.264；**没有实车帧率/CPU/PSS/温度数据，不能称卡顿已经消失**。真实 Camera2 多路、长时间存储、飞书端到端、补盲/HUD、VHAL 踏板字段仍需实车验证。
+- 测试步骤与架构限制见 [A/B 试录说明](RECORDING_AB_TEST.md)，交付清单与哈希见 `outputs/EVCam-Recording-AB-notes.md`。旧 GitHub 发布不变；上次外部推送自动审批拒绝未获新授权，本次仅交付本地 APK。
+
 ## 当前基线
 
 | 项目 | 状态 |
 | --- | --- |
 | 主目录 | `E:\GPT\EVCam` |
-| 当前分支 | `codex/vehicle-status-watermark` |
+| 当前分支 | `codex/recording-ab-comparison` |
 | 已发布应用提交 | `c9c493ef2eac5d0956677c3b3835f0a67cb31ccb` |
 | 性能/HUD 前一基线 | `273c411f2eba37bd2ec06b21b7b677d0e8b58baf` |
 | 上游基线 | `0876b976bff554ef6bad2c65513cf0149f451d81` |

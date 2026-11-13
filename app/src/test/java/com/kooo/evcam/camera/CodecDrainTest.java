@@ -32,7 +32,7 @@ public class CodecDrainTest {
     @Test public void finalDrainWritesAllTailFramesAndPreservesCaptureGaps() throws Exception {
         CodecVideoRecorder recorder = new CodecVideoRecorder("left", 1280, 800);
         MediaCodec encoder = mock(MediaCodec.class);
-        MediaMuxer muxer = mock(MediaMuxer.class);
+        AsyncMuxerWriter muxer = mock(AsyncMuxerWriter.class);
         MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
         set(recorder, "encoder", encoder);
         set(recorder, "muxer", muxer);

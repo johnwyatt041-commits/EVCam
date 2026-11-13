@@ -181,6 +181,15 @@ public class EglSurfaceEncoder {
     private static final long WATERMARK_UPDATE_INTERVAL_MS = 1000; // 每秒更新一次水印
     
     private final FrameTimestampClock frameClock = new FrameTimestampClock(30);
+    private long latchedFrames;
+    private long pacedSkips;
+    private long lastSourceNs;
+    private long maxSourceGapNs;
+
+    public String frameStats() {
+        return "latchedFrames=" + latchedFrames + ", pacedSkips=" + pacedSkips
+                + ", maxLatchedSourceGapMs=" + maxSourceGapNs / 1_000_000;
+    }
 
     // 性能优化：复用缓冲区，减少GC
     private final float[] tempMatrix = new float[16];
@@ -269,8 +278,12 @@ public class EglSurfaceEncoder {
         try {
             makeCurrent();
             inputSurfaceTexture.updateTexImage();
-            long ptsNs = frameClock.nextPresentationTimeNs(inputSurfaceTexture.getTimestamp());
-            if (ptsNs == FrameTimestampClock.SKIP_FRAME) return false;
+            long sourceNs = inputSurfaceTexture.getTimestamp();
+            if (lastSourceNs > 0 && sourceNs > lastSourceNs) maxSourceGapNs = Math.max(maxSourceGapNs,sourceNs-lastSourceNs);
+            lastSourceNs = sourceNs;
+            latchedFrames++;
+            long ptsNs = frameClock.nextPresentationTimeNs(sourceNs);
+            if (ptsNs == FrameTimestampClock.SKIP_FRAME) { pacedSkips++; return false; }
             inputSurfaceTexture.getTransformMatrix(texMatrix);
 
             GLES20.glViewport(0, 0, width, height);

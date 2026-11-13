@@ -21,10 +21,24 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 77
-        versionName = "1.6.6-test-11140245"
+        versionName = "1.6.6-test-11140403"
+        buildConfigField("boolean", "RECORDING_COMPARISON", "true")
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    buildFeatures { buildConfig = true }
+    flavorDimensions += "recording"
+    productFlavors {
+        create("independent") {
+            dimension = "recording"
+            buildConfigField("boolean", "SMARTCAM_COMPOSITE", "false")
+        }
+        create("composite") {
+            dimension = "recording"
+            buildConfigField("boolean", "SMARTCAM_COMPOSITE", "true")
+        }
     }
 
     buildTypes {

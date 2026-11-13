@@ -561,6 +561,7 @@ public class AppConfig {
      * @return true 表示应该使用 CodecVideoRecorder
      */
     public boolean shouldUseCodecRecording() {
+        if (BuildConfig.RECORDING_COMPARISON) return true;
         String mode = getRecordingMode();
         if (RECORDING_MODE_CODEC.equals(mode)) {
             // 强制使用 Codec 模式

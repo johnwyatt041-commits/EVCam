@@ -16,16 +16,18 @@
 .\tools\verify.ps1
 ```
 
-默认离线依次运行 `:app:testDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`，日志写入主项目的 `work/verification/`，不会覆盖已发布的 `outputs/` APK。离线缺依赖时，网络可用再运行 `-Online`。可用 `-SharedRoot 'E:\GPT\EVCam'` 指定共享工具位置；独立工作树默认使用此位置。可用 `-AndroidSdk 'C:\Users\luka\AppData\Local\Android\Sdk'` 指定 SDK。
+当前录像 A/B 分支默认离线运行 `:app:testIndependentDebugUnitTest :app:testCompositeDebugUnitTest :app:assembleDebug :app:assembleRelease --no-daemon`，日志写入主项目的 `work/verification/`，不会覆盖已发布的 `outputs/` APK。离线缺依赖时，网络可用再运行 `-Online`。可用 `-SharedRoot 'E:\GPT\EVCam'` 指定共享工具位置；独立工作树默认使用此位置。可用 `-AndroidSdk 'C:\Users\luka\AppData\Local\Android\Sdk'` 指定 SDK。
 
 脚本不安装 APK、不启动模拟器、不操作设备、不发布。构建成功不等于实车功能验证。
 
 | 产物 | 位置 |
 | --- | --- |
-| Debug APK | `app/build/outputs/apk/debug/app-debug.apk` |
-| Release APK | `app/build/outputs/apk/release/app-release.apk` |
-| JVM XML 结果 | `app/build/test-results/testDebugUnitTest/TEST-*.xml` |
-| 单元测试报告 | `app/build/reports/tests/testDebugUnitTest/index.html` |
+| A Debug/Release APK | `app/build/outputs/apk/independent/{debug,release}/app-independent-{debug,release}.apk` |
+| B Debug/Release APK | `app/build/outputs/apk/composite/{debug,release}/app-composite-{debug,release}.apk` |
+| JVM XML 结果 | `app/build/test-results/test{Independent,Composite}DebugUnitTest/TEST-*.xml` |
+| 单元测试报告 | `app/build/reports/tests/test{Independent,Composite}DebugUnitTest/index.html` |
+
+两版同包名同签名，按顺序覆盖安装，共享偏好；不要用不同包名同时运行两套摄像头。A 是整改后的三路独立文件，B 日常三路合成 H.264 单文件；B 的飞书四路仍分别录制。`RecordingExperiment` 和 flavor 的 `BuildConfig.SMARTCAM_COMPOSITE` 决定方法，不能只改 APK 文件名冒充不同架构。详见 `docs/tasks/recording-ab.md`。
 
 Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生产密钥。构建/迁移不应修改 `outputs/EVCam-E5-UI-1.6.6-test-11140102.apk`；核验时与 `docs/STATUS.md` 的固定 SHA 对比。
 

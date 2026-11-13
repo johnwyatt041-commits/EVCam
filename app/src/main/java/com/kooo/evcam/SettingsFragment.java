@@ -292,6 +292,8 @@ public class SettingsFragment extends Fragment {
         });
 
         // 默认关闭的录像车辆状态水印
+        TextView recordingExperiment = view.findViewById(R.id.recording_experiment_description);
+        recordingExperiment.setText(com.kooo.evcam.camera.RecordingExperiment.description());
         SwitchMaterial vehicleStatusSwitch = view.findViewById(R.id.switch_vehicle_status_watermark);
         vehicleStatusSwitch.setChecked(appConfig.isVehicleStatusWatermarkEnabled());
         vehicleStatusSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
@@ -1111,6 +1113,14 @@ public class SettingsFragment extends Fragment {
     private void initRecordingModeConfig(View view) {
         recordingModeSpinner = view.findViewById(R.id.spinner_recording_mode);
         recordingModeDescText = view.findViewById(R.id.tv_recording_mode_desc);
+        if (BuildConfig.RECORDING_COMPARISON && recordingModeSpinner != null && getContext() != null) {
+            recordingModeSpinner.setAdapter(new ArrayAdapter<>(getContext(), R.layout.spinner_item,
+                    new String[]{"录像方式对比测试"}));
+            recordingModeSpinner.setEnabled(false);
+            if (recordingModeDescText != null) recordingModeDescText.setText(
+                    com.kooo.evcam.camera.RecordingExperiment.description());
+            return;
+        }
         
         if (recordingModeSpinner == null || getContext() == null) {
             return;

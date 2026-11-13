@@ -20,6 +20,7 @@ public class VideoGroup {
     public static final String POSITION_BACK = "back";
     public static final String POSITION_LEFT = "left";
     public static final String POSITION_RIGHT = "right";
+    public static final String POSITION_COMBINED = "combined";
     
     /** 时间戳前缀，如 "20260131_1254" */
     private final String timestampPrefix;
@@ -79,6 +80,7 @@ public class VideoGroup {
      * @return 位置，如 "front"
      */
     public static String extractPosition(String fileName) {
+        if (!fileName.toLowerCase(Locale.ROOT).endsWith(".mp4")) return null;
         // 移除扩展名
         String nameWithoutExt = fileName;
         int dotIndex = fileName.lastIndexOf('.');
@@ -189,6 +191,7 @@ public class VideoGroup {
      * 优先级：front > back > left > right
      */
     public File getThumbnailFile() {
+        if (videoFiles.containsKey(POSITION_COMBINED)) return videoFiles.get(POSITION_COMBINED);
         if (videoFiles.containsKey(POSITION_FRONT)) {
             return videoFiles.get(POSITION_FRONT);
         } else if (videoFiles.containsKey(POSITION_BACK)) {

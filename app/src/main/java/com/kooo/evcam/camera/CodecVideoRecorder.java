@@ -2,12 +2,8 @@ package com.kooo.evcam.camera;
 
 import android.graphics.SurfaceTexture;
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
-import android.media.MediaCodecList;
 import android.media.MediaFormat;
-import android.media.MediaMuxer;
 import android.os.Handler;
-import android.os.Build;
 import android.os.SystemClock;
 import android.os.HandlerThread;
 import android.os.Looper;
@@ -60,6 +56,10 @@ public class CodecVideoRecorder {
 
     // 编码器选择：是否强制使用 H.264（默认 false，优先使用 HEVC）
     private boolean forceH264 = false;
+    private int keyFrameIntervalSeconds = I_FRAME_INTERVAL;
+    public void setKeyFrameIntervalSeconds(int seconds) { keyFrameIntervalSeconds = Math.max(1, seconds); }
+    private boolean hardwareOnly;
+    public void setHardwareOnly(boolean required) { hardwareOnly = required; }
     
     // 画质等级：0=低, 1=中, 2=高, 3=最高
     private int qualityLevel = 2;
@@ -79,9 +79,14 @@ public class CodecVideoRecorder {
     private MediaCodec.BufferInfo bufferInfo;
 
     // MediaMuxer 相关
-    private MediaMuxer muxer;
+    private volatile AsyncMuxerWriter muxer;
     private int videoTrackIndex = -1;
-    private boolean muxerStarted = false;
+    private volatile boolean muxerStarted = false;
+    private MediaFormat outputFormat;
+    private volatile boolean segmentRequested;
+    private final Object codecLock = new Object();
+    private HandlerThread drainThread;
+    private Handler drainHandler;
 
     // EGL 渲染器
     private EglSurfaceEncoder eglEncoder;
@@ -95,10 +100,24 @@ public class CodecVideoRecorder {
     // 状态
     private final AtomicBoolean isRecording = new AtomicBoolean(false);  // 使用 AtomicBoolean 确保线程安全
     private volatile boolean isReleased = false;
+    private volatile boolean stopRequested;
     private final Runnable delayedDrain = () -> {
-        if (!isReleased && isRecording.get() && encoder != null) drainEncoderWithResult(false);
+        synchronized (codecLock) {
+            if (isReleased || stopRequested || !isRecording.get() || !this.encoderHealthy || encoder == null) return;
+            drainEncoderWithResult(false);
+        }
+        if (!isReleased && !stopRequested && isRecording.get() && drainHandler != null) {
+            drainHandler.postDelayed(this.delayedDrain, 10);
+        }
     };
-    private String currentFilePath;
+
+    private void scheduleDrain() {
+        if (drainHandler != null) {
+            drainHandler.removeCallbacks(delayedDrain);
+            drainHandler.post(delayedDrain);
+        }
+    }
+    private volatile String currentFilePath;
     
     // 缓存的录制 Surface，避免重复创建导致内存泄漏
     private Surface cachedRecordSurface = null;
@@ -129,7 +148,7 @@ public class CodecVideoRecorder {
     
     // 首次写入检测（与 VideoRecorder 保持一致）
     private static final long FIRST_WRITE_TIMEOUT_MS = 10000;  // 首次写入超时（10秒）
-    private boolean hasFirstWrite = false;  // 是否已有首次写入
+    private volatile boolean hasFirstWrite = false;  // 是否已有首次写入
     private Runnable firstWriteTimeoutRunnable;  // 首次写入超时检查任务
     
     // 快速恢复机制
@@ -141,9 +160,12 @@ public class CodecVideoRecorder {
     // 编码器健康检查
     private static final long ENCODER_HEALTH_CHECK_INTERVAL_MS = 3000;  // 健康检查间隔：3秒
     private static final int MAX_FRAMES_WITHOUT_OUTPUT = 30;  // 无输出的最大帧数阈值
-    private long lastEncoderOutputTime = 0;  // 最后一次编码器输出时间
+    private volatile long lastEncoderOutputTime = 0;  // 最后一次编码器输出时间
     private volatile int framesWithoutEncoderOutput = 0;  // 无编码器输出的连续帧数
     private volatile boolean encoderHealthy = true;  // 编码器是否健康
+    private long maxGlUs;
+    private long totalGlUs;
+    private long codecPolls, totalCodecPollUs, maxCodecPollUs;
     private Runnable healthCheckRunnable;  // 健康检查任务
 
     // 回调
@@ -163,7 +185,7 @@ public class CodecVideoRecorder {
         if (handler != null) handler.post(() -> {
             if (eglEncoder != null) {
                 eglEncoder.setVehicleStatusWatermarkEnabled(
-                        vehicleStatusWatermarkEnabled && isRecording.get() && !isReleased);
+                        vehicleStatusWatermarkEnabled && isRecording.get() && !isReleased && !stopRequested);
             }
         });
     }
@@ -331,9 +353,13 @@ public class CodecVideoRecorder {
 
         // 保存录制参数
         this.currentFilePath = filePath;
+        this.stopRequested = false;
         this.segmentIndex = 0;
         this.recordedFrameCount = 0;
         this.inputFrameCallbacks = 0;
+        this.maxGlUs = this.totalGlUs = 0;
+        this.codecPolls = this.totalCodecPollUs = this.maxCodecPollUs = 0;
+        this.segmentRequested = false;
         this.encodedOutputFrameCount = 0;  // 重置编码输出帧计数
 
         // 重置健康检查状态
@@ -368,6 +394,9 @@ public class CodecVideoRecorder {
             };
             encoderThread.start();
             encoderHandler = new Handler(encoderThread.getLooper());
+            drainThread = new HandlerThread("CodecDrain-" + cameraId);
+            drainThread.start();
+            drainHandler = new Handler(drainThread.getLooper());
 
             // 创建 MediaCodec 编码器
             createEncoder();
@@ -397,20 +426,19 @@ public class CodecVideoRecorder {
                     // 直接在回调中处理帧，避免 Handler 死锁
                     inputSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
                         if (isReleased) return;
-                        if (!isRecording.get() || !encoderHealthy) {
+                        if (stopRequested || !isRecording.get() || !encoderHealthy) {
                             if (eglEncoder != null) eglEncoder.consumeFrame();
                             return;
                         }
                         inputFrameCallbacks++;
                         try {
-                            // Free output before submitting another input. Timestamping and
-                            // pacing happen after updateTexImage, using sensor time.
-                            drainEncoderWithResult(false);
+                            long frameStart = System.nanoTime();
                             if (eglEncoder != null && eglEncoder.drawFrame()) {
                                 recordedFrameCount++;
                                 framesWithoutEncoderOutput++;
-                                encoderHandler.removeCallbacks(delayedDrain);
-                                encoderHandler.postDelayed(delayedDrain, 10);
+                                long glUs = (System.nanoTime() - frameStart) / 1000;
+                                totalGlUs += glUs;
+                                maxGlUs = Math.max(maxGlUs, glUs);
                             }
                         } catch (Exception e) {
                             AppLog.e(TAG, "Camera " + cameraId + " Error processing frame", e);
@@ -510,6 +538,7 @@ public class CodecVideoRecorder {
      * 开始录制
      */
     public boolean startRecording() {
+        if (stopRequested || isReleased) return false;
         if (encoder == null || eglEncoder == null) {
             AppLog.e(TAG, "Camera " + cameraId + " Encoder not prepared");
             return false;
@@ -531,6 +560,7 @@ public class CodecVideoRecorder {
         
         isRecording.set(true);
         updateVehicleStatusWatermark();
+        scheduleDrain();
 
         // 注意：不再使用单独的编码循环
         // 帧的处理直接在 onFrameAvailable 回调中完成（该回调在 encoderHandler 上执行）
@@ -563,6 +593,7 @@ public class CodecVideoRecorder {
      * 停止录制
      */
     public void stopRecording() {
+        stopRequested = true;
         if (!isRecording.get()) {
             AppLog.w(TAG, "Camera " + cameraId + " Not recording");
             return;
@@ -572,6 +603,8 @@ public class CodecVideoRecorder {
 
         // 立即标记停止状态，防止新帧处理
         isRecording.set(false);
+        segmentRequested = false;
+        if (drainHandler != null) drainHandler.removeCallbacks(delayedDrain);
 
         // 取消所有定时器和任务
         if (segmentRunnable != null) {
@@ -603,7 +636,6 @@ public class CodecVideoRecorder {
             final java.util.concurrent.CountDownLatch stopped = new java.util.concurrent.CountDownLatch(1);
             Runnable stopTask = () -> {
                 try {
-                    encoderHandler.removeCallbacks(delayedDrain);
                     if (eglEncoder != null) eglEncoder.setVehicleStatusWatermarkEnabled(false);
                     // 发送结束信号给编码器
                     if (encoder != null) {
@@ -611,7 +643,6 @@ public class CodecVideoRecorder {
                             encoder.signalEndOfInputStream();
                             // 排空编码器
                             drainEncoder(true);
-                            logRecordingStats();
                         } catch (Exception e) {
                             AppLog.e(TAG, "Camera " + cameraId + " Error signaling end of stream", e);
                         }
@@ -626,6 +657,7 @@ public class CodecVideoRecorder {
                         }
                         muxerStarted = false;
                     }
+                    logRecordingStats();
 
                     AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped on encoder thread, frames recorded: " + recordedFrameCount);
                 } catch (Exception e) {
@@ -639,9 +671,7 @@ public class CodecVideoRecorder {
             } else {
                 if (!encoderHandler.post(stopTask)) stopTask.run();
                 try {
-                    if (!stopped.await(3000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
-                        AppLog.w(TAG, "Camera " + cameraId + " Timed out stopping encoder");
-                    }
+                    stopped.await();
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -664,6 +694,9 @@ public class CodecVideoRecorder {
         recordedFilePaths.clear();
     }
 
+    /** Pause every camera's submissions before waiting for any one camera's disk finalization. */
+    public void requestStop() { stopRequested = true; }
+
     /**
      * 释放资源
      */
@@ -675,15 +708,23 @@ public class CodecVideoRecorder {
         AppLog.d(TAG, "Camera " + cameraId + " Releasing CodecVideoRecorder");
 
         isReleased = true;
+        stopRequested = true;
 
         if (isRecording.get()) {
             stopRecording();
         }
 
-        // 释放 EGL 渲染器
-        if (eglEncoder != null) {
-            eglEncoder.release();
-            eglEncoder = null;
+        // GL objects must be destroyed on their owning thread, after its last frame callback.
+        if (eglEncoder != null && encoderHandler != null) {
+            final java.util.concurrent.CountDownLatch glReleased = new java.util.concurrent.CountDownLatch(1);
+            Runnable task = () -> {
+                try { if (eglEncoder != null) eglEncoder.release(); }
+                finally { eglEncoder = null; glReleased.countDown(); }
+            };
+            if (Looper.myLooper() == encoderHandler.getLooper()) task.run();
+            else if (encoderHandler.post(task)) {
+                try { glReleased.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            }
         }
 
         // 释放缓存的录制 Surface（必须在 SurfaceTexture 之前释放）
@@ -724,11 +765,19 @@ public class CodecVideoRecorder {
             } catch (Exception e) {
                 // Ignore
             }
-            muxer.release();
+            try { muxer.release(); }
+            catch (Exception e) { AppLog.w(TAG, "Writer close failed; pending file retained: " + e.getMessage()); }
             muxer = null;
         }
 
         // 停止编码线程
+        if (drainHandler != null) drainHandler.removeCallbacksAndMessages(null);
+        if (drainThread != null) {
+            drainThread.quitSafely();
+            try { drainThread.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            drainThread = null;
+            drainHandler = null;
+        }
         if (encoderThread != null) {
             encoderThread.quitSafely();
             try {
@@ -807,41 +856,19 @@ public class CodecVideoRecorder {
      * 优先尝试 HEVC (H.265)，如果不支持则回退到 H.264
      */
     private void createEncoder() throws IOException {
-        // 检测并选择最优编码格式（forceH264 开启时固定 H.264）
-        mimeType = selectBestEncoder();
-
         // 如果启用了补盲优化模式，使用降低的帧率
         int effectiveFrameRate = blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate;
         if (eglEncoder != null) eglEncoder.setTargetFrameRate(effectiveFrameRate);
 
         // 码率：HEVC 模式使用优化后码率；H.264 兼容模式使用显式配置值
-        int effectiveBitrate = forceH264 ? bitRate : calculateOptimalBitrate();
+        int avcBitrate = forceH264 ? bitRate : calculateOptimalBitrate(MIME_TYPE_H264);
+        int hevcBitrate = calculateOptimalBitrate(MIME_TYPE_HEVC);
 
-        MediaFormat format = MediaFormat.createVideoFormat(mimeType, width, height);
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
-        format.setInteger(MediaFormat.KEY_BIT_RATE, effectiveBitrate);
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, effectiveFrameRate);
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL);
-        if (Build.VERSION.SDK_INT >= 29) format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
-
-        if (!forceH264) {
-            // HEVC/H.264 优化路径：附加 Profile/Level 以获得更好效率
-            if (mimeType.equals(MIME_TYPE_HEVC)) {
-                format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.HEVCProfileMain);
-                format.setInteger(MediaFormat.KEY_LEVEL, MediaCodecInfo.CodecProfileLevel.HEVCHighTierLevel4);
-            } else {
-                format.setInteger(MediaFormat.KEY_PROFILE, MediaCodecInfo.CodecProfileLevel.AVCProfileHigh);
-            }
-        }
-        // forceH264 开启：不设置 Profile/Level，走 v1.2.4 兼容路径，避免车机硬件 configure 失败
-
-        // 编码器创建：兼容模式用 createEncoderByType；优化模式优先选择硬件编码器
-        if (forceH264) {
-            encoder = MediaCodec.createEncoderByType(mimeType);
-        } else {
-            encoder = createHardwareEncoder(mimeType);
-        }
-        encoder.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE);
+        RecordingEncoderSelector.Result selected = RecordingEncoderSelector.create(width, height,
+                effectiveFrameRate, avcBitrate, hevcBitrate, forceH264, keyFrameIntervalSeconds, hardwareOnly);
+        encoder = selected.codec;
+        mimeType = selected.mime;
+        outputFormat = null;
 
         encoderInputSurface = encoder.createInputSurface();
         encoder.start();
@@ -850,91 +877,11 @@ public class CodecVideoRecorder {
 
         AppLog.d(TAG, "Camera " + cameraId + " Encoder created: " + width + "x" + height +
                 " @ " + effectiveFrameRate + "fps" + (blindSpotOptimizeMode ? "(补盲优化)" : "") +
-                ", " + (effectiveBitrate / 1000) + " Kbps, " +
+                ", " + (selected.bitrate / 1000) + " Kbps, " +
                 (mimeType.equals(MIME_TYPE_HEVC) ? "HEVC" : "H.264") +
                 (forceH264 ? " [兼容模式]" : ""));
     }
 
-    /**
-     * 选择最优编码器类型
-     * 优先使用 HEVC (H.265)，如果不支持则回退到 H.264
-     * 优化：优先选择硬件编码器，性能更好
-     */
-    private String selectBestEncoder() {
-        // 用户强制 H.264：兼容部分车型（避免 HEVC 在车机硬件上的闪烁/configure 失败）
-        if (forceH264) {
-            AppLog.i(TAG, "Camera " + cameraId + " force H.264 encoder (user setting)");
-            return MIME_TYPE_H264;
-        }
-        try {
-            // 检查 HEVC 编码器是否可用
-            MediaCodec hevcEncoder = MediaCodec.createEncoderByType(MIME_TYPE_HEVC);
-            hevcEncoder.release();
-            AppLog.d(TAG, "HEVC encoder available, using H.265 for better efficiency");
-            return MIME_TYPE_HEVC;
-        } catch (Exception e) {
-            AppLog.w(TAG, "HEVC encoder not available, falling back to H.264");
-            return MIME_TYPE_H264;
-        }
-    }
-    
-    /**
-     * 创建编码器，优先使用硬件编码器
-     * 优化：通过编码器名称选择硬件编码器，避免软件编码器性能问题
-     */
-    private MediaCodec createHardwareEncoder(String mimeType) throws IOException {
-        // 获取所有支持该类型的编码器
-        MediaCodecList codecList = new MediaCodecList(MediaCodecList.REGULAR_CODECS);
-        MediaCodecInfo[] codecInfos = codecList.getCodecInfos();
-        
-        MediaCodecInfo bestEncoder = null;
-        String bestEncoderName = null;
-        
-        for (MediaCodecInfo codecInfo : codecInfos) {
-            if (!codecInfo.isEncoder()) {
-                continue;
-            }
-            
-            String[] supportedTypes = codecInfo.getSupportedTypes();
-            boolean supportsMimeType = false;
-            for (String type : supportedTypes) {
-                if (type.equalsIgnoreCase(mimeType)) {
-                    supportsMimeType = true;
-                    break;
-                }
-            }
-            
-            if (!supportsMimeType) {
-                continue;
-            }
-            
-            String name = codecInfo.getName();
-            
-            // 优先选择硬件编码器（通常名称包含特定关键字）
-            // 避免软件编码器（如 c2.android.* 或 OMX.google.*）
-            if (name.contains("c2.android") || name.contains("OMX.google")) {
-                // 软件编码器，作为备选
-                if (bestEncoder == null) {
-                    bestEncoder = codecInfo;
-                    bestEncoderName = name;
-                }
-                continue;
-            }
-            
-            // 硬件编码器优先
-            bestEncoder = codecInfo;
-            bestEncoderName = name;
-            AppLog.i(TAG, "Camera " + cameraId + " Selected hardware encoder: " + name);
-            break;
-        }
-        
-        if (bestEncoder != null) {
-            return MediaCodec.createByCodecName(bestEncoderName);
-        }
-        
-        // 回退到默认方式
-        return MediaCodec.createEncoderByType(mimeType);
-    }
 
     /**
      * 计算最优码率
@@ -946,7 +893,7 @@ public class CodecVideoRecorder {
      * 2. 根据分辨率动态调整，高分辨率适当降低 bpp
      * 3. 严格限制最大码率，防止编码器过载
      */
-    private int calculateOptimalBitrate() {
+    private int calculateOptimalBitrate(String targetMime) {
         // 基础码率计算（每像素每帧的比特数）- 优化后的值，降低码率减少CPU占用
         double bitsPerPixelPerFrame;
 
@@ -976,7 +923,7 @@ public class CodecVideoRecorder {
         }
 
         // HEVC 效率更高，相同画质下使用 55% 的码率
-        boolean isHevc = mimeType.equals(MIME_TYPE_HEVC);
+        boolean isHevc = targetMime.equals(MIME_TYPE_HEVC);
         if (isHevc) {
             bitsPerPixelPerFrame *= 0.55;
         }
@@ -1002,7 +949,11 @@ public class CodecVideoRecorder {
      * 创建 MediaMuxer
      */
     private void createMuxer(String filePath) throws IOException {
-        muxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+        muxer = new AsyncMuxerWriter(filePath, error -> {
+            encoderHealthy = false;
+            AppLog.e(TAG, "Camera " + cameraId + " Writer failed; incomplete video remains .pending", error);
+            if (callback != null) callback.onRecordError(cameraId, "Video writer failed: " + error.getMessage());
+        });
         videoTrackIndex = -1;
         muxerStarted = false;
         muxerClock.reset();
@@ -1011,9 +962,7 @@ public class CodecVideoRecorder {
         AppLog.d(TAG, "Camera " + cameraId + " Muxer created: " + filePath);
     }
 
-    // 注意：encodingLoop() 方法已被移除
-    // 帧处理现在直接在 onFrameAvailable 回调中完成
-    // 这样可以避免 Handler 死锁问题
+    // GL submission and output draining have separate owning threads.
 
     private void drainEncoder(boolean endOfStream) {
         drainEncoderWithResult(endOfStream);
@@ -1021,6 +970,10 @@ public class CodecVideoRecorder {
 
     /** Normal drains never wait; final drains read all samples through EOS with a deadline. */
     private boolean drainEncoderWithResult(boolean endOfStream) {
+        synchronized (codecLock) { return drainEncoderLocked(endOfStream); }
+    }
+
+    private boolean drainEncoderLocked(boolean endOfStream) {
         if (encoder == null) return false;
         boolean gotOutput = false;
         int processed = 0;
@@ -1028,17 +981,24 @@ public class CodecVideoRecorder {
         try {
             while (endOfStream || processed < DRAIN_BATCH_SIZE) {
                 if (endOfStream && SystemClock.elapsedRealtime() >= deadline) {
-                    AppLog.w(TAG, "Camera " + cameraId + " Timed out waiting for encoder EOS");
-                    break;
+                    IllegalStateException timeout = new IllegalStateException("Timed out waiting for encoder EOS");
+                    if (muxer != null) muxer.abort(timeout);
+                    throw timeout;
                 }
+                long pollStart = System.nanoTime();
                 int index = encoder.dequeueOutputBuffer(bufferInfo, endOfStream ? 10000 : 0);
+                if (!endOfStream) {
+                    long us = (System.nanoTime() - pollStart) / 1000;
+                    codecPolls++; totalCodecPollUs += us; maxCodecPollUs = Math.max(maxCodecPollUs,us);
+                }
                 if (index == MediaCodec.INFO_TRY_AGAIN_LATER) {
                     if (!endOfStream) break;
                     continue;
                 }
                 if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    outputFormat = encoder.getOutputFormat();
                     if (!muxerStarted && muxer != null) {
-                        videoTrackIndex = muxer.addTrack(encoder.getOutputFormat());
+                        videoTrackIndex = muxer.addTrack(outputFormat);
                         muxer.start();
                         muxerStarted = true;
                         encoderHealthy = true;
@@ -1052,6 +1012,10 @@ public class CodecVideoRecorder {
                     if (data != null && bufferInfo.size > 0
                             && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
                         if (!muxerStarted) throw new IllegalStateException("Muxer not started");
+                        if (!endOfStream && segmentRequested
+                                && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
+                            rotateMuxerAtKeyFrame();
+                        }
                         long correctedBefore = muxerClock.getCorrectedSamples();
                         bufferInfo.presentationTimeUs = muxerClock.normalize(bufferInfo.presentationTimeUs);
                         if (muxerClock.getCorrectedSamples() != correctedBefore) {
@@ -1087,6 +1051,12 @@ public class CodecVideoRecorder {
                 + ", segmentFrames=" + encodedOutputFrameCount + ", durationUs=" + durationUs
                 + ", inputCallbacks=" + inputFrameCallbacks + ", submittedFrames=" + recordedFrameCount
                 + ", correctedPts=" + muxerClock.getCorrectedSamples());
+        AppLog.i(TAG, "Recording timing camera=" + cameraId + ", glAvgUs="
+                + (recordedFrameCount == 0 ? 0 : totalGlUs / recordedFrameCount)
+                + ", glMaxUs=" + maxGlUs + ", " + (muxer == null ? "noWriter" : muxer.stats()));
+        AppLog.i(TAG, "Recording codec poll camera=" + cameraId + ", avgUs="
+                + (codecPolls == 0 ? 0 : totalCodecPollUs / codecPolls) + ", maxUs=" + maxCodecPollUs);
+        if (eglEncoder != null) AppLog.i(TAG, "Recording input camera=" + cameraId + ", " + eglEncoder.frameStats());
     }
 
     /**
@@ -1117,94 +1087,43 @@ public class CodecVideoRecorder {
         AppLog.d(TAG, "Camera " + cameraId + " Scheduled next segment in " + (segmentDurationMs / 1000) + " seconds (actual delay: " + actualDelayMs + "ms)");
     }
 
-    /**
-     * 切换到下一段（在编码线程上执行）
-     * 
-     * 采用简单方案：完整停止当前录制，然后重新开始
-     * 类似 MediaRecorder 的方式，虽然会丢失几帧，但更简单可靠
-     * 
-     * 快速恢复机制：
-     * - 成功时：重置恢复计数器，调度正常的1分钟定时器
-     * - 失败时：使用5秒快速重试，最多重试6次（30秒内），之后回到正常1分钟间隔
-     */
+    /** Request a key frame; the output thread rotates only the muxer at that frame. */
     private void switchToNextSegment() {
-        // 检查是否仍在录制状态（防止与 stopRecording 竞态）
-        if (!isRecording.get() || isReleased) {
-            AppLog.w(TAG, "Camera " + cameraId + " Skipping segment switch (not recording or released)");
-            return;
-        }
-        
-        AppLog.d(TAG, "Camera " + cameraId + " Starting segment switch on encoder thread");
-        
-        boolean switchSuccess = false;
-        
-        try {
-            // 1. 停止当前录制（会排空编码器、停止 Muxer）
-            stopRecordingForSegmentSwitch();
-            
-            // 2. 验证当前文件（在主线程上执行，因为是 IO 操作）
-            final String previousFilePath = currentFilePath;
-            segmentHandler.post(() -> validateAndCleanupFile(previousFilePath));
-
-            // 3. 准备下一段
-            segmentIndex++;
-            String nextSegmentPath = generateSegmentPath();
-            currentFilePath = nextSegmentPath;
-            recordedFilePaths.add(nextSegmentPath);  // 记录新分段文件
-            
-            // 重置分段开始时间和帧计数
-            encodedOutputFrameCount = 0;
-
-            // 4. 创建新的 Muxer
-            createMuxer(nextSegmentPath);
-            
-            // 5. 重新开始录制
-            isRecording.set(true);
-            switchSuccess = true;
-            
-            // 成功：重置恢复计数器
-            recoveryAttempts = 0;
-            
-            AppLog.d(TAG, "Camera " + cameraId + " Switched to segment " + segmentIndex + ": " + nextSegmentPath);
-
-            if (callback != null) {
-                final int newIndex = segmentIndex;
-                final String completedPath = previousFilePath;  // 已完成的文件路径
-                segmentHandler.post(() -> callback.onSegmentSwitch(cameraId, newIndex, completedPath));
-            }
-
-        } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " Failed to switch segment (attempt " + (recoveryAttempts + 1) + ")", e);
-            
-            // 标记录制状态（允许帧回调继续消费帧）
-            isRecording.set(false);
-            
-            if (callback != null) {
-                final String errorMsg = e.getMessage();
-                segmentHandler.post(() -> callback.onRecordError(cameraId, "Failed to switch segment: " + errorMsg));
+        if (!isRecording.get() || isReleased || stopRequested || segmentRequested) return;
+        segmentRequested = true;
+        synchronized (codecLock) {
+            try {
+                android.os.Bundle parameters = new android.os.Bundle();
+                parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+                if (encoder != null) encoder.setParameters(parameters);
+            } catch (Exception e) {
+                AppLog.w(TAG, "Sync-frame request unavailable; waiting for natural key frame");
             }
         }
-        
-        // 6. 根据结果调度下一次操作
-        if (switchSuccess) {
-            // 成功：调度正常的1分钟定时器
-            segmentHandler.post(() -> scheduleNextSegment());
-        } else {
-            // 失败：启动快速恢复机制
-            recoveryAttempts++;
-            if (recoveryAttempts <= MAX_RECOVERY_ATTEMPTS) {
-                // 快速重试（5秒后）
-                AppLog.w(TAG, "Camera " + cameraId + " Segment switch failed, quick retry in " 
-                    + (RECOVERY_RETRY_INTERVAL_MS / 1000) + "s (attempt " + recoveryAttempts + "/" + MAX_RECOVERY_ATTEMPTS + ")");
-                scheduleRecoveryRetry();
-            } else {
-                // 超过最大重试次数，回到正常分段间隔
-                AppLog.w(TAG, "Camera " + cameraId + " Max recovery attempts reached, will retry in " 
-                    + (segmentDurationMs / 1000) + " seconds");
-                recoveryAttempts = 0;  // 重置计数器
-                segmentHandler.post(() -> scheduleNextSegment());
-            }
-        }
+    }
+
+    /** Runs on the output thread. The same codec/camera/GL input continues across files. */
+    private void rotateMuxerAtKeyFrame() throws IOException {
+        if (outputFormat == null) return;
+        segmentRequested = false;
+        String completedPath = currentFilePath;
+        muxer.stop();
+        logRecordingStats();
+        muxer.release();
+        segmentIndex++;
+        currentFilePath = generateSegmentPath();
+        recordedFilePaths.add(currentFilePath);
+        createMuxer(currentFilePath);
+        videoTrackIndex = muxer.addTrack(outputFormat);
+        muxer.start();
+        muxerStarted = true;
+        lastFileSize = 0;
+        final int index = segmentIndex;
+        if (segmentHandler != null) segmentHandler.post(() -> {
+            validateAndCleanupFile(completedPath);
+            if (callback != null) callback.onSegmentSwitch(cameraId, index, completedPath);
+            scheduleNextSegment();
+        });
     }
     
     /**
@@ -1231,6 +1150,11 @@ public class CodecVideoRecorder {
      * 尝试恢复录制
      */
     private void attemptRecovery() {
+        synchronized (codecLock) { attemptRecoveryLocked(); }
+    }
+
+    private void attemptRecoveryLocked() {
+        if (stopRequested || isReleased) return;
         AppLog.d(TAG, "Camera " + cameraId + " Attempting recovery (attempt " + recoveryAttempts + "/" + MAX_RECOVERY_ATTEMPTS + ")");
         
         boolean recoverySuccess = false;
@@ -1255,7 +1179,10 @@ public class CodecVideoRecorder {
             encodedOutputFrameCount = 0;
             
             // 恢复录制
+            if (stopRequested || isReleased) return;
+            encoderHealthy = true;
             isRecording.set(true);
+            scheduleDrain();
             recoverySuccess = true;
             
             // 成功：重置恢复计数器
@@ -1285,85 +1212,6 @@ public class CodecVideoRecorder {
         }
     }
     
-    /**
-     * 为分段切换停止录制（在编码线程上执行）
-     * 完整停止并重新创建编码器
-     * 
-     * 注意：此方法有完善的异常处理，即使部分操作失败也会继续执行
-     */
-    private void stopRecordingForSegmentSwitch() {
-        AppLog.d(TAG, "Camera " + cameraId + " Stopping recording for segment switch");
-        
-        // 1. 停止录制（阻止新帧写入）
-        isRecording.set(false);
-        
-        // 2. 排空编码器（drainEncoder 现在在同一线程执行，不会有竞争）
-        if (encoder != null) {
-            try {
-                encoder.signalEndOfInputStream();
-                drainEncoder(true);
-                logRecordingStats();
-            } catch (Exception e) {
-                AppLog.e(TAG, "Camera " + cameraId + " Error draining encoder during segment switch", e);
-            }
-        }
-        
-        // 3. 停止 Muxer（即使失败也继续）
-        if (muxer != null) {
-            try {
-                if (muxerStarted) {
-                    muxer.stop();
-                }
-                muxer.release();
-            } catch (Exception e) {
-                AppLog.e(TAG, "Camera " + cameraId + " Error stopping muxer during segment switch", e);
-            }
-            muxer = null;
-            muxerStarted = false;
-            videoTrackIndex = -1;
-        }
-        
-        // 4. 释放旧编码器（即使失败也继续）
-        if (encoder != null) {
-            try {
-                encoder.stop();
-            } catch (Exception e) {
-                AppLog.w(TAG, "Camera " + cameraId + " Error stopping encoder: " + e.getMessage());
-            }
-            try {
-                encoder.release();
-            } catch (Exception e) {
-                AppLog.w(TAG, "Camera " + cameraId + " Error releasing encoder: " + e.getMessage());
-            }
-            encoder = null;
-        }
-        
-        if (encoderInputSurface != null) {
-            try {
-                encoderInputSurface.release();
-            } catch (Exception e) {
-                AppLog.w(TAG, "Camera " + cameraId + " Error releasing encoder surface: " + e.getMessage());
-            }
-            encoderInputSurface = null;
-        }
-        
-        // 5. 重新创建编码器
-        try {
-            createEncoder();
-            
-            // 重新设置 EGL 的输出 Surface
-            if (eglEncoder != null && encoderInputSurface != null) {
-                eglEncoder.updateOutputSurface(encoderInputSurface);
-            }
-            
-            AppLog.d(TAG, "Camera " + cameraId + " Encoder recreated for new segment");
-            
-        } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " Failed to recreate encoder", e);
-            // 抛出异常，让调用者处理
-            throw new RuntimeException("Failed to recreate encoder for segment switch", e);
-        }
-    }
 
     /**
      * 生成新的分段文件路径
@@ -1395,7 +1243,7 @@ public class CodecVideoRecorder {
         }
 
         healthCheckRunnable = () -> {
-            if (!isRecording.get() || isReleased) {
+            if (!isRecording.get() || isReleased || stopRequested) {
                 return;
             }
 
@@ -1410,7 +1258,8 @@ public class CodecVideoRecorder {
                 // Muxer 从未启动，但已经处理了很多帧
                 needsRecovery = true;
                 reason = "muxer never started after " + recordedFrameCount + " frames";
-            } else if (framesWithoutEncoderOutput > MAX_FRAMES_WITHOUT_OUTPUT) {
+            } else if (framesWithoutEncoderOutput > MAX_FRAMES_WITHOUT_OUTPUT
+                    && System.currentTimeMillis() - lastEncoderOutputTime > 1500) {
                 needsRecovery = true;
                 reason = "no encoder output for " + framesWithoutEncoderOutput + " frames";
             }
@@ -1437,6 +1286,11 @@ public class CodecVideoRecorder {
      * 当检测到编码器不健康时调用
      */
     private void rebuildEncoder() {
+        synchronized (codecLock) { rebuildEncoderLocked(); }
+    }
+
+    private void rebuildEncoderLocked() {
+        if (stopRequested || isReleased) return;
         AppLog.d(TAG, "Camera " + cameraId + " Rebuilding encoder due to health check failure");
 
         // 暂停录制
@@ -1507,7 +1361,10 @@ public class CodecVideoRecorder {
             lastEncoderOutputTime = System.currentTimeMillis();
 
             // 8. 恢复录制
+            if (stopRequested || isReleased) return;
             isRecording.set(true);
+            segmentRequested = false;
+            scheduleDrain();
 
             AppLog.d(TAG, "Camera " + cameraId + " Encoder rebuilt successfully, new file: " + newFilePath);
 
@@ -1545,13 +1402,15 @@ public class CodecVideoRecorder {
         }
 
         fileSizeCheckRunnable = () -> {
-            if (isRecording.get() && currentFilePath != null) {
-                File file = new File(currentFilePath);
+            if (!stopRequested && isRecording.get() && currentFilePath != null) {
+                File file = new File(currentFilePath + ".pending");
+                if (!file.exists()) file = new File(currentFilePath);
                 long currentSize = file.exists() ? file.length() : 0;
                 long sizeIncrease = currentSize - lastFileSize;
 
                 // 检查是否有写入
-                boolean hasWrite = (sizeIncrease > 0) || (currentSize > MIN_VALID_FILE_SIZE);
+                AsyncMuxerWriter writer = muxer;
+                boolean hasWrite = writer != null && writer.getWrittenSamples() > 0;
                 
                 if (hasWrite) {
                     // 首次写入检测

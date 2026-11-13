@@ -397,7 +397,7 @@ public class PlaybackFragmentNew extends Fragment {
         
         // 先在后台加载视频，延迟后再切换界面显示（防止闪烁旧画面或黑屏）
         labelSingle.setText(label);
-        btnViewMode.setText(label + "摄");
+        btnViewMode.setText(VideoGroup.POSITION_COMBINED.equals(position) ? label : label + "摄");
         
         // 确保 videoSingle 可见（在切换布局之前）
         if (videoSingle != null) {
@@ -423,6 +423,8 @@ public class PlaybackFragmentNew extends Fragment {
      * 切换到多路模式
      */
     private void switchToMultiMode() {
+        if (currentGroup != null && currentGroup.hasVideo(VideoGroup.POSITION_COMBINED)
+                && currentGroup.getVideoCount() == 1) return;
         isSingleMode = false;
         btnViewMode.setText("多路");
         
@@ -447,6 +449,7 @@ public class PlaybackFragmentNew extends Fragment {
         if (currentGroup.hasVideo(VideoGroup.POSITION_BACK)) availablePositions.add(VideoGroup.POSITION_BACK);
         if (currentGroup.hasVideo(VideoGroup.POSITION_LEFT)) availablePositions.add(VideoGroup.POSITION_LEFT);
         if (currentGroup.hasVideo(VideoGroup.POSITION_RIGHT)) availablePositions.add(VideoGroup.POSITION_RIGHT);
+        if (currentGroup.hasVideo(VideoGroup.POSITION_COMBINED)) availablePositions.add(VideoGroup.POSITION_COMBINED);
         
         // 找到当前位置的索引
         String currentPos = isSingleMode ? currentSinglePosition : "multi";
@@ -474,6 +477,7 @@ public class PlaybackFragmentNew extends Fragment {
             case VideoGroup.POSITION_BACK: return "后";
             case VideoGroup.POSITION_LEFT: return "左";
             case VideoGroup.POSITION_RIGHT: return "右";
+            case VideoGroup.POSITION_COMBINED: return "合成";
             default: return "";
         }
     }
@@ -537,6 +541,14 @@ public class PlaybackFragmentNew extends Fragment {
      */
     private void loadVideoGroup(VideoGroup group) {
         this.currentGroup = group;
+        boolean combined = group.hasVideo(VideoGroup.POSITION_COMBINED);
+        btnViewMode.setEnabled(!combined || group.getVideoCount() > 1);
+        if (combined) {
+            isSingleMode = true;
+            currentSinglePosition = VideoGroup.POSITION_COMBINED;
+            labelSingle.setText("合成：左 / 后 / 右");
+            btnViewMode.setText("合成");
+        }
         noSelectionHint.setVisibility(View.GONE);
         
         // 如果在单路模式下，检查当前选择的摄像头是否有视频

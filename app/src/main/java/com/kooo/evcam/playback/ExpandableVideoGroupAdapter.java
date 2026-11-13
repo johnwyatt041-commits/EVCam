@@ -215,10 +215,11 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
 
         // 视频路数标签
         int count = group.getVideoCount();
-        holder.videoCountBadge.setText(count + "路");
+        holder.videoCountBadge.setText(group.hasVideo(VideoGroup.POSITION_COMBINED) ? "合成" : count + "路");
 
         // 加载四个位置的缩略图
-        loadThumbnail(group.getFrontVideo(), holder.thumbFront);
+        loadThumbnail(group.hasVideo(VideoGroup.POSITION_COMBINED)
+                ? group.getVideoFile(VideoGroup.POSITION_COMBINED) : group.getFrontVideo(), holder.thumbFront);
         loadThumbnail(group.getBackVideo(), holder.thumbBack);
         loadThumbnail(group.getLeftVideo(), holder.thumbLeft);
         loadThumbnail(group.getRightVideo(), holder.thumbRight);
