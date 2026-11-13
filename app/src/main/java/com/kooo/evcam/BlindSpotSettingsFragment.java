@@ -96,6 +96,12 @@ public class BlindSpotSettingsFragment extends Fragment {
         initViews(view);
         loadSettings();
         setupListeners();
+        view.findViewById(R.id.btn_open_lab).setVisibility(View.GONE);
+        OptionalFeatureViews.hideRow(view, R.id.switch_long_view_mode);
+        OptionalFeatureViews.hideRow(view, R.id.switch_mock_floating);
+        view.findViewById(R.id.btn_long_view_adjust).setVisibility(View.GONE);
+        View doors = view.findViewById(R.id.ll_door_linkage_section);
+        if (doors != null) doors.setVisibility(View.GONE);
         return view;
     }
 
@@ -124,6 +130,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         secondaryBlindSpotSwitch = view.findViewById(R.id.switch_secondary_blind_spot_display);
         adjustSecondaryBlindSpotWindowButton = view.findViewById(R.id.btn_adjust_secondary_blind_spot_window);
         adjustMjpegStreamButton = view.findViewById(R.id.btn_adjust_mjpeg_stream);
+        adjustMjpegStreamButton.setVisibility(AppFeatures.NETWORK_STREAMING ? View.VISIBLE : View.GONE);
         
         // 车门联动UI初始化
         doorLinkageSectionLayout = view.findViewById(R.id.ll_door_linkage_section);

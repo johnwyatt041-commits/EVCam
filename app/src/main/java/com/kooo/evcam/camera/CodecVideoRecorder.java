@@ -7,6 +7,8 @@ import android.media.MediaCodecList;
 import android.media.MediaFormat;
 import android.media.MediaMuxer;
 import android.os.Handler;
+import android.os.Build;
+import android.os.SystemClock;
 import android.os.HandlerThread;
 import android.os.Looper;
 import android.os.Process;
@@ -62,13 +64,10 @@ public class CodecVideoRecorder {
     // 画质等级：0=低, 1=中, 2=高, 3=最高
     private int qualityLevel = 2;
     
-    // 自适应 drain 间隔控制（优化版 - 减少CPU占用）
-    private volatile long currentDrainIntervalMs = 20;  // 当前 drain 间隔（毫秒）- 提高到20ms减少CPU占用
-    private static final long DRAIN_INTERVAL_MIN_MS = 10;   // 最小 10ms（保证流畅性）
-    private static final long DRAIN_INTERVAL_MAX_MS = 50;  // 最大 50ms（减少CPU占用）
-    private static final int DRAIN_BATCH_SIZE = 8;  // 每次 drain 批量处理更多帧，减少系统调用开销
-    private long lastDrainTimeMs = 0;  // 上次 drain 时间
-    private int framesSinceLastDrain = 0;  // 上次 drain 以来的帧数
+    private static final int DRAIN_BATCH_SIZE = 8;
+    private static final long EOS_DRAIN_TIMEOUT_MS = 1500;
+    private final MuxerTimestampClock muxerClock = new MuxerTimestampClock();
+    private long inputFrameCallbacks = 0;
 
     private final String cameraId;
     private final int width;
@@ -96,17 +95,13 @@ public class CodecVideoRecorder {
     // 状态
     private final AtomicBoolean isRecording = new AtomicBoolean(false);  // 使用 AtomicBoolean 确保线程安全
     private volatile boolean isReleased = false;
+    private final Runnable delayedDrain = () -> {
+        if (!isReleased && isRecording.get() && encoder != null) drainEncoderWithResult(false);
+    };
     private String currentFilePath;
     
     // 缓存的录制 Surface，避免重复创建导致内存泄漏
     private Surface cachedRecordSurface = null;
-    
-    // 时间戳基准（用于计算相对时间戳，供输入端使用）
-    private long firstFrameTimestampNs = -1;
-    
-    // 分段开始时间（用于计算 PTS，基于系统时间而非帧数）
-    // 这样可以准确反映实际录制时长，不受帧率波动影响
-    private long segmentStartTimeNs = 0;
     
     // 编码器输出帧计数（仅用于日志和统计，不再用于 PTS 计算）
     private long encodedOutputFrameCount = 0;
@@ -147,7 +142,7 @@ public class CodecVideoRecorder {
     private static final long ENCODER_HEALTH_CHECK_INTERVAL_MS = 3000;  // 健康检查间隔：3秒
     private static final int MAX_FRAMES_WITHOUT_OUTPUT = 30;  // 无输出的最大帧数阈值
     private long lastEncoderOutputTime = 0;  // 最后一次编码器输出时间
-    private int framesWithoutEncoderOutput = 0;  // 无编码器输出的连续帧数
+    private volatile int framesWithoutEncoderOutput = 0;  // 无编码器输出的连续帧数
     private volatile boolean encoderHealthy = true;  // 编码器是否健康
     private Runnable healthCheckRunnable;  // 健康检查任务
 
@@ -322,7 +317,7 @@ public class CodecVideoRecorder {
         this.currentFilePath = filePath;
         this.segmentIndex = 0;
         this.recordedFrameCount = 0;
-        this.firstFrameTimestampNs = -1;  // 重置时间戳基准
+        this.inputFrameCallbacks = 0;
         this.encodedOutputFrameCount = 0;  // 重置编码输出帧计数
 
         // 重置健康检查状态
@@ -350,11 +345,9 @@ public class CodecVideoRecorder {
             encoderThread = new HandlerThread("Encoder-" + cameraId) {
                 @Override
                 protected void onLooperPrepared() {
-                    // 降低编码线程优先级，避免与补盲画面渲染竞争资源
-                    // THREAD_PRIORITY_BACKGROUND 比 FOREGROUND 更低，给补盲画面留出更多 CPU 时间
-                    // 同时保持比 THREAD_PRIORITY_LOWEST 高，确保录制不会掉帧
-                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
-                    AppLog.d(TAG, "Camera " + cameraId + " 编码线程优先级设置为 BACKGROUND");
+                    // Encoding is time-sensitive; do not throttle it as background file I/O.
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_DEFAULT);
+                    AppLog.d(TAG, "Camera " + cameraId + " Encoding thread uses normal priority");
                 }
             };
             encoderThread.start();
@@ -376,6 +369,7 @@ public class CodecVideoRecorder {
                 try {
                     // 创建 EGL 渲染器（在编码线程上）
                     eglEncoder = new EglSurfaceEncoder(cameraId, width, height);
+                    eglEncoder.setTargetFrameRate(blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate);
                     resultTextureId[0] = eglEncoder.initialize(encoderInputSurface);
                     textureId = resultTextureId[0];
 
@@ -386,77 +380,24 @@ public class CodecVideoRecorder {
                     // 设置帧可用回调（在编码线程上）
                     // 直接在回调中处理帧，避免 Handler 死锁
                     inputSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
-                        if (isReleased) {
+                        if (isReleased) return;
+                        if (!isRecording.get() || !encoderHealthy) {
+                            if (eglEncoder != null) eglEncoder.consumeFrame();
                             return;
                         }
-
+                        inputFrameCallbacks++;
                         try {
-                            // 关键修复：即使不在录制状态，也必须调用 updateTexImage() 消费帧
-                            // 否则 SurfaceTexture 会保持 pending 状态，不再触发后续回调
-                            // updateTexImage 在 drawFrame 内部调用，这里单独处理非录制状态
-                            if (!isRecording.get()) {
-                                // 不在录制状态时，仍需消费帧以保持 SurfaceTexture 正常工作
-                                if (eglEncoder != null && eglEncoder.isInitialized()) {
-                                    eglEncoder.consumeFrame();  // 只消费帧，不编码
-                                }
-                                return;
-                            }
-
-                            // 检查编码器健康状态，不健康时只消费帧不编码
-                            if (!encoderHealthy) {
-                                if (eglEncoder != null && eglEncoder.isInitialized()) {
-                                    eglEncoder.consumeFrame();  // 只消费帧，等待重建
-                                }
-                                return;
-                            }
-
-                            // 获取绝对时间戳（系统启动以来的纳秒）
-                            long absoluteTimestampNs = surfaceTexture.getTimestamp();
-                            
-                            // 计算相对时间戳（以第一帧为基准）
-                            // 注意：firstFrameTimestampNs 在整个录制期间不重置
-                            // 因为 eglPresentationTimeANDROID 需要单调递增的时间戳
-                            // 否则 GraphicBufferSource 会拒绝帧
-                            if (firstFrameTimestampNs < 0) {
-                                firstFrameTimestampNs = absoluteTimestampNs;
-                                AppLog.d(TAG, "Camera " + cameraId + " First frame timestamp: " + absoluteTimestampNs + " ns");
-                            }
-                            long relativeTimestampNs = absoluteTimestampNs - firstFrameTimestampNs;
-
-                            // 直接渲染帧到编码器（使用相对时间戳）
-                            if (eglEncoder != null && eglEncoder.isInitialized()) {
-                                eglEncoder.drawFrame(relativeTimestampNs);
+                            // Free output before submitting another input. Timestamping and
+                            // pacing happen after updateTexImage, using sensor time.
+                            drainEncoderWithResult(false);
+                            if (eglEncoder != null && eglEncoder.drawFrame()) {
                                 recordedFrameCount++;
-                                framesSinceLastDrain++;
-
-                                // 定期输出帧计数
-                                if (recordedFrameCount % 100 == 0) {
-                                    AppLog.d(TAG, "Camera " + cameraId + " Encoded frames: " + recordedFrameCount);
-                                }
+                                framesWithoutEncoderOutput++;
+                                encoderHandler.removeCallbacks(delayedDrain);
+                                encoderHandler.postDelayed(delayedDrain, 10);
                             }
-
-                            // 自适应 drain 控制：根据时间间隔决定是否 drain
-                            // 优化：使用更激进的批量策略，减少系统调用开销
-                            long currentTimeMs = System.currentTimeMillis();
-                            // 优化：增加帧数阈值到 10 帧，进一步减少 drain 次数
-                            if (currentTimeMs - lastDrainTimeMs >= currentDrainIntervalMs || framesSinceLastDrain >= 10) {
-                                // 从编码器获取输出数据并写入 muxer
-                                boolean hadOutput = drainEncoderWithResult(false);
-                                lastDrainTimeMs = currentTimeMs;
-                                framesSinceLastDrain = 0;
-                                
-                                // 调整 drain 间隔：有输出时缩短间隔，无输出时延长间隔
-                                // 优化：使用更平滑的调整策略
-                                if (hadOutput) {
-                                    currentDrainIntervalMs = Math.max(DRAIN_INTERVAL_MIN_MS, currentDrainIntervalMs - 1);
-                                } else {
-                                    currentDrainIntervalMs = Math.min(DRAIN_INTERVAL_MAX_MS, currentDrainIntervalMs + 2);
-                                }
-                            }
-
                         } catch (Exception e) {
                             AppLog.e(TAG, "Camera " + cameraId + " Error processing frame", e);
-                            // 发生异常时标记编码器不健康
                             encoderHealthy = false;
                         }
                     }, encoderHandler);
@@ -566,7 +507,6 @@ public class CodecVideoRecorder {
         AppLog.d(TAG, "Camera " + cameraId + " Starting codec recording");
 
         // 记录分段开始时间（用于 PTS 计算）
-        segmentStartTimeNs = System.nanoTime();
         encodedOutputFrameCount = 0;
         
         // 重置首次写入状态
@@ -643,22 +583,17 @@ public class CodecVideoRecorder {
 
         // 在编码线程上执行停止操作
         if (encoderHandler != null) {
-            final Object stopLock = new Object();
-            encoderHandler.post(() -> {
+            final java.util.concurrent.CountDownLatch stopped = new java.util.concurrent.CountDownLatch(1);
+            Runnable stopTask = () -> {
                 try {
-                    // 稍等一下让正在处理的帧完成
-                    try {
-                        Thread.sleep(50);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-
+                    encoderHandler.removeCallbacks(delayedDrain);
                     // 发送结束信号给编码器
                     if (encoder != null) {
                         try {
                             encoder.signalEndOfInputStream();
                             // 排空编码器
                             drainEncoder(true);
+                            logRecordingStats();
                         } catch (Exception e) {
                             AppLog.e(TAG, "Camera " + cameraId + " Error signaling end of stream", e);
                         }
@@ -678,16 +613,17 @@ public class CodecVideoRecorder {
                 } catch (Exception e) {
                     AppLog.e(TAG, "Camera " + cameraId + " Error in stopRecording on encoder thread", e);
                 } finally {
-                    synchronized (stopLock) {
-                        stopLock.notifyAll();
-                    }
+                    stopped.countDown();
                 }
-            });
-
-            // 等待停止完成（最多3秒）
-            synchronized (stopLock) {
+            };
+            if (Looper.myLooper() == encoderHandler.getLooper()) {
+                stopTask.run();
+            } else {
+                if (!encoderHandler.post(stopTask)) stopTask.run();
                 try {
-                    stopLock.wait(3000);
+                    if (!stopped.await(3000, java.util.concurrent.TimeUnit.MILLISECONDS)) {
+                        AppLog.w(TAG, "Camera " + cameraId + " Timed out stopping encoder");
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
@@ -858,6 +794,7 @@ public class CodecVideoRecorder {
 
         // 如果启用了补盲优化模式，使用降低的帧率
         int effectiveFrameRate = blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate;
+        if (eglEncoder != null) eglEncoder.setTargetFrameRate(effectiveFrameRate);
 
         // 码率：HEVC 模式使用优化后码率；H.264 兼容模式使用显式配置值
         int effectiveBitrate = forceH264 ? bitRate : calculateOptimalBitrate();
@@ -867,6 +804,7 @@ public class CodecVideoRecorder {
         format.setInteger(MediaFormat.KEY_BIT_RATE, effectiveBitrate);
         format.setInteger(MediaFormat.KEY_FRAME_RATE, effectiveFrameRate);
         format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL);
+        if (Build.VERSION.SDK_INT >= 29) format.setInteger(MediaFormat.KEY_MAX_B_FRAMES, 0);
 
         if (!forceH264) {
             // HEVC/H.264 优化路径：附加 Profile/Level 以获得更好效率
@@ -1049,6 +987,8 @@ public class CodecVideoRecorder {
         muxer = new MediaMuxer(filePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
         videoTrackIndex = -1;
         muxerStarted = false;
+        muxerClock.reset();
+        encodedOutputFrameCount = 0;
 
         AppLog.d(TAG, "Camera " + cameraId + " Muxer created: " + filePath);
     }
@@ -1057,201 +997,78 @@ public class CodecVideoRecorder {
     // 帧处理现在直接在 onFrameAvailable 回调中完成
     // 这样可以避免 Handler 死锁问题
 
-    /**
-     * 排空编码器输出（优化版 - 不降低画质）
-     * 
-     * 优化策略：
-     * - 使用批量处理，一次 drain 最多处理 DRAIN_BATCH_SIZE 帧
-     * - 使用零超时非阻塞模式，快速返回避免阻塞渲染线程
-     * - 捕获 IllegalStateException 并标记编码器不健康
-     * - 跟踪无输出的帧数，用于健康检查
-     */
     private void drainEncoder(boolean endOfStream) {
-        if (encoder == null) {
-            return;
-        }
-
-        // 优化：使用零超时非阻塞模式，快速检查是否有输出
-        final int TIMEOUT_USEC = endOfStream ? 10000 : 0;  // 结束状态等待，正常状态非阻塞
-        boolean gotOutput = false;
-        int processedFrames = 0;  // 本次 drain 已处理帧数
-
-        try {
-            while (processedFrames < DRAIN_BATCH_SIZE) {  // 批量处理限制
-                int outputBufferIndex;
-                try {
-                    outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
-                } catch (IllegalStateException e) {
-                    // 编码器处于无效状态，标记为不健康
-                    AppLog.e(TAG, "Camera " + cameraId + " Encoder in invalid state during dequeueOutputBuffer", e);
-                    encoderHealthy = false;
-                    return;
-                }
-
-                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    if (!endOfStream) {
-                        break;  // 没有数据了，快速返回
-                    }
-                    // 结束状态且超时，继续等待
-                    if (processedFrames > 0) {
-                        break;  // 已经处理了一些帧，可以返回了
-                    }
-                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    // 输出格式变化，添加视频轨道
-                    if (muxerStarted) {
-                        AppLog.w(TAG, "Camera " + cameraId + " Format changed twice");
-                    } else {
-                        MediaFormat newFormat = encoder.getOutputFormat();
-                        videoTrackIndex = muxer.addTrack(newFormat);
-                        muxer.start();
-                        muxerStarted = true;
-                        encoderHealthy = true;  // 收到格式变化说明编码器正常
-                        lastEncoderOutputTime = System.currentTimeMillis();
-                        AppLog.d(TAG, "Camera " + cameraId + " Muxer started, track=" + videoTrackIndex);
-                    }
-                    gotOutput = true;
-                } else if (outputBufferIndex >= 0) {
-                    ByteBuffer encodedData = encoder.getOutputBuffer(outputBufferIndex);
-
-                    if (encodedData == null) {
-                        AppLog.e(TAG, "Camera " + cameraId + " Encoder output buffer " + outputBufferIndex + " was null");
-                    } else if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) != 0) {
-                        // 配置数据，忽略（已在 FORMAT_CHANGED 中处理）
-                        bufferInfo.size = 0;
-                    }
-
-                    if (bufferInfo.size != 0) {
-                        if (!muxerStarted) {
-                            AppLog.e(TAG, "Camera " + cameraId + " Muxer not started but got data");
-                        } else {
-                            // 性能优化：使用基于帧数的 PTS 计算，减少 System.nanoTime() 调用
-                            // 假设目标帧率为 25fps，每帧间隔 40000 微秒
-                            // 优点：
-                            //   1. 大幅减少系统调用开销
-                            //   2. 时间戳单调递增，不会出现乱序
-                            //   3. 掉帧时时间轴仍然正确
-                            long calculatedPtsUs = encodedOutputFrameCount * 40000L;
-                            
-                            // 调试日志（仅第一帧）
-                            if (encodedOutputFrameCount == 0) {
-                                AppLog.d(TAG, "Camera " + cameraId + " First frame PTS: " + calculatedPtsUs + " us");
-                            }
-                            
-                            // 使用计算的时间戳
-                            bufferInfo.presentationTimeUs = calculatedPtsUs;
-                            
-                            encodedData.position(bufferInfo.offset);
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size);
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo);
-                            
-                            encodedOutputFrameCount++;
-                            lastEncoderOutputTime = System.currentTimeMillis();
-                            gotOutput = true;
-                            processedFrames++;  // 增加已处理帧计数
-                        }
-                    }
-
-                    try {
-                        encoder.releaseOutputBuffer(outputBufferIndex, false);
-                    } catch (IllegalStateException e) {
-                        AppLog.e(TAG, "Camera " + cameraId + " Encoder in invalid state during releaseOutputBuffer", e);
-                        encoderHealthy = false;
-                        return;
-                    }
-
-                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break;  // 流结束
-                    }
-                }
-            }
-        } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " Unexpected error in drainEncoder", e);
-            encoderHealthy = false;
-        }
-
-        // 更新无输出帧计数器
-        if (gotOutput) {
-            framesWithoutEncoderOutput = 0;
-        } else {
-            framesWithoutEncoderOutput++;
-        }
+        drainEncoderWithResult(endOfStream);
     }
 
-    /**
-     * 排空编码器输出（带返回值）
-     * @param endOfStream 是否结束流
-     * @return 是否有输出数据
-     */
+    /** Normal drains never wait; final drains read all samples through EOS with a deadline. */
     private boolean drainEncoderWithResult(boolean endOfStream) {
-        if (encoder == null) {
-            return false;
-        }
-
-        final int TIMEOUT_USEC = 10000;
+        if (encoder == null) return false;
         boolean gotOutput = false;
-
+        int processed = 0;
+        long deadline = SystemClock.elapsedRealtime() + EOS_DRAIN_TIMEOUT_MS;
         try {
-            while (true) {
-                int outputBufferIndex;
-                try {
-                    outputBufferIndex = encoder.dequeueOutputBuffer(bufferInfo, TIMEOUT_USEC);
-                } catch (IllegalStateException e) {
-                    encoderHealthy = false;
-                    return false;
+            while (endOfStream || processed < DRAIN_BATCH_SIZE) {
+                if (endOfStream && SystemClock.elapsedRealtime() >= deadline) {
+                    AppLog.w(TAG, "Camera " + cameraId + " Timed out waiting for encoder EOS");
+                    break;
                 }
-
-                if (outputBufferIndex == MediaCodec.INFO_TRY_AGAIN_LATER) {
-                    if (!endOfStream) {
-                        break;
-                    }
-                } else if (outputBufferIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
-                    if (!muxerStarted) {
-                        MediaFormat newFormat = encoder.getOutputFormat();
-                        videoTrackIndex = muxer.addTrack(newFormat);
+                int index = encoder.dequeueOutputBuffer(bufferInfo, endOfStream ? 10000 : 0);
+                if (index == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    if (!endOfStream) break;
+                    continue;
+                }
+                if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    if (!muxerStarted && muxer != null) {
+                        videoTrackIndex = muxer.addTrack(encoder.getOutputFormat());
                         muxer.start();
                         muxerStarted = true;
                         encoderHealthy = true;
-                        lastEncoderOutputTime = System.currentTimeMillis();
                     }
-                    gotOutput = true;
-                } else if (outputBufferIndex >= 0) {
-                    ByteBuffer encodedData = encoder.getOutputBuffer(outputBufferIndex);
-
-                    if (encodedData != null && bufferInfo.size != 0) {
-                        if (muxerStarted) {
-                            // 性能优化：使用基于帧数的 PTS 计算，减少 System.nanoTime() 调用开销
-                            // 与 drainEncoder 中的计算方式保持一致
-                            long calculatedPtsUs = encodedOutputFrameCount * 40000L;
-                            bufferInfo.presentationTimeUs = calculatedPtsUs;
-
-                            encodedData.position(bufferInfo.offset);
-                            encodedData.limit(bufferInfo.offset + bufferInfo.size);
-                            muxer.writeSampleData(videoTrackIndex, encodedData, bufferInfo);
-
-                            encodedOutputFrameCount++;
-                            lastEncoderOutputTime = System.currentTimeMillis();
-                            gotOutput = true;
-                        }
-                    }
-
-                    try {
-                        encoder.releaseOutputBuffer(outputBufferIndex, false);
-                    } catch (IllegalStateException e) {
-                        encoderHealthy = false;
-                        return gotOutput;
-                    }
-
-                    if ((bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0) {
-                        break;
-                    }
+                    continue;
                 }
+                if (index < 0) continue;
+                boolean eos = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_END_OF_STREAM) != 0;
+                try {
+                    ByteBuffer data = encoder.getOutputBuffer(index);
+                    if (data != null && bufferInfo.size > 0
+                            && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
+                        if (!muxerStarted) throw new IllegalStateException("Muxer not started");
+                        long correctedBefore = muxerClock.getCorrectedSamples();
+                        bufferInfo.presentationTimeUs = muxerClock.normalize(bufferInfo.presentationTimeUs);
+                        if (muxerClock.getCorrectedSamples() != correctedBefore) {
+                            AppLog.w(TAG, "Camera " + cameraId + " Corrected non-monotonic encoder PTS");
+                        }
+                        data.position(bufferInfo.offset);
+                        data.limit(bufferInfo.offset + bufferInfo.size);
+                        muxer.writeSampleData(videoTrackIndex, data, bufferInfo);
+                        encodedOutputFrameCount++;
+                        framesWithoutEncoderOutput = 0;
+                        lastEncoderOutputTime = System.currentTimeMillis();
+                        gotOutput = true;
+                    }
+                } finally {
+                    encoder.releaseOutputBuffer(index, false);
+                }
+                processed++;
+                if (eos) break;
             }
         } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " Error in drainEncoderWithResult", e);
+            AppLog.e(TAG, "Camera " + cameraId + " Error draining encoder", e);
             encoderHealthy = false;
         }
-
         return gotOutput;
+    }
+
+    private void logRecordingStats() {
+        long durationUs = muxerClock.getLastPtsUs();
+        double actualFps = durationUs > 0 ? (encodedOutputFrameCount - 1) * 1_000_000.0 / durationUs : 0;
+        AppLog.i(TAG, "Recording stats camera=" + cameraId + ", size=" + width + "x" + height
+                + ", codec=" + mimeType + ", targetFps=" + frameRate
+                + ", actualFps=" + String.format(Locale.US, "%.2f", actualFps)
+                + ", segmentFrames=" + encodedOutputFrameCount + ", durationUs=" + durationUs
+                + ", inputCallbacks=" + inputFrameCallbacks + ", submittedFrames=" + recordedFrameCount
+                + ", correctedPts=" + muxerClock.getCorrectedSamples());
     }
 
     /**
@@ -1318,9 +1135,7 @@ public class CodecVideoRecorder {
             recordedFilePaths.add(nextSegmentPath);  // 记录新分段文件
             
             // 重置分段开始时间和帧计数
-            segmentStartTimeNs = System.nanoTime();
             encodedOutputFrameCount = 0;
-            // 不重置 firstFrameTimestampNs，保持 EGL 时间戳单调递增
 
             // 4. 创建新的 Muxer
             createMuxer(nextSegmentPath);
@@ -1419,7 +1234,6 @@ public class CodecVideoRecorder {
             }
             
             // 重置分段开始时间和帧计数
-            segmentStartTimeNs = System.nanoTime();
             encodedOutputFrameCount = 0;
             
             // 恢复录制
@@ -1468,7 +1282,9 @@ public class CodecVideoRecorder {
         // 2. 排空编码器（drainEncoder 现在在同一线程执行，不会有竞争）
         if (encoder != null) {
             try {
-                drainEncoder(false);  // 先排空已有数据
+                encoder.signalEndOfInputStream();
+                drainEncoder(true);
+                logRecordingStats();
             } catch (Exception e) {
                 AppLog.e(TAG, "Camera " + cameraId + " Error draining encoder during segment switch", e);
             }
@@ -1667,7 +1483,6 @@ public class CodecVideoRecorder {
             createMuxer(newFilePath);
 
             // 7. 重置状态
-            segmentStartTimeNs = System.nanoTime();
             encodedOutputFrameCount = 0;
             framesWithoutEncoderOutput = 0;
             encoderHealthy = true;

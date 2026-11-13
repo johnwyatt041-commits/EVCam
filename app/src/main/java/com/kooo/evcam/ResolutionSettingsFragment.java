@@ -113,7 +113,11 @@ public class ResolutionSettingsFragment extends Fragment {
         initBitrateSpinner();
         
         // 初始化亮度/降噪调节
-        initImageAdjust();
+        if (AppFeatures.IMAGE_ADJUSTMENT) {
+            initImageAdjust();
+        } else {
+            OptionalFeatureViews.hideCard(view, R.id.btn_open_adjust_window);
+        }
 
         // 显示调试信息
         displayDebugInfo();

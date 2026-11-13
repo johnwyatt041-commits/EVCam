@@ -159,17 +159,8 @@ public class EglSurfaceEncoder {
     private long lastWatermarkUpdateMs = 0;
     private static final long WATERMARK_UPDATE_INTERVAL_MS = 1000; // 每秒更新一次水印
     
-    // 性能优化：跳帧控制（仅用于录制编码，不影响预览质量）
-    private int frameSkipCounter = 0;
-    private static final int FRAME_SKIP_THRESHOLD = 2; // 每3帧渲染1次（当CPU高负载时）
-    private boolean enableFrameSkip = false; // 默认不跳帧
-    
-    // 性能优化：异步渲染支持
-    private volatile boolean hasPendingFrame = false; // 是否有待处理的帧
-    private final Object frameLock = new Object(); // 帧处理锁
-    private volatile long lastFrameTimeNs = 0; // 上一帧时间戳
-    private static final long MIN_FRAME_INTERVAL_NS = 33_000_000L; // 最小帧间隔约30fps（防止过度渲染）
-    
+    private final FrameTimestampClock frameClock = new FrameTimestampClock(30);
+
     // 性能优化：复用缓冲区，减少GC
     private final float[] tempMatrix = new float[16];
     private long frameCount = 0;
@@ -247,105 +238,39 @@ public class EglSurfaceEncoder {
         return watermarkEnabled;
     }
 
-    /**
-     * 设置是否启用跳帧（用于降低CPU占用）
-     * @param enabled true 表示启用跳帧
-     */
-    public void setFrameSkipEnabled(boolean enabled) {
-        this.enableFrameSkip = enabled;
-        this.frameSkipCounter = 0;
-        AppLog.d(TAG, "Camera " + cameraId + " Frame skip " + (enabled ? "enabled" : "disabled"));
+    public void setTargetFrameRate(int frameRate) {
+        frameClock.setFrameRate(frameRate);
     }
 
-    /**
-     * 检查是否启用了跳帧
-     */
-    public boolean isFrameSkipEnabled() {
-        return enableFrameSkip;
-    }
-
-    /**
-     * 渲染一帧到输出 Surface
-     * 应该在 SurfaceTexture.onFrameAvailable 回调中调用
-     * @param presentationTimeNs 帧的呈现时间（纳秒）
-     */
-    public void drawFrame(long presentationTimeNs) {
-        if (!isInitialized || isReleased) {
-            return;
-        }
-
-        if (inputSurfaceTexture == null) {
-            AppLog.w(TAG, "Camera " + cameraId + " No input SurfaceTexture set");
-            return;
-        }
-
-        // 性能优化：帧率控制，防止过度渲染占用CPU
-        long currentTimeNs = System.nanoTime();
-        if (currentTimeNs - lastFrameTimeNs < MIN_FRAME_INTERVAL_NS) {
-            // 帧间隔太短，跳过渲染但消费帧
-            try {
-                makeCurrent();
-                inputSurfaceTexture.updateTexImage();
-            } catch (Exception e) {
-                // 忽略
-            }
-            return;
-        }
-
-        // 性能优化：跳帧控制（当启用时，每3帧渲染1次）
-        if (enableFrameSkip) {
-            frameSkipCounter++;
-            if (frameSkipCounter < FRAME_SKIP_THRESHOLD) {
-                // 跳过渲染，但更新时间戳
-                try {
-                    makeCurrent();
-                    inputSurfaceTexture.updateTexImage();
-                } catch (Exception e) {
-                    // 忽略
-                }
-                return;
-            }
-            frameSkipCounter = 0;
-        }
-
+    /** Latch the image first, then use that image's capture timestamp for encoding. */
+    public boolean drawFrame() {
+        if (!isInitialized || isReleased || inputSurfaceTexture == null) return false;
         try {
-            // 首先绑定 EGL context（必须在 updateTexImage 之前）
             makeCurrent();
-
-            // 更新纹理（需要在正确的 EGL context 中）
             inputSurfaceTexture.updateTexImage();
+            long ptsNs = frameClock.nextPresentationTimeNs(inputSurfaceTexture.getTimestamp());
+            if (ptsNs == FrameTimestampClock.SKIP_FRAME) return false;
             inputSurfaceTexture.getTransformMatrix(texMatrix);
-            lastFrameTimeNs = currentTimeNs;
 
-            // 设置视口
             GLES20.glViewport(0, 0, width, height);
-
-            // 优化：只在必要时清除缓冲，避免闪屏
             if (needsClear) {
                 GLES20.glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
                 needsClear = false;
             }
-
-            // 根据是否启用水印选择不同的渲染路径
             if (watermarkEnabled && watermarkProgram != 0) {
                 drawFrameWithWatermark();
             } else {
                 drawFrameWithoutWatermark();
             }
-
-            // 设置呈现时间戳并交换缓冲区
-            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, presentationTimeNs);
-            EGL14.eglSwapBuffers(eglDisplay, eglSurface);
-
+            EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs);
+            return EGL14.eglSwapBuffers(eglDisplay, eglSurface);
         } catch (Exception e) {
             AppLog.e(TAG, "Camera " + cameraId + " Error drawing frame", e);
+            return false;
         }
     }
 
-    /**
-     * 无水印渲染
-     */
     private void drawFrameWithoutWatermark() {
         // 使用着色器程序
         GLES20.glUseProgram(program);

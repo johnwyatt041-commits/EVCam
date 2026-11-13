@@ -184,6 +184,7 @@ public class MainActivity extends AppCompatActivity {
     // 导航相关
     private DrawerLayout drawerLayout;
     private NavigationView navigationView;
+    private PreviewVisibilityController previewVisibilityController;
     private View recordingLayout;  // 录制界面布局
     private View fragmentContainer;  // Fragment容器
 
@@ -237,6 +238,7 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化应用配置
         appConfig = new AppConfig(this);
+        appConfig.applyE5RecordingProfile();
         
         // 重置U盘回退提示标志（每次冷启动重置）
         AppConfig.resetSdFallbackFlag();
@@ -424,7 +426,7 @@ public class MainActivity extends AppCompatActivity {
         storageCleanupManager.start();
         
         // 启动文件传输服务（用于U盘中转写入模式）
-        FileTransferManager.getInstance(this).start();
+        // File transfers start only when an actual relay task is queued.
 
         // 检查是否是开机自启动
         boolean autoStartFromBoot = getIntent().getBooleanExtra("auto_start_from_boot", false);
@@ -457,13 +459,13 @@ public class MainActivity extends AppCompatActivity {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                 if (cameraManager != null && !cameraManager.isRecording()) {
                     // 确保摄像头已连接
-                    if (!cameraManager.hasConnectedCameras()) {
+                    if (!cameraManager.hasAvailableCameras()) {
                         AppLog.d(TAG, "摄像头未连接，先打开摄像头");
                         cameraManager.openAllCameras();
                     }
                     // 再等待一段时间确保摄像头完全准备好
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        if (cameraManager != null && cameraManager.hasConnectedCameras() && !cameraManager.isRecording()) {
+                        if (cameraManager != null && cameraManager.hasAvailableCameras() && !cameraManager.isRecording()) {
                             AppLog.d(TAG, "摄像头已准备好，自动开始录制");
                             startRecording();
                             // 录制开始后，延迟将 Activity 移到后台（让用户看到录制已开始）
@@ -543,13 +545,13 @@ public class MainActivity extends AppCompatActivity {
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                 if (cameraManager != null && !cameraManager.isRecording()) {
                     // 确保摄像头已连接
-                    if (!cameraManager.hasConnectedCameras()) {
+                    if (!cameraManager.hasAvailableCameras()) {
                         AppLog.d(TAG, "摄像头未连接，先打开摄像头");
                         cameraManager.openAllCameras();
                     }
                     // 再等待一段时间确保摄像头完全准备好
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        if (cameraManager != null && cameraManager.hasConnectedCameras() && !cameraManager.isRecording()) {
+                        if (cameraManager != null && cameraManager.hasAvailableCameras() && !cameraManager.isRecording()) {
                             AppLog.d(TAG, "摄像头已准备好，自动开始录制");
                             startRecording();
                             // 录制开始后，延迟将 Activity 移到后台
@@ -667,10 +669,10 @@ public class MainActivity extends AppCompatActivity {
                 AppLog.d(TAG, "Telegram: Connected cameras: " + connectedCount);
                 
                 // 如果连接的摄像头不足，继续等待
-                if (!cameraManager.hasConnectedCameras()) {
+                if (!cameraManager.hasAvailableCameras()) {
                     AppLog.w(TAG, "Telegram: No cameras connected yet, waiting 1.5s more...");
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        boolean hasCamera = cameraManager != null && cameraManager.hasConnectedCameras();
+                        boolean hasCamera = cameraManager != null && cameraManager.hasAvailableCameras();
                         AppLog.d(TAG, "Telegram: After waiting, hasConnectedCameras: " + hasCamera);
                         executeTelegramCommand(finalAction, chatId, duration);
                     }, 1500);
@@ -732,10 +734,10 @@ public class MainActivity extends AppCompatActivity {
                 AppLog.d(TAG, "Feishu: Connected cameras: " + connectedCount);
                 
                 // 如果连接的摄像头不足，继续等待
-                if (!cameraManager.hasConnectedCameras()) {
+                if (!cameraManager.hasAvailableCameras()) {
                     AppLog.w(TAG, "Feishu: No cameras connected yet, waiting 1.5s more...");
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        boolean hasCamera = cameraManager != null && cameraManager.hasConnectedCameras();
+                        boolean hasCamera = cameraManager != null && cameraManager.hasAvailableCameras();
                         AppLog.d(TAG, "Feishu: After waiting, hasConnectedCameras: " + hasCamera);
                         executeFeishuCommand(finalAction, finalChatId, duration);
                     }, 1500);
@@ -1067,7 +1069,10 @@ public class MainActivity extends AppCompatActivity {
         textureFront = findViewById(R.id.texture_front);
         textureBack = findViewById(R.id.texture_back);  // 1摄布局中为null
         textureLeft = findViewById(R.id.texture_left);  // 1摄和2摄布局中为null
-        textureRight = findViewById(R.id.texture_right);  // 1摄和2摄布局中为null
+        textureRight = findViewById(R.id.texture_right);
+        previewVisibilityController = new PreviewVisibilityController(
+                () -> setMainPreviewEnabled(true), textureFront, textureBack, textureLeft, textureRight);
+        previewVisibilityController.setPreviewEnabled(appConfig.isMainPreviewEnabled());  // 1摄和2摄布局中为null
         
         btnStartRecord = findViewById(R.id.btn_start_record);
         btnExit = findViewById(R.id.btn_exit);
@@ -1742,8 +1747,8 @@ public class MainActivity extends AppCompatActivity {
             }
             
             @Override
-            public boolean hasConnectedCameras() {
-                return cameraManager != null && cameraManager.hasConnectedCameras();
+            public boolean hasAvailableCameras() {
+                return cameraManager != null && cameraManager.hasAvailableCameras();
             }
             
             @Override
@@ -1756,8 +1761,16 @@ public class MainActivity extends AppCompatActivity {
             
             @Override
             public void stopRecording(boolean skipTransfer) {
+                stopRecording(skipTransfer, null);
+            }
+
+            @Override
+            public void stopRecording(boolean skipTransfer, Runnable onStopped) {
+                isRecording = false;
                 if (cameraManager != null) {
-                    cameraManager.stopRecording(skipTransfer);
+                    cameraManager.stopRecording(skipTransfer, onStopped);
+                } else if (onStopped != null) {
+                    onStopped.run();
                 }
             }
             
@@ -1915,14 +1928,32 @@ public class MainActivity extends AppCompatActivity {
     /**
      * 设置导航抽屉
      */
+    public void setMainPreviewEnabled(boolean enabled) {
+        appConfig.setMainPreviewEnabled(enabled);
+        if (cameraManager != null) cameraManager.setMainPreviewEnabled(enabled && !isInBackground);
+        if (previewVisibilityController != null) previewVisibilityController.setPreviewEnabled(enabled);
+        if (navigationView != null) {
+            MenuItem item = navigationView.getMenu().findItem(R.id.nav_main_preview_toggle);
+            if (item != null) item.setTitle(enabled ? "关闭实时预览" : "开启实时预览");
+        }
+    }
+
     private void setupNavigationDrawer() {
+        navigationView.getMenu().add(Menu.NONE, R.id.nav_main_preview_toggle, 1,
+                appConfig.isMainPreviewEnabled() ? "关闭实时预览" : "开启实时预览").setCheckable(false);
+        navigationView.getMenu().findItem(R.id.nav_remote_view).setVisible(AppFeatures.DINGTALK);
+        navigationView.getMenu().findItem(R.id.nav_telegram).setVisible(AppFeatures.TELEGRAM);
+        navigationView.getMenu().findItem(R.id.nav_heartbeat).setVisible(AppFeatures.HEARTBEAT_IMAGES);
+        navigationView.getMenu().findItem(R.id.nav_supervision_mode).setVisible(AppFeatures.SUPERVISION);
         // 设置导航菜单点击监听
         navigationView.setNavigationItemSelectedListener(item -> {
             int itemId = item.getItemId();
             // 先清除所有菜单项的选中状态（处理跨组选中）
             clearAllNavigationChecks();
             
-            if (itemId == R.id.nav_recording) {
+            if (itemId == R.id.nav_main_preview_toggle) {
+                setMainPreviewEnabled(!appConfig.isMainPreviewEnabled());
+            } else if (itemId == R.id.nav_recording) {
                 // 显示录制界面
                 showRecordingInterface();
             } else if (itemId == R.id.nav_playback) {
@@ -2350,6 +2381,7 @@ public class MainActivity extends AppCompatActivity {
             // 后台已初始化，复用实例并绑定 TextureView
             AppLog.d(TAG, "复用后台已初始化的摄像头管理器，绑定 TextureView");
             cameraManager = existingManager;
+            cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
 
             // --- 补全后台初始化时缺失的回调 ---
             // 后台（BlindSpotService）初始化的 MultiCameraManager 没有设置 MainActivity 的回调，
@@ -2480,7 +2512,7 @@ public class MainActivity extends AppCompatActivity {
             cameraManager.firePreviewSizeCallbacks();
 
             // 初始化亮度/降噪调节管理器
-            imageAdjustManager = new ImageAdjustManager(this);
+            if (AppFeatures.IMAGE_ADJUSTMENT) imageAdjustManager = new ImageAdjustManager(this);
             registerCamerasToImageAdjustManager();
             initHeartbeatManager();
             AppLog.d(TAG, "Camera initialized with " + configuredCameraCount + " cameras (reused from background)");
@@ -2491,12 +2523,13 @@ public class MainActivity extends AppCompatActivity {
         }
 
         cameraManager = new MultiCameraManager(this);
+        cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
         cameraManager.setMaxOpenCameras(configuredCameraCount);
         // 注册到全局 Holder
         holder.setCameraManager(cameraManager);
         
         // 初始化亮度/降噪调节管理器
-        imageAdjustManager = new ImageAdjustManager(this);
+        if (AppFeatures.IMAGE_ADJUSTMENT) imageAdjustManager = new ImageAdjustManager(this);
 
         // 设置摄像头状态回调
         cameraManager.setStatusCallback((cameraId, status) -> {
@@ -3416,7 +3449,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             // 检查摄像头是否就绪
-            if (cameraManager == null || !cameraManager.hasConnectedCameras()) {
+            if (cameraManager == null || !cameraManager.hasAvailableCameras()) {
                 AppLog.w(TAG, "摄像头未就绪，无法恢复录制");
                 Toast.makeText(this, "摄像头未就绪，恢复录制失败", Toast.LENGTH_SHORT).show();
                 shouldResumeRecordingAfterRecreate = false;
@@ -3473,7 +3506,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             // 检查摄像头是否就绪
-            if (cameraManager == null || !cameraManager.hasConnectedCameras()) {
+            if (cameraManager == null || !cameraManager.hasAvailableCameras()) {
                 AppLog.w(TAG, "摄像头未就绪，无法自动开始录制");
                 Toast.makeText(this, "摄像头未就绪，自动录制失败", Toast.LENGTH_SHORT).show();
                 return;
@@ -3561,7 +3594,7 @@ public class MainActivity extends AppCompatActivity {
         }
         
         // 检查摄像头是否就绪
-        if (cameraManager == null || !cameraManager.hasConnectedCameras()) {
+        if (cameraManager == null || !cameraManager.hasAvailableCameras()) {
             AppLog.w(TAG, "自动录制检查：摄像头未就绪，跳过恢复");
             return;
         }
@@ -3854,7 +3887,7 @@ public class MainActivity extends AppCompatActivity {
         AppLog.d(TAG, "亮屏后将在10秒后恢复录制...");
         
         // 如果摄像头已关闭，先重新打开
-        if (cameraManager != null && !cameraManager.hasConnectedCameras()) {
+        if (cameraManager != null && !cameraManager.hasAvailableCameras()) {
             AppLog.d(TAG, "摄像头已关闭，先重新打开摄像头");
             try {
                 cameraManager.openAllCameras();
@@ -3892,7 +3925,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             // 检查摄像头是否就绪
-            if (cameraManager == null || !cameraManager.hasConnectedCameras()) {
+            if (cameraManager == null || !cameraManager.hasAvailableCameras()) {
                 AppLog.w(TAG, "摄像头未就绪，尝试重新打开...");
                 // 再次尝试打开摄像头
                 if (cameraManager != null) {
@@ -3900,7 +3933,7 @@ public class MainActivity extends AppCompatActivity {
                         cameraManager.openAllCameras();
                         // 延迟2秒后再次尝试恢复录制
                         screenStateHandler.postDelayed(() -> {
-                            if (!isScreenOff && !isRecording && cameraManager.hasConnectedCameras()) {
+                            if (!isScreenOff && !isRecording && cameraManager.hasAvailableCameras()) {
                                 AppLog.d(TAG, "摄像头已就绪，开始恢复录制");
                                 startRecording();
                                 Toast.makeText(MainActivity.this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
@@ -4970,6 +5003,9 @@ public class MainActivity extends AppCompatActivity {
     protected void onStop() {
         super.onStop();
         AppLog.d(TAG, "onStop called, isRecording=" + isRecording);
+        if (cameraManager != null) {
+            cameraManager.setMainPreviewEnabled(false);
+        }
         
         // 如果正在录制但 Activity 即将被销毁，提前停止录制
         // 这给予了比 onDestroy 更充裕的时间来完成清理
@@ -4995,6 +5031,9 @@ public class MainActivity extends AppCompatActivity {
         boolean wasInBackground = isInBackground;
         isInBackground = false;
         BlindSpotService.notifySelfForeground();
+        if (cameraManager != null) {
+            cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled());
+        }
         
         // 标记 Activity 已经完全恢复过一次（用于区分新创建和已存在的 Activity）
         // 这个标记在 onCreate 后第一次 onResume 时设为 true
@@ -5038,7 +5077,7 @@ public class MainActivity extends AppCompatActivity {
                     if (appConfig.isAutoStartRecording()) {
                         AppLog.d(TAG, "启用了自动录制，从后台返回后将自动恢复录制");
                         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                            if (!isRecording && cameraManager != null && cameraManager.hasConnectedCameras()) {
+                            if (!isRecording && cameraManager != null && cameraManager.hasAvailableCameras()) {
                                 AppLog.d(TAG, "自动恢复录制...");
                                 startRecording();
                                 Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
@@ -5314,6 +5353,7 @@ public class MainActivity extends AppCompatActivity {
      * 初始化心跳推图管理器
      */
     private void initHeartbeatManager() {
+        if (!AppFeatures.HEARTBEAT_IMAGES) return;
         if (heartbeatManager == null) {
             heartbeatManager = new com.kooo.evcam.heartbeat.HeartbeatManager(this);
         }
@@ -5389,7 +5429,7 @@ public class MainActivity extends AppCompatActivity {
             
             @Override
             public boolean hasCamerasConnected() {
-                return cameraManager != null && cameraManager.hasConnectedCameras();
+                return cameraManager != null && cameraManager.hasAvailableCameras();
             }
         });
         

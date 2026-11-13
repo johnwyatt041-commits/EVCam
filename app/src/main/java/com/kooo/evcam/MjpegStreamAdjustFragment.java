@@ -65,6 +65,13 @@ public class MjpegStreamAdjustFragment extends Fragment {
         initSpinners();
         loadSettings();
         setupListeners();
+        if (!AppFeatures.FISHEYE_CORRECTION) {
+            OptionalFeatureViews.hideRow(view, R.id.seekbar_k1);
+            OptionalFeatureViews.hideRow(view, R.id.seekbar_k2);
+            OptionalFeatureViews.hideRow(view, R.id.seekbar_zoom);
+            ((TextView) view.findViewById(R.id.tv_stream_direction_title)).setText("画面方向");
+            view.findViewById(R.id.tv_stream_correction_description).setVisibility(View.GONE);
+        }
         return view;
     }
 

@@ -64,10 +64,9 @@ public class FileTransferManager {
     // 配置
     private static final int MAX_RETRY_COUNT = 5;           // 最大重试次数（增加到5次）
     private static final long RETRY_DELAY_MS = 3000;        // 重试延迟（毫秒）- 减少到3秒加快重试
-    private static final long TRANSFER_CHECK_INTERVAL_MS = 500;  // 检查队列间隔（缩短到500ms）
     private static final long STARTUP_CLEANUP_DELAY_MS = 60 * 1000;  // 启动后清理延迟：1分钟
     private static final long TEMP_FILE_EXPIRE_MS = 60 * 60 * 1000;  // 临时文件过期时间：1小时
-    private static final long MIN_VALID_FILE_SIZE = 500 * 1024;  // 最小有效文件大小：500KB（增加到500KB）
+    private static final long MIN_VALID_FILE_SIZE = 1024;  // Short, valid recordings can be smaller than 500 KB.
     
     // 统计
     private long totalTransferred = 0;      // 已传输文件数
@@ -94,7 +93,7 @@ public class FileTransferManager {
     /**
      * 启动传输服务
      */
-    public void start() {
+    public synchronized void start() {
         if (isRunning.getAndSet(true)) {
             AppLog.d(TAG, "Transfer service already running");
             return;
@@ -104,8 +103,8 @@ public class FileTransferManager {
         transferThread.start();
         transferHandler = new Handler(transferThread.getLooper());
         
-        // 启动定期检查队列
-        scheduleNextCheck();
+        // Resume any queued work once. Empty queues do not need a polling timer.
+        transferHandler.post(this::processQueue);
         
         // 启动后1分钟检查并清理过期的临时文件
         transferHandler.postDelayed(this::cleanupExpiredTempFiles, STARTUP_CLEANUP_DELAY_MS);
@@ -116,7 +115,7 @@ public class FileTransferManager {
     /**
      * 停止传输服务
      */
-    public void stop() {
+    public synchronized void stop() {
         if (!isRunning.getAndSet(false)) {
             return;
         }
@@ -156,6 +155,7 @@ public class FileTransferManager {
         }
         
         TransferTask task = new TransferTask(sourceFile, targetFile, callback);
+        start();
         transferQueue.offer(task);
         
         AppLog.d(TAG, "Added transfer task: " + sourceFile.getName() + " -> " + targetFile.getAbsolutePath());
@@ -251,22 +251,6 @@ public class FileTransferManager {
     }
     
     // ===== 私有方法 =====
-    
-    /**
-     * 调度下一次队列检查
-     */
-    private void scheduleNextCheck() {
-        if (!isRunning.get() || transferHandler == null) {
-            return;
-        }
-        
-        transferHandler.postDelayed(() -> {
-            if (isRunning.get()) {
-                processQueue();
-                scheduleNextCheck();
-            }
-        }, TRANSFER_CHECK_INTERVAL_MS);
-    }
     
     /**
      * 清理过期的临时文件
@@ -434,6 +418,7 @@ public class FileTransferManager {
             if (transferHandler != null) {
                 transferHandler.postDelayed(() -> {
                     transferQueue.offer(task);
+                    processQueue();
                 }, RETRY_DELAY_MS);
             }
         } else {

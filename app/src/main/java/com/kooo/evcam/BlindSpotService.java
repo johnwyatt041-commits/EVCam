@@ -94,6 +94,9 @@ public class BlindSpotService extends Service {
 
     // 全景影像避让
     private Runnable avmCheckRunnable;
+    private long avmEventQueryEndMs;
+    private String cachedAvmActivity;
+    private boolean cachedAvmForeground;
     private boolean isAvmAvoidanceActive = false; // 当前是否处于避让状态（AVM或自身前台）
     private int avmDeactivateCount = 0; // 连续未检测到AVM前台的次数（去抖）
     private static final int AVM_DEACTIVATE_THRESHOLD = 2; // 连续2次（2秒）未检测到才解除避让
@@ -2166,6 +2169,9 @@ public class BlindSpotService extends Service {
      * 停止全景影像避让检测
      */
     private void stopAvmAvoidance() {
+        avmEventQueryEndMs = 0;
+        cachedAvmActivity = null;
+        cachedAvmForeground = false;
         if (avmCheckRunnable != null) {
             hideHandler.removeCallbacks(avmCheckRunnable);
             avmCheckRunnable = null;
@@ -2223,37 +2229,37 @@ public class BlindSpotService extends Service {
     /**
      * 检测指定Activity（完整类名）是否在前台
      * 使用 UsageEvents 精确到 Activity 级别（需 PACKAGE_USAGE_STATS 权限）
-     * 查询最近5分钟的事件，追踪最后一次前台/后台切换来判断当前状态
+     * 首次查询最近5分钟，之后只读取增量事件并保留前后台状态。
      */
     private boolean isActivityInForeground(String activityClassName) {
+        long now = System.currentTimeMillis();
+        boolean reset = !activityClassName.equals(cachedAvmActivity) || now < avmEventQueryEndMs;
+        if (reset) {
+            cachedAvmActivity = activityClassName;
+            cachedAvmForeground = false;
+            avmEventQueryEndMs = 0;
+        }
+        long from = avmEventQueryEndMs == 0 ? now - 300000 : Math.max(0, avmEventQueryEndMs - 1);
         try {
             UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
-            if (usm == null) return false;
-
-            long now = System.currentTimeMillis();
-            android.app.usage.UsageEvents events = usm.queryEvents(now - 300000, now);
-            if (events == null) return false;
-
+            if (usm == null) return cachedAvmForeground;
+            android.app.usage.UsageEvents events = usm.queryEvents(from, now);
+            if (events == null) return cachedAvmForeground;
             android.app.usage.UsageEvents.Event event = new android.app.usage.UsageEvents.Event();
-            Boolean targetLastState = null;
-
             while (events.hasNextEvent()) {
                 events.getNextEvent(event);
-                String className = event.getClassName();
-                if (activityClassName.equals(className)) {
-                    if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                        targetLastState = true;
-                    } else if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                        targetLastState = false;
-                    }
+                if (!activityClassName.equals(event.getClassName())) continue;
+                if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
+                    cachedAvmForeground = true;
+                } else if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND) {
+                    cachedAvmForeground = false;
                 }
             }
-
-            return targetLastState != null && targetLastState;
+            avmEventQueryEndMs = now;
         } catch (Exception e) {
-            AppLog.e(TAG, "检测前台Activity失败: " + e.getMessage());
+            AppLog.w(TAG, "Foreground event query failed", e);
         }
-        return false;
+        return cachedAvmForeground;
     }
 
     /**

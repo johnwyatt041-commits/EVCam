@@ -36,8 +36,12 @@ public class RemoteCommandDispatcher {
         this.handlers = new EnumMap<>(RemotePlatform.class);
         
         // 预创建各平台处理器（但不设置 API 客户端）
-        handlers.put(RemotePlatform.DINGTALK, new DingTalkHandler(context));
-        handlers.put(RemotePlatform.TELEGRAM, new TelegramHandler(context));
+        if (com.kooo.evcam.AppFeatures.DINGTALK) {
+            handlers.put(RemotePlatform.DINGTALK, new DingTalkHandler(context));
+        }
+        if (com.kooo.evcam.AppFeatures.TELEGRAM) {
+            handlers.put(RemotePlatform.TELEGRAM, new TelegramHandler(context));
+        }
         handlers.put(RemotePlatform.FEISHU, new FeishuHandler(context));
         
         AppLog.d(TAG, "RemoteCommandDispatcher 初始化完成");

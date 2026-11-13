@@ -587,6 +587,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:id="@+id/tv_stream_direction_title"
                     android:text="鱼眼矫正（复用副屏参数，按摄像头位置）"
                     android:textColor="@color/text_primary"
                     android:textSize="18sp"
@@ -596,6 +597,7 @@
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
+                    android:id="@+id/tv_stream_correction_description"
                     android:text="此处修改会同步写入副屏鱼眼参数，反之亦然。"
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp"

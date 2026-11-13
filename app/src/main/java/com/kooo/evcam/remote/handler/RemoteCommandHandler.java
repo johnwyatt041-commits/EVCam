@@ -57,9 +57,10 @@ public abstract class RemoteCommandHandler {
      */
     public interface CameraController {
         boolean isRecording();
-        boolean hasConnectedCameras();
+        boolean hasAvailableCameras();
         boolean startRecording(String timestamp);
         void stopRecording(boolean skipTransfer);
+        void stopRecording(boolean skipTransfer, Runnable onStopped);
         void takePicture(String timestamp);
         void stopRecordingTimer();
         void stopBlinkAnimation();
@@ -124,7 +125,7 @@ public abstract class RemoteCommandHandler {
         AppLog.d(TAG, platformName + " 远程录制: chatId=" + chatId.getId() + ", duration=" + durationSeconds);
         
         // 1. 检查是否已有远程录制任务正在进行
-        if (isRemoteRecording) {
+        if (isRemoteRecording || isPreparingRecording) {
             AppLog.w(TAG, "远程录制任务正在进行中，拒绝新的" + platformName + "录制指令");
             sendError(chatId, "远程录制任务正在进行中，请等待完成后再试");
             return;
@@ -139,7 +140,7 @@ public abstract class RemoteCommandHandler {
         }
         
         // 3. 检查是否有已连接的摄像头
-        if (!cameraController.hasConnectedCameras()) {
+        if (!cameraController.hasAvailableCameras()) {
             AppLog.e(TAG, "没有可用的相机");
             sendError(chatId, "没有可用的相机");
             returnToBackgroundIfNeeded();
@@ -153,40 +154,28 @@ public abstract class RemoteCommandHandler {
         // 5. 创建录制上下文
         currentContext = new RecordingContext(chatId, durationSeconds, timestamp);
         
-        // 6. 如果正在手动录制，记录状态并停止
+        isPreparingRecording = true;
         if (cameraController.isRecording()) {
             currentContext.setWasManualRecordingBefore(true);
-            AppLog.d(TAG, platformName + ": 检测到手动录制正在进行，暂停手动录制");
-            cameraController.stopRecording(false);
             cameraController.stopRecordingTimer();
             cameraController.stopBlinkAnimation();
-            
-            // 等待停止完成
-            try {
-                Thread.sleep(500);
-            } catch (InterruptedException e) {
-                e.printStackTrace();
-            }
+            cameraController.stopRecording(false, () -> beginRemoteRecording(timestamp, durationSeconds));
+        } else {
+            beginRemoteRecording(timestamp, durationSeconds);
         }
-        
-        // 7. 标记开始远程录制
+    }
+
+    private void beginRemoteRecording(String timestamp, int durationSeconds) {
+        if (cameraController == null || currentContext == null) return;
         isRemoteRecording = true;
-        
-        // 8. 设置分段时长覆盖（远程录制不分段）
-        // 将分段时长设置为录制时长 + 30秒余量，确保整个录制过程不会触发分段
-        long segmentOverrideMs = (durationSeconds + 30) * 1000L;
-        cameraController.setSegmentDurationOverride(segmentOverrideMs);
-        AppLog.d(TAG, platformName + " 设置分段时长覆盖: " + (segmentOverrideMs / 1000) + " 秒（禁用分段）");
-        
-        // 9. 开始录制
-        boolean success = cameraController.startRecording(timestamp);
-        if (success) {
+        cameraController.setSegmentDurationOverride((durationSeconds + 30L) * 1000L);
+        if (cameraController.startRecording(timestamp)) {
             onRecordingStarted(currentContext, durationSeconds);
         } else {
             onRecordingFailed(currentContext);
         }
     }
-    
+
     /**
      * 录制成功启动后的处理
      */
@@ -217,42 +206,26 @@ public abstract class RemoteCommandHandler {
      */
     private void setupAutoStop(RecordingContext ctx, int durationSeconds) {
         autoStopRunnable = () -> {
-            String platformName = getPlatformName();
-            AppLog.d(TAG, platformName + " " + durationSeconds + " 秒录制完成，正在停止...");
-            
-            // 停止录制（跳过自动传输，等上传完成后再传输）
             if (cameraController != null) {
-                cameraController.stopRecording(true);
-                // 清除分段时长覆盖（恢复为用户配置值）
-                cameraController.clearSegmentDurationOverride();
+                cameraController.stopRecording(true, () -> finishRemoteRecording(ctx));
             }
-            
-            // 停止前台服务
-            CameraForegroundService.stop(context);
-            
-            // 发送录制状态广播
-            FloatingWindowService.sendRecordingStateChanged(context, false);
-            
-            // 更新状态
-            isPreparingRecording = false;
-            isRemoteRecording = false;
-            
-            // 通知监听器录制结束（停止闪烁动画、恢复按钮颜色等）
-            if (recordingStateListener != null) {
-                recordingStateListener.onRemoteRecordingStop();
-            }
-            
-            // 延迟后处理上传和恢复
-            mainHandler.postDelayed(() -> {
-                handleRecordingComplete(ctx);
-            }, 1000);
         };
-        
+
         // 定时器延迟到首次数据写入后启动
         pendingDurationSeconds = durationSeconds;
         AppLog.d(TAG, getPlatformName() + " 录制定时器将在首次数据写入后启动，时长: " + durationSeconds + " 秒");
     }
     
+    private void finishRemoteRecording(RecordingContext ctx) {
+        if (cameraController != null) cameraController.clearSegmentDurationOverride();
+        CameraForegroundService.stop(context);
+        FloatingWindowService.sendRecordingStateChanged(context, false);
+        isPreparingRecording = false;
+        isRemoteRecording = false;
+        if (recordingStateListener != null) recordingStateListener.onRemoteRecordingStop();
+        handleRecordingComplete(ctx);
+    }
+
     /**
      * 通知首次数据写入完成，启动定时器
      * 由 MainActivity 在检测到录制数据写入时调用
@@ -301,6 +274,7 @@ public abstract class RemoteCommandHandler {
      * 录制启动失败的处理
      */
     private void onRecordingFailed(RecordingContext ctx) {
+        isPreparingRecording = false;
         String platformName = getPlatformName();
         AppLog.e(TAG, platformName + " 远程录制启动失败");
         isRemoteRecording = false;
@@ -338,7 +312,7 @@ public abstract class RemoteCommandHandler {
         }
         
         // 2. 检查摄像头连接
-        if (!cameraController.hasConnectedCameras()) {
+        if (!cameraController.hasAvailableCameras()) {
             AppLog.e(TAG, "没有可用的相机");
             sendError(chatId, "没有可用的相机");
             returnToBackgroundIfNeeded();
@@ -357,7 +331,7 @@ public abstract class RemoteCommandHandler {
         final String finalTimestamp = timestamp;
         mainHandler.postDelayed(() -> {
             uploadPhotos(chatId, finalTimestamp);
-        }, 5000);
+        }, 8000);
     }
     
     // ==================== 上传逻辑 ====================

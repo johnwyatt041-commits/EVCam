@@ -23,6 +23,7 @@ import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.ArrayDeque;
 import java.util.Date;
 import java.util.List;
 import java.util.Locale;
@@ -30,9 +31,13 @@ import java.util.Locale;
 public final class AppLog {
     private static final String PREFS_NAME = "app_settings";
     private static final String KEY_DEBUG_TO_INFO = "debug_to_info";
-    private static final int MAX_BUFFER_LINES = 5000;
+    private static final int MAX_BUFFER_LINES = 1000;
+    private static final int MAX_LINE_LENGTH = 4096;
     private static final Object LOCK = new Object();
-    private static final List<String> BUFFER = new ArrayList<>();
+    private static final ArrayDeque<String> BUFFER = new ArrayDeque<>();
+    // Only accessed while holding LOCK: SimpleDateFormat is not thread safe.
+    private static final SimpleDateFormat BUFFER_DATE_FORMAT =
+            new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US);
     private static volatile boolean debugToInfo = false;
     
     // 会话日志文件名
@@ -499,6 +504,7 @@ public final class AppLog {
     }
 
     private static void logInternal(int level, String tag, String message, Throwable tr) {
+        if (level == Log.DEBUG && !debugToInfo) return;
         String safeTag = tag == null ? "AppLog" : tag;
         String safeMessage = message == null ? "" : message;
         if (tr != null) {
@@ -510,15 +516,12 @@ public final class AppLog {
     }
 
     private static void addToBuffer(int level, String tag, String message) {
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US).format(new Date());
-        String levelLabel = levelToLabel(level);
-        String line = timestamp + " " + levelLabel + "/" + tag + ": " + message;
         synchronized (LOCK) {
-            BUFFER.add(line);
-            if (BUFFER.size() > MAX_BUFFER_LINES) {
-                int removeCount = BUFFER.size() - MAX_BUFFER_LINES;
-                BUFFER.subList(0, removeCount).clear();
-            }
+            String timestamp = BUFFER_DATE_FORMAT.format(new Date());
+            String line = timestamp + " " + levelToLabel(level) + "/" + tag + ": " + message;
+            if (line.length() > MAX_LINE_LENGTH) line = line.substring(0, MAX_LINE_LENGTH) + "...";
+            if (BUFFER.size() >= MAX_BUFFER_LINES) BUFFER.removeFirst();
+            BUFFER.addLast(line);
         }
     }
 

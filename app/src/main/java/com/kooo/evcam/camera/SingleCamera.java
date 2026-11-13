@@ -49,6 +49,8 @@ public class SingleCamera {
     private final Context context;
     private final String cameraId;
     private TextureView textureView;
+    private volatile boolean mainPreviewEnabled = true;
+    private volatile boolean mainPreviewChanged = false;
     private CameraCallback callback;
     private String cameraPosition;  // 摄像头位置（front/back/left/right）
     private int customRotation = 0;  // 自定义旋转角度（仅用于自定义车型）
@@ -155,6 +157,9 @@ public class SingleCamera {
     }
 
     public void setTextureView(TextureView textureView) {
+        if (this.textureView == textureView) {
+            return;
+        }
         this.textureView = textureView;
         clearPreviewSurface();
         if ("back".equals(cameraPosition) && this.textureView != null) {
@@ -174,6 +179,40 @@ public class SingleCamera {
             previewSurface = null;
         }
         releaseFisheyeCorrector();
+    }
+
+    /** 主界面不可见时停用预览；录像、补盲及远程输出独立保留。 */
+    public void setMainPreviewEnabled(boolean enabled) {
+        if (mainPreviewEnabled == enabled) return;
+        mainPreviewEnabled = enabled;
+        mainPreviewChanged = true;
+        if (enabled && textureView != null && textureView.isAvailable()) {
+            openCamera();
+        }
+        if (!closeIfUnused()) {
+            recreateSession();
+        }
+    }
+
+    public boolean hasActiveOutputs() {
+        return (mainPreviewEnabled && textureView != null && textureView.isAvailable())
+                || isValidSurface(recordSurface)
+                || isValidSurface(mainFloatingSurface)
+                || isValidSurface(secondaryDisplaySurface)
+                || isValidSurface(fullscreenPreviewSurface)
+                || isValidSurface(streamSurface);
+    }
+
+    private static boolean isValidSurface(Surface surface) {
+        return surface != null && surface.isValid();
+    }
+
+    public boolean closeIfUnused() {
+        if (hasActiveOutputs()) return false;
+        if (cameraDevice != null || isOpening || backgroundThread != null) {
+            closeCamera();
+        }
+        return true;
     }
 
     /**
@@ -455,6 +494,9 @@ public class SingleCamera {
         if (surface != null) {
             AppLog.d(TAG, "Camera " + cameraId + " stream surface set: " + surface
                     + ", isValid=" + surface.isValid());
+            // Main preview and daily front recording may both be disabled.
+            // A HUD stream is an independent demand for this camera.
+            if (surface.isValid() && !isConnected()) openCamera();
             // 动态加入 session（鱼眼模式不影响，streamSurface 自带 GL 管线，不走 FisheyeCorrector）
             addStreamSurfaceToSession();
         } else {
@@ -463,6 +505,7 @@ public class SingleCamera {
             if (streamSurfaceTexture != null) {
                 streamSurfaceTexture = null;
             }
+            if (changed && !closeIfUnused()) recreateSession();
         }
     }
 
@@ -1300,8 +1343,13 @@ public class SingleCamera {
                 return;
             }
 
+            // 必须等旧会话关闭后再释放 GL/Surface，避免影响仍在推送的录像。
+            if (mainPreviewChanged) {
+                clearPreviewSurface();
+                mainPreviewChanged = false;
+            }
             SurfaceTexture surfaceTexture = null;
-            if (textureView != null && textureView.isAvailable()) {
+            if (mainPreviewEnabled && textureView != null && textureView.isAvailable()) {
                 surfaceTexture = textureView.getSurfaceTexture();
             }
             if (surfaceTexture != null) {
@@ -2166,19 +2214,25 @@ public class SingleCamera {
      * @param saveDelayMs 保存文件前的延迟时间（毫秒）
      */
     public void takePicture(String timestamp, int saveDelayMs) {
+        takePicture(timestamp, saveDelayMs, null);
+    }
+
+    public void takePicture(String timestamp, int saveDelayMs, Runnable onCompleted) {
         if (textureView == null || !textureView.isAvailable()) {
             AppLog.e(TAG, "Camera " + cameraId + " TextureView not available");
+            if (onCompleted != null) onCompleted.run();
             return;
         }
 
         if (previewSize == null) {
             AppLog.e(TAG, "Camera " + cameraId + " preview size not available");
+            if (onCompleted != null) onCompleted.run();
             return;
         }
 
         // 在后台线程中处理截图和保存
-        if (backgroundHandler != null) {
-            backgroundHandler.post(() -> {
+        Handler photoHandler = backgroundHandler;
+        if (photoHandler != null && photoHandler.post(() -> {
                 try {
                     // 1. 立即从TextureView获取Bitmap（快速抓拍）
                     android.graphics.Bitmap bitmap = textureView.getBitmap(
@@ -2190,27 +2244,28 @@ public class SingleCamera {
                         AppLog.d(TAG, "Camera " + cameraId + " picture captured (" +
                               bitmap.getWidth() + "x" + bitmap.getHeight() + "), will save in " + saveDelayMs + "ms");
                         
-                        // 2. 延迟后再保存到磁盘（分散I/O压力）
-                        if (saveDelayMs > 0) {
+                        // Delay the save without blocking camera callbacks or health checks.
+                        if (photoHandler.postDelayed(() -> {
                             try {
-                                Thread.sleep(saveDelayMs);
-                            } catch (InterruptedException e) {
-                                AppLog.w(TAG, "Save delay interrupted");
+                                saveBitmapAsJPEG(bitmap, timestamp);
+                                AppLog.d(TAG, "Camera " + cameraId + " picture saved");
+                            } catch (Exception e) {
+                                AppLog.e(TAG, "Camera " + cameraId + " error saving picture", e);
+                            } finally {
+                                bitmap.recycle();
+                                if (onCompleted != null) onCompleted.run();
                             }
-                        }
-                        
-                        // 3. 保存文件
-                        saveBitmapAsJPEG(bitmap, timestamp);
+                        }, Math.max(0, saveDelayMs))) return;
                         bitmap.recycle();
-                        AppLog.d(TAG, "Camera " + cameraId + " picture saved");
                     } else {
                         AppLog.e(TAG, "Camera " + cameraId + " failed to get bitmap from TextureView");
                     }
                 } catch (Exception e) {
                     AppLog.e(TAG, "Camera " + cameraId + " error capturing picture", e);
                 }
-            });
-        }
+                if (onCompleted != null) onCompleted.run();
+            })) return;
+        if (onCompleted != null) onCompleted.run();
     }
 
     /**

@@ -48,6 +48,9 @@ public class MultiVideoPlayerManager {
     private int preparedCount = 0;
     private int totalVideos = 0;
     private boolean isStopping = false;
+    private int loadGeneration = 0;
+    private int pendingSeekPosition = 0;
+    private boolean playWhenPrepared = true;
 
     /** 当前倍速 */
     private float currentSpeed = 1.0f;
@@ -103,6 +106,10 @@ public class MultiVideoPlayerManager {
      * 加载视频组
      */
     public void loadVideoGroup(VideoGroup group) {
+        loadVideoGroup(group, 0, true);
+    }
+
+    private void loadVideoGroup(VideoGroup group, int seekPosition, boolean autoPlay) {
         // 停止当前播放
         stopAll();
 
@@ -112,16 +119,22 @@ public class MultiVideoPlayerManager {
         this.totalVideos = 0;
         this.duration = 0;
         this.mediaPlayers.clear();
+        this.pendingSeekPosition = seekPosition;
+        this.playWhenPrepared = autoPlay;
 
         if (group == null) {
             return;
         }
 
-        // 统计要加载的视频数量
-        if (group.hasVideo(VideoGroup.POSITION_FRONT)) totalVideos++;
-        if (group.hasVideo(VideoGroup.POSITION_BACK)) totalVideos++;
-        if (group.hasVideo(VideoGroup.POSITION_LEFT)) totalVideos++;
-        if (group.hasVideo(VideoGroup.POSITION_RIGHT)) totalVideos++;
+        // 单路模式只准备一个解码器，不加载隐藏的四宫格播放器。
+        if (isSingleMode) {
+            if (videoSingle != null && group.hasVideo(singleModePosition)) totalVideos = 1;
+        } else {
+            if (videoFront != null && group.hasVideo(VideoGroup.POSITION_FRONT)) totalVideos++;
+            if (videoBack != null && group.hasVideo(VideoGroup.POSITION_BACK)) totalVideos++;
+            if (videoLeft != null && group.hasVideo(VideoGroup.POSITION_LEFT)) totalVideos++;
+            if (videoRight != null && group.hasVideo(VideoGroup.POSITION_RIGHT)) totalVideos++;
+        }
 
         if (totalVideos == 0) {
             if (playbackListener != null) {
@@ -130,15 +143,13 @@ public class MultiVideoPlayerManager {
             return;
         }
 
-        // 加载各位置视频
-        loadVideoIfExists(VideoGroup.POSITION_FRONT, group.getFrontVideo(), videoFront);
-        loadVideoIfExists(VideoGroup.POSITION_BACK, group.getBackVideo(), videoBack);
-        loadVideoIfExists(VideoGroup.POSITION_LEFT, group.getLeftVideo(), videoLeft);
-        loadVideoIfExists(VideoGroup.POSITION_RIGHT, group.getRightVideo(), videoRight);
-        
-        // 如果是单路模式，也加载单路视频
-        if (isSingleMode && videoSingle != null) {
-            loadSingleModeVideo(0, false);
+        if (isSingleMode) {
+            loadVideoIfExists("single", group.getVideoFile(singleModePosition), videoSingle);
+        } else {
+            loadVideoIfExists(VideoGroup.POSITION_FRONT, group.getFrontVideo(), videoFront);
+            loadVideoIfExists(VideoGroup.POSITION_BACK, group.getBackVideo(), videoBack);
+            loadVideoIfExists(VideoGroup.POSITION_LEFT, group.getLeftVideo(), videoLeft);
+            loadVideoIfExists(VideoGroup.POSITION_RIGHT, group.getRightVideo(), videoRight);
         }
     }
 
@@ -151,10 +162,11 @@ public class MultiVideoPlayerManager {
         }
 
         try {
+            final int generation = loadGeneration;
             Uri uri = Uri.fromFile(videoFile);
-            videoView.setVideoURI(uri);
 
             videoView.setOnPreparedListener(mp -> {
+                if (generation != loadGeneration || isStopping) return;
                 Log.d(TAG, "Video prepared: " + position);
                 mediaPlayers.put(position, mp);
 
@@ -171,6 +183,8 @@ public class MultiVideoPlayerManager {
 
                 // 设置倍速
                 setMediaPlayerSpeed(mp, currentSpeed);
+                // setPlaybackParams may start playback; wait until every visible view is ready.
+                mp.pause();
 
                 preparedCount++;
                 Log.d(TAG, "Prepared count: " + preparedCount + "/" + totalVideos);
@@ -178,6 +192,7 @@ public class MultiVideoPlayerManager {
             });
 
             videoView.setOnCompletionListener(mp -> {
+                if (generation != loadGeneration || isStopping) return;
                 // 所有视频播放完成
                 isPlaying = false;
                 if (playbackListener != null) {
@@ -187,7 +202,7 @@ public class MultiVideoPlayerManager {
             });
 
             videoView.setOnErrorListener((mp, what, extra) -> {
-                if (!isStopping) {
+                if (!isStopping && generation == loadGeneration) {
                     Log.w(TAG, "Video error: " + position + ", what=" + what + ", extra=" + extra);
                     if (playbackListener != null) {
                         playbackListener.onError("Video error: " + position + ", what=" + what + ", extra=" + extra);
@@ -195,6 +210,7 @@ public class MultiVideoPlayerManager {
                 }
                 return true;
             });
+            videoView.setVideoURI(uri);
 
         } catch (Exception e) {
             Log.e(TAG, "Failed to load video: " + position, e);
@@ -205,7 +221,7 @@ public class MultiVideoPlayerManager {
      * 检查是否所有视频都准备好了
      */
     private void checkAllPrepared() {
-        if (preparedCount >= totalVideos) {
+        if (totalVideos > 0 && preparedCount >= totalVideos) {
             isPrepared = true;
             Log.d(TAG, "All videos prepared, duration=" + duration);
             
@@ -215,8 +231,18 @@ public class MultiVideoPlayerManager {
             if (playbackListener != null) {
                 playbackListener.onPrepared(duration);
             }
-            // 自动开始播放
-            play();
+            if (pendingSeekPosition > 0) seekTo(pendingSeekPosition);
+            if (isSingleMode && playbackListener != null) {
+                playbackListener.onSingleVideoPrepared();
+            }
+            if (playWhenPrepared) {
+                play();
+            } else if (playbackListener != null) {
+                playbackListener.onPlaybackStateChanged(false);
+            }
+            if (playbackListener != null) {
+                playbackListener.onProgressUpdate(pendingSeekPosition);
+            }
         }
     }
 
@@ -224,6 +250,7 @@ public class MultiVideoPlayerManager {
      * 开始播放
      */
     public void play() {
+        playWhenPrepared = true;
         if (!isPrepared) {
             return;
         }
@@ -263,6 +290,7 @@ public class MultiVideoPlayerManager {
      * 暂停播放
      */
     public void pause() {
+        playWhenPrepared = false;
         isPlaying = false;
 
         if (videoFront != null) videoFront.pause();
@@ -291,19 +319,20 @@ public class MultiVideoPlayerManager {
      * 停止所有播放
      */
     public void stopAll() {
+        loadGeneration++;
+        playWhenPrepared = false;
         isPlaying = false;
         isPrepared = false;
         stopProgressUpdate();
         isStopping = true;
 
-        try {
-            if (videoFront != null) videoFront.stopPlayback();
-            if (videoBack != null) videoBack.stopPlayback();
-            if (videoLeft != null) videoLeft.stopPlayback();
-            if (videoRight != null) videoRight.stopPlayback();
-            if (videoSingle != null) videoSingle.stopPlayback();
-        } catch (Exception e) {
-            Log.e(TAG, "Error stopping playback", e);
+        for (VideoView view : new VideoView[]{videoFront, videoBack, videoLeft, videoRight, videoSingle}) {
+            if (view == null) continue;
+            try {
+                view.stopPlayback();
+            } catch (Exception e) {
+                Log.e(TAG, "Error stopping playback", e);
+            }
         }
 
         mediaPlayers.clear();
@@ -481,8 +510,8 @@ public class MultiVideoPlayerManager {
      */
     public void setSingleMode(boolean singleMode, String position) {
         // 先保存当前播放位置和状态
-        int savedPosition = 0;
-        boolean wasPlaying = isPlaying;
+        int savedPosition = pendingSeekPosition;
+        boolean wasPlaying = isPrepared ? isPlaying : playWhenPrepared;
         
         if (isPrepared && currentGroup != null) {
             savedPosition = getCurrentPosition();
@@ -493,87 +522,9 @@ public class MultiVideoPlayerManager {
             this.singleModePosition = position;
         }
 
-        // 如果已准备好，需要重新同步
-        if (isPrepared && currentGroup != null) {
-            if (singleMode) {
-                // 切换到单路：先暂停多路视频
-                if (videoFront != null) videoFront.pause();
-                if (videoBack != null) videoBack.pause();
-                if (videoLeft != null) videoLeft.pause();
-                if (videoRight != null) videoRight.pause();
-                // 将源视频的内容显示到单路VideoView
-                loadSingleModeVideo(savedPosition, wasPlaying);
-            } else {
-                // 切换回多路：暂停单路视频
-                if (videoSingle != null) {
-                    videoSingle.pause();
-                }
-                // 直接 seek 到保存的位置
-                seekTo(savedPosition);
-                if (wasPlaying) {
-                    play();
-                } else {
-                    // 确保所有视频都暂停
-                    if (videoFront != null) videoFront.pause();
-                    if (videoBack != null) videoBack.pause();
-                    if (videoLeft != null) videoLeft.pause();
-                    if (videoRight != null) videoRight.pause();
-                    isPlaying = false;
-                    if (playbackListener != null) {
-                        playbackListener.onPlaybackStateChanged(false);
-                    }
-                }
-            }
-        }
-    }
-
-    /**
-     * 加载单路模式视频
-     */
-    private void loadSingleModeVideo(int seekPosition, boolean autoPlay) {
-        if (currentGroup == null || videoSingle == null) return;
-
-        File videoFile = currentGroup.getVideoFile(singleModePosition);
-        if (videoFile != null && videoFile.exists()) {
-            try {
-                Uri uri = Uri.fromFile(videoFile);
-                videoSingle.setVideoURI(uri);
-                videoSingle.setOnPreparedListener(mp -> {
-                    mediaPlayers.put("single", mp);
-                    // 行车记录仪视频没有声音，设置静音
-                    mp.setVolume(0f, 0f);
-                    setMediaPlayerSpeed(mp, currentSpeed);
-                    // 放弃音频焦点
-                    abandonAudioFocus();
-                    // 视频准备好后再 seek 和播放
-                    mp.seekTo(seekPosition);
-                    
-                    // 通知 UI 单路视频已准备好（可以显示画面了）
-                    if (playbackListener != null) {
-                        playbackListener.onSingleVideoPrepared();
-                    }
-                    
-                    if (autoPlay) {
-                        mp.start();
-                        isPlaying = true;
-                        startProgressUpdate();
-                        // 通知 UI 更新按钮状态
-                        if (playbackListener != null) {
-                            playbackListener.onPlaybackStateChanged(true);
-                        }
-                    } else {
-                        // 确保视频暂停（某些设备 seek 后会自动播放）
-                        mp.pause();
-                        isPlaying = false;
-                        // 通知 UI 更新按钮状态
-                        if (playbackListener != null) {
-                            playbackListener.onPlaybackStateChanged(false);
-                        }
-                    }
-                });
-            } catch (Exception e) {
-                Log.e(TAG, "Failed to load single mode video", e);
-            }
+        if (currentGroup != null) {
+            // stopPlayback 释放隐藏解码器；新模式准备后恢复进度、倍速及播放/暂停状态。
+            loadVideoGroup(currentGroup, savedPosition, wasPlaying);
         }
     }
 

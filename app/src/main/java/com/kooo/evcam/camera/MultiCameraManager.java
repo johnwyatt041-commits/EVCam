@@ -42,6 +42,9 @@ public class MultiCameraManager {
     private int maxOpenCameras = DEFAULT_MAX_OPEN_CAMERAS;
 
     private boolean isRecording = false;
+    private volatile boolean stoppingRecording;
+    private final List<Runnable> recordingStoppedCallbacks = new ArrayList<>();
+    private final PreviewDemand previewDemand = new PreviewDemand();
     private volatile boolean repairSuppressed = false;  // 主动关闭摄像头时抑制 repair loop
     private boolean useCodecRecording = false;  // 是否使用软编码录制（用于 L6/L7）
     private boolean useRelayWrite = false;      // 是否使用中转写入（录制到内部存储，异步传输到U盘）
@@ -137,7 +140,7 @@ public class MultiCameraManager {
     }
 
     public MultiCameraManager(Context context) {
-        this.context = context;
+        this.context = context.getApplicationContext();
     }
 
     /**
@@ -304,7 +307,20 @@ public class MultiCameraManager {
         }
         camera.setTextureView(null);
         camera.clearPreviewSurface();
-        camera.recreateSession();
+        if (!camera.closeIfUnused()) {
+            camera.recreateSession();
+        }
+    }
+
+    public void setMainPreviewEnabled(boolean enabled) {
+        previewDemand.setMainPreview(enabled);
+        applyPreviewDemand();
+    }
+
+    private void applyPreviewDemand() {
+        for (SingleCamera camera : cameras.values()) {
+            camera.setMainPreviewEnabled(previewDemand.isRequired());
+        }
     }
 
     private void updatePreviewTextureView(String cameraKey, TextureView view) {
@@ -313,6 +329,9 @@ public class MultiCameraManager {
             return;
         }
         camera.setTextureView(view);
+        if (previewDemand.isRequired() && view != null && view.isAvailable()) {
+            camera.openCamera();
+        }
         camera.recreateSession();
     }
 
@@ -381,6 +400,7 @@ public class MultiCameraManager {
         Set<String> primaryIds = new HashSet<>();
         for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
             SingleCamera camera = entry.getValue();
+            camera.setMainPreviewEnabled(previewDemand.isRequired());
             String id = camera.getCameraId();
             
             if (primaryIds.add(id)) {
@@ -720,7 +740,9 @@ public class MultiCameraManager {
                 continue;
             }
             activeCameraKeys.add(entry.getKey());
-            camera.openCamera();
+            if (previewDemand.isRequired() || camera.hasActiveOutputs()) {
+                camera.openCamera();
+            }
             opened++;
         }
 
@@ -752,13 +774,15 @@ public class MultiCameraManager {
      * @param timestamp 统一的时间戳，用于所有摄像头的文件命名
      */
     public boolean startRecording(String timestamp) {
-        if (isRecording) {
-            AppLog.w(TAG, "Already recording");
+        if (isRecording || stoppingRecording) {
+            AppLog.w(TAG, "Recording is active or still stopping");
             return false;
         }
 
         // 清除缓存的分段时间戳，开始新的录制周期
         clearCachedSegmentTimestamp();
+
+        openRecordingCameras(null);
 
         // 根据模式选择录制方式
         if (useCodecRecording) {
@@ -774,13 +798,15 @@ public class MultiCameraManager {
      * @param enabledCameras 要录制的摄像头位置集合（如 ["front", "back"]），为 null 时录制所有摄像头
      */
     public boolean startRecording(String timestamp, Set<String> enabledCameras) {
-        if (isRecording) {
-            AppLog.w(TAG, "Already recording");
+        if (isRecording || stoppingRecording) {
+            AppLog.w(TAG, "Recording is active or still stopping");
             return false;
         }
 
         // 清除缓存的分段时间戳，开始新的录制周期
         clearCachedSegmentTimestamp();
+
+        openRecordingCameras(enabledCameras);
 
         // 根据模式选择录制方式
         if (useCodecRecording) {
@@ -790,11 +816,21 @@ public class MultiCameraManager {
         }
     }
 
-    /**
-     * 使用 MediaRecorder 开始录制（标准模式）
-     * @param timestamp 时间戳
-     * @param enabledCameras 要录制的摄像头位置集合，为 null 时录制所有摄像头
-     */
+    /** 打开本次任务所需的摄像头，包括后台已释放的前摄。 */
+    private void openRecordingCameras(Set<String> enabledCameras) {
+        repairSuppressed = false;
+        for (String key : getActiveCameraKeys()) {
+            if (enabledCameras == null || enabledCameras.contains(key)) {
+                SingleCamera camera = cameras.get(key);
+                if (camera != null && !camera.isConnected()) {
+                    // openCamera 同步读取尺寸并清理旧 Surface；必须先打开，再准备新录制 Surface。
+                    camera.openCamera();
+                }
+            }
+        }
+    }
+
+    /** 使用 MediaRecorder 开始录制；null 摄像头集合表示全部摄像头。 */
     private boolean startMediaRecorderRecording(String timestamp, Set<String> enabledCameras) {
         AppLog.d(TAG, "Starting MediaRecorder recording with timestamp: " + timestamp);
 
@@ -1657,6 +1693,18 @@ public class MultiCameraManager {
      * @param skipRelayTransfer 是否跳过自动传输（用于远程录制，上传完成后再传输）
      */
     public void stopRecording(boolean skipRelayTransfer) {
+        stopRecording(skipRelayTransfer, null);
+    }
+
+    public void stopRecording(boolean skipRelayTransfer, Runnable onStopped) {
+        synchronized (this) {
+            if (onStopped != null) recordingStoppedCallbacks.add(onStopped);
+            if (stoppingRecording) return;
+            stoppingRecording = true;
+        }
+        final boolean savedRelayWrite = useRelayWrite;
+        final File savedFinalDir = finalSaveDir;
+        final List<String> stoppingKeys = getActiveCameraKeys();
         AppLog.d(TAG, "stopRecording called, isRecording=" + isRecording + ", useCodecRecording=" + useCodecRecording + ", skipRelayTransfer=" + skipRelayTransfer);
 
         // 立即标记停止状态，防止新的录制请求
@@ -1747,25 +1795,9 @@ public class MultiCameraManager {
                     }
                 }
 
-                // 在主线程清理摄像头会话（使用短延迟确保录制器已完全停止）
-                mainHandler.postDelayed(() -> {
-                    for (String key : keys) {
-                        try {
-                            SingleCamera camera = cameras.get(key);
-                            if (camera != null) {
-                                camera.clearRecordSurface();
-                                camera.recreateSession();
-                            }
-                        } catch (Exception e) {
-                            AppLog.e(TAG, "Error clearing record surface for " + key, e);
-                        }
-                    }
-                }, 100);
-
                 // 如果使用中转写入，将临时目录中的所有文件传输到最终目录
-                if (useRelayWrite && finalSaveDir != null && !skipRelayTransfer) {
+                if (savedRelayWrite && savedFinalDir != null && !skipRelayTransfer) {
                     AppLog.d(TAG, "Scheduling relay transfer for remaining files...");
-                    final File savedFinalDir = finalSaveDir;
                     
                     File tempDir = new File(context.getCacheDir(), FileTransferManager.TEMP_VIDEO_DIR);
                     final File[] filesToTransfer;
@@ -1784,6 +1816,8 @@ public class MultiCameraManager {
                 AppLog.d(TAG, "stopRecording completed successfully");
             } catch (Exception e) {
                 AppLog.e(TAG, "Error in stopRecording", e);
+            } finally {
+                mainHandler.post(() -> finishStoppingRecording(stoppingKeys));
             }
         }, "StopRecording-" + System.currentTimeMillis()).start();
         finalSaveDir = null;
@@ -1795,6 +1829,32 @@ public class MultiCameraManager {
         isRebuildingRecording = false;  // 重置重建标志
         
         AppLog.d(TAG, "All cameras stopped recording");
+    }
+
+    private void finishStoppingRecording(List<String> keys) {
+        for (String key : keys) {
+            SingleCamera camera = cameras.get(key);
+            if (camera == null) continue;
+            try {
+                camera.clearRecordSurface();
+                if (!camera.closeIfUnused()) camera.recreateSession();
+            } catch (Exception e) {
+                AppLog.w(TAG, "Error clearing stopped recording output", e);
+            }
+        }
+        List<Runnable> callbacks;
+        synchronized (this) {
+            stoppingRecording = false;
+            callbacks = new ArrayList<>(recordingStoppedCallbacks);
+            recordingStoppedCallbacks.clear();
+        }
+        for (Runnable callback : callbacks) {
+            try {
+                callback.run();
+            } catch (Exception e) {
+                AppLog.e(TAG, "Recording stop callback failed", e);
+            }
+        }
     }
 
     /**
@@ -2175,29 +2235,59 @@ public class MultiCameraManager {
      */
     public void takePicture(String timestamp) {
         List<String> keys = getActiveCameraKeys();
-        if (keys.isEmpty()) {
-            AppLog.e(TAG, "No active cameras for taking picture");
+        if (keys.isEmpty()) return;
+        previewDemand.acquirePhoto();
+        applyPreviewDemand();
+        long requestedAtMs = System.currentTimeMillis();
+        waitForPhotoFrames(timestamp, keys, requestedAtMs);
+    }
+
+    private void waitForPhotoFrames(String timestamp, List<String> keys, long requestedAtMs) {
+        if (isReleased()) {
+            previewDemand.releasePhoto();
             return;
         }
-
-        AppLog.d(TAG, "Taking picture with " + keys.size() + " camera(s) using timestamp: " + timestamp);
-
-        // 快速拍照，每个摄像头间隔300ms触发拍照，但保存文件时按顺序延迟1秒
+        boolean allReady = true;
+        for (String key : keys) {
+            SingleCamera camera = cameras.get(key);
+            if (!isPhotoReady(camera, requestedAtMs)) allReady = false;
+        }
+        if (!allReady && System.currentTimeMillis() - requestedAtMs < 3000) {
+            mainHandler.postDelayed(() -> waitForPhotoFrames(timestamp, keys, requestedAtMs), 100);
+            return;
+        }
+        java.util.concurrent.atomic.AtomicInteger remaining =
+                new java.util.concurrent.atomic.AtomicInteger(keys.size());
+        Runnable photoCompleted = () -> mainHandler.post(() -> {
+            if (remaining.decrementAndGet() == 0) {
+                previewDemand.releasePhoto();
+                if (!isReleased()) applyPreviewDemand();
+            }
+        });
         for (int i = 0; i < keys.size(); i++) {
             final String key = keys.get(i);
-            final int captureDelay = i * 300;      // 拍照触发延迟：300ms（快速抓拍画面）
-            final int saveDelay = i * 1000;        // 文件保存延迟：1秒（分散磁盘I/O）
-
+            final int saveDelay = i * 1000;
             mainHandler.postDelayed(() -> {
                 SingleCamera camera = cameras.get(key);
-                if (camera != null && camera.isConnected()) {
-                    AppLog.d(TAG, "Taking picture with camera " + key);
-                    camera.takePicture(timestamp, saveDelay);  // 传递统一时间戳和保存延迟
+                if (isPhotoReady(camera, requestedAtMs)) {
+                    camera.takePicture(timestamp, saveDelay, photoCompleted);
                 } else {
-                    AppLog.w(TAG, "Camera " + key + " not available for taking picture");
+                    AppLog.w(TAG, "Camera " + key + " No fresh preview frame available for photo");
+                    photoCompleted.run();
                 }
-            }, captureDelay);
+            }, i * 300L);
         }
+    }
+
+    private boolean isPhotoReady(SingleCamera camera, long requestedAtMs) {
+        return camera != null && camera.isConnected()
+                && camera.getTextureView() != null && camera.getTextureView().isAvailable()
+                && camera.getLastFrameTimestampMs() >= requestedAtMs;
+    }
+
+    /** Configured cameras may be closed intentionally while preview is disabled. */
+    public boolean hasAvailableCameras() {
+        return !cameras.isEmpty();
     }
 
     private List<String> getActiveCameraKeys() {
@@ -2281,7 +2371,7 @@ public class MultiCameraManager {
         
         for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
             SingleCamera camera = entry.getValue();
-            if (!camera.isConnected()) {
+            if (camera.hasActiveOutputs() && !camera.isConnected()) {
                 disconnectedCount++;
                 AppLog.d(TAG, "Camera " + entry.getKey() + " reconnecting...");
                 camera.forceReopen();
@@ -2302,7 +2392,9 @@ public class MultiCameraManager {
         AppLog.d(TAG, "Force reopening all cameras...");
         repairSuppressed = false;
         for (SingleCamera camera : cameras.values()) {
-            camera.forceReopen();
+            if (camera.hasActiveOutputs()) {
+                camera.forceReopen();
+            }
         }
     }
 

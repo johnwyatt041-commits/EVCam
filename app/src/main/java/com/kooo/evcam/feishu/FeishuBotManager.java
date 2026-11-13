@@ -13,11 +13,9 @@ import com.google.gson.Gson;
 import com.google.gson.JsonObject;
 import com.google.gson.reflect.TypeToken;
 
-import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.OkHttpClient;
@@ -56,7 +54,7 @@ public class FeishuBotManager {
     private String connId = "";
 
     // 消息分包缓存
-    private final ConcurrentHashMap<String, byte[][]> messageCache = new ConcurrentHashMap<>();
+    private final FeishuPacketCache messageCache = new FeishuPacketCache();
 
     // 心跳定时器
     private Handler pingHandler;
@@ -333,29 +331,7 @@ public class FeishuBotManager {
      * 合并分包消息
      */
     private byte[] combinePackets(String msgId, int sum, int seq, byte[] data) {
-        byte[][] packets = messageCache.get(msgId);
-        if (packets == null) {
-            packets = new byte[sum][];
-            messageCache.put(msgId, packets);
-        }
-
-        packets[seq] = data;
-
-        // 检查是否所有包都已到达
-        ByteArrayOutputStream combined = new ByteArrayOutputStream();
-        for (byte[] packet : packets) {
-            if (packet == null) {
-                return null; // 还有包未到达
-            }
-            try {
-                combined.write(packet);
-            } catch (Exception ignored) {
-            }
-        }
-
-        // 清除缓存
-        messageCache.remove(msgId);
-        return combined.toByteArray();
+        return messageCache.add(msgId, sum, seq, data);
     }
 
     /**
@@ -651,6 +627,7 @@ public class FeishuBotManager {
         pingRunnable = new Runnable() {
             @Override
             public void run() {
+                messageCache.prune();
                 if (isRunning && webSocket != null) {
                     try {
                         // 发送 Protobuf 格式的 ping 帧

@@ -177,6 +177,7 @@ public class MjpegStreamManager {
      * @return 启动成功返回访问 URL，失败返回 null
      */
     public String start(MultiCameraManager multiCameraManager) {
+        if (!com.kooo.evcam.AppFeatures.NETWORK_STREAMING) return null;
         if (running.get()) {
             AppLog.w(TAG, "already running");
             return getAccessUrl();
@@ -442,11 +443,12 @@ public class MjpegStreamManager {
     private void applyParamsToEncoder() {
         if (glEncoder == null) return;
         // 鱼眼参数按当前摄像头位置取
-        float k1 = appConfig.getFisheyeCorrectionK1(currentCameraPosition);
-        float k2 = appConfig.getFisheyeCorrectionK2(currentCameraPosition);
-        float zoom = appConfig.getFisheyeCorrectionZoom(currentCameraPosition);
-        float cx = appConfig.getFisheyeCorrectionCenterX(currentCameraPosition);
-        float cy = appConfig.getFisheyeCorrectionCenterY(currentCameraPosition);
+        boolean correction = com.kooo.evcam.AppFeatures.FISHEYE_CORRECTION;
+        float k1 = correction ? appConfig.getFisheyeCorrectionK1(currentCameraPosition) : 0;
+        float k2 = correction ? appConfig.getFisheyeCorrectionK2(currentCameraPosition) : 0;
+        float zoom = correction ? appConfig.getFisheyeCorrectionZoom(currentCameraPosition) : 1;
+        float cx = correction ? appConfig.getFisheyeCorrectionCenterX(currentCameraPosition) : 0.5f;
+        float cy = correction ? appConfig.getFisheyeCorrectionCenterY(currentCameraPosition) : 0.5f;
         int rot = appConfig.getFisheyeCorrectionRotation(currentCameraPosition);
         glEncoder.setFisheyeParams(k1, k2, zoom, cx, cy, rot);
         glEncoder.setPan(appConfig.getMjpegStreamPanX(), appConfig.getMjpegStreamPanY());

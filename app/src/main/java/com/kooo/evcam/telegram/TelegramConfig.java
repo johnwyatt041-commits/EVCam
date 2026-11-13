@@ -123,7 +123,7 @@ public class TelegramConfig {
     }
 
     public boolean isConfigured() {
-        return !getBotToken().isEmpty();
+        return com.kooo.evcam.AppFeatures.TELEGRAM && !getBotToken().isEmpty();
     }
 
     public void setAutoStart(boolean autoStart) {

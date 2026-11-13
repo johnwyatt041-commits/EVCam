@@ -69,7 +69,7 @@ public class HeartbeatConfig {
      * 获取功能开关状态
      */
     public boolean isEnabled() {
-        return prefs.getBoolean(KEY_ENABLED, false);
+        return com.kooo.evcam.AppFeatures.HEARTBEAT_IMAGES && prefs.getBoolean(KEY_ENABLED, false);
     }
     
     /**

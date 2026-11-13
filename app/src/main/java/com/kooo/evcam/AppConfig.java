@@ -16,6 +16,8 @@ public class AppConfig {
     
     // 配置项键名
     private static final String KEY_FIRST_LAUNCH = "first_launch";  // 首次启动标记
+    private static final String KEY_MAIN_PREVIEW_ENABLED = "main_preview_enabled";
+    private static final String KEY_E5_THREE_CAMERA_PROFILE = "e5_three_camera_profile_applied";
     private static final String KEY_DEVICE_NICKNAME = "device_nickname";  // 设备识别名称（用于日志上传）
     private static final String KEY_AUTO_START_ON_BOOT = "auto_start_on_boot";  // 开机自启动
     private static final String KEY_AUTO_START_RECORDING = "auto_start_recording";  // 启动自动录制
@@ -395,6 +397,14 @@ public class AppConfig {
      */
     public boolean isFirstLaunch() {
         return prefs.getBoolean(KEY_FIRST_LAUNCH, true);
+    }
+
+    public boolean isMainPreviewEnabled() {
+        return prefs.getBoolean(KEY_MAIN_PREVIEW_ENABLED, false);
+    }
+
+    public void setMainPreviewEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_MAIN_PREVIEW_ENABLED, enabled).apply();
     }
     
     /**
@@ -1552,6 +1562,7 @@ public class AppConfig {
      * @return true 表示超视模式已启用
      */
     public boolean isSupervisionModeEnabled() {
+        if (!AppFeatures.SUPERVISION) return false;
         return prefs.getBoolean(KEY_SUPERVISION_MODE_ENABLED, false);
     }
     
@@ -1641,6 +1652,7 @@ public class AppConfig {
      * @return true 表示长视模式已启用
      */
     public boolean isLongViewModeEnabled() {
+        if (!AppFeatures.SUPERVISION) return false;
         return prefs.getBoolean(KEY_LONG_VIEW_MODE_ENABLED, false);
     }
     
@@ -1695,6 +1707,7 @@ public class AppConfig {
     }
     
     public boolean isSecondaryDisplayEnabled() {
+        if (!AppFeatures.SECONDARY_DISPLAY) return false;
         return prefs.getBoolean(KEY_SECONDARY_DISPLAY_ENABLED, false);
     }
     
@@ -1927,6 +1940,7 @@ public class AppConfig {
      * 获取预览画面矫正开关
      */
     public boolean isPreviewCorrectionEnabled() {
+        if (!AppFeatures.PREVIEW_CORRECTION) return false;
         return prefs.getBoolean(KEY_PREVIEW_CORRECTION_ENABLED, false);
     }
 
@@ -2003,6 +2017,7 @@ public class AppConfig {
      * 获取鱼眼矫正开关
      */
     public boolean isFisheyeCorrectionEnabled() {
+        if (!AppFeatures.FISHEYE_CORRECTION) return false;
         return prefs.getBoolean(KEY_FISHEYE_CORRECTION_ENABLED, false);
     }
 
@@ -2341,6 +2356,7 @@ public class AppConfig {
     }
 
     public boolean isDoorLinkageEnabled() {
+        if (!AppFeatures.DOOR_LINKAGE) return false;
         return prefs.getBoolean(KEY_DOOR_LINKAGE_ENABLED, false);
     }
 
@@ -2391,6 +2407,7 @@ public class AppConfig {
     }
 
     public boolean isDoorSecondaryDisplayEnabled() {
+        if (!AppFeatures.DOOR_LINKAGE || !AppFeatures.SECONDARY_DISPLAY) return false;
         return prefs.getBoolean(KEY_DOOR_SECONDARY_DISPLAY_ENABLED, false); // 默认关闭
     }
 
@@ -2440,6 +2457,7 @@ public class AppConfig {
     }
 
     public boolean isMockTurnSignalFloatingEnabled() {
+        if (!AppFeatures.MOCK_SIGNALS) return false;
         return prefs.getBoolean(KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED, false);
     }
 
@@ -2739,6 +2757,7 @@ public class AppConfig {
      * @return true 表示启用
      */
     public boolean isImageAdjustEnabled() {
+        if (!AppFeatures.IMAGE_ADJUSTMENT) return false;
         return prefs.getBoolean(KEY_IMAGE_ADJUST_ENABLED, false);
     }
     
@@ -3153,6 +3172,7 @@ public class AppConfig {
      * 获取定制键唤醒开关状态
      */
     public boolean isCustomKeyWakeupEnabled() {
+        if (!AppFeatures.CUSTOM_KEYS) return false;
         return prefs.getBoolean(KEY_CUSTOM_KEY_WAKEUP_ENABLED, false);
     }
 
@@ -3639,7 +3659,20 @@ public class AppConfig {
     // 鱼眼参数复用 getFisheyeCorrection*(cameraPos) 系列方法，按摄像头位置取值。
 
     public boolean isMjpegStreamEnabled() {
-        return prefs.getBoolean(KEY_MJPEG_STREAM_ENABLED, false);
+        return AppFeatures.NETWORK_STREAMING && prefs.getBoolean(KEY_MJPEG_STREAM_ENABLED, false);
+    }
+
+    /** Apply the requested daily recording profile once; Feishu still requests all cameras. */
+    public void applyE5RecordingProfile() {
+        if ((!CAR_MODEL_GALAXY_E5.equals(getCarModel()) && !CAR_MODEL_E5_MULTI.equals(getCarModel()))
+                || prefs.getBoolean(KEY_E5_THREE_CAMERA_PROFILE, false)) return;
+        prefs.edit()
+                .putBoolean(KEY_RECORDING_CAMERA_FRONT_ENABLED, false)
+                .putBoolean(KEY_RECORDING_CAMERA_BACK_ENABLED, true)
+                .putBoolean(KEY_RECORDING_CAMERA_LEFT_ENABLED, true)
+                .putBoolean(KEY_RECORDING_CAMERA_RIGHT_ENABLED, true)
+                .putBoolean(KEY_E5_THREE_CAMERA_PROFILE, true)
+                .apply();
     }
 
     public void setMjpegStreamEnabled(boolean enabled) {

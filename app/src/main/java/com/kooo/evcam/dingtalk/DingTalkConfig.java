@@ -37,7 +37,8 @@ public class DingTalkConfig {
     }
 
     public boolean isConfigured() {
-        return !getClientId().isEmpty() && !getClientSecret().isEmpty();
+        return com.kooo.evcam.AppFeatures.DINGTALK
+                && !getClientId().isEmpty() && !getClientSecret().isEmpty();
     }
 
     public void saveAccessToken(String token, long expireTime) {

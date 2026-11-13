@@ -21,7 +21,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 77
-        versionName = "1.6.6-test-06220930"
+        versionName = "1.6.6-test-11130838"
 
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -41,6 +41,10 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     sourceSets {
@@ -89,6 +93,7 @@ dependencies {
     implementation("io.grpc:grpc-stub:1.62.2")
 
     testImplementation(libs.junit)
+    testImplementation("org.mockito:mockito-core:5.14.2")
     androidTestImplementation(libs.ext.junit)
     androidTestImplementation(libs.espresso.core)
 }

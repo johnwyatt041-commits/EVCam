@@ -305,101 +305,9 @@ public class SettingsFragment extends Fragment {
             }
         });
 
-        // 初始化预览画面矫正
-        previewCorrectionSwitch = view.findViewById(R.id.switch_preview_correction);
-        previewCorrectionButtonsLayout = view.findViewById(R.id.layout_preview_correction_buttons);
-        openPreviewCorrectionFloatingButton = view.findViewById(R.id.btn_open_preview_correction_floating);
-        resetPreviewCorrectionButton = view.findViewById(R.id.btn_reset_preview_correction);
-        if (getContext() != null && appConfig != null) {
-            boolean correctionEnabled = appConfig.isPreviewCorrectionEnabled();
-            previewCorrectionSwitch.setChecked(correctionEnabled);
-            previewCorrectionButtonsLayout.setVisibility(correctionEnabled ? View.VISIBLE : View.GONE);
-        }
-        previewCorrectionSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (getContext() != null && appConfig != null) {
-                appConfig.setPreviewCorrectionEnabled(isChecked);
-                previewCorrectionButtonsLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
-                // 刷新预览
-                MainActivity mainActivity = MainActivity.getInstance();
-                if (mainActivity != null) {
-                    mainActivity.refreshPreviewCorrection();
-                }
-                String message = isChecked ? "预览画面矫正已开启" : "预览画面矫正已关闭";
-                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
-            }
-        });
-        openPreviewCorrectionFloatingButton.setOnClickListener(v -> {
-            if (getContext() == null) return;
-            if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
-                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                WakeUpHelper.requestOverlayPermission(requireContext());
-                return;
-            }
-            // 先回到主界面再打开悬浮窗，方便实时预览
-            MainActivity mainActivity = MainActivity.getInstance();
-            if (mainActivity != null) {
-                mainActivity.goToRecordingInterface();
-                mainActivity.showPreviewCorrectionFloating();
-            }
-        });
-        resetPreviewCorrectionButton.setOnClickListener(v -> {
-            if (getContext() != null && appConfig != null) {
-                appConfig.resetAllPreviewCorrection();
-                Toast.makeText(getContext(), "所有预览矫正参数已恢复默认", Toast.LENGTH_SHORT).show();
-                MainActivity mainActivity = MainActivity.getInstance();
-                if (mainActivity != null) {
-                    mainActivity.refreshPreviewCorrection();
-                }
-            }
-        });
-
-        // 初始化鱼眼矫正
-        fisheyeCorrectionSwitch = view.findViewById(R.id.switch_fisheye_correction);
-        fisheyeCorrectionButtonsLayout = view.findViewById(R.id.layout_fisheye_correction_buttons);
-        openFisheyeCorrectionFloatingButton = view.findViewById(R.id.btn_open_fisheye_correction_floating);
-        resetFisheyeCorrectionButton = view.findViewById(R.id.btn_reset_fisheye_correction);
-        if (getContext() != null && appConfig != null) {
-            boolean fisheyeEnabled = appConfig.isFisheyeCorrectionEnabled();
-            fisheyeCorrectionSwitch.setChecked(fisheyeEnabled);
-            fisheyeCorrectionButtonsLayout.setVisibility(fisheyeEnabled ? View.VISIBLE : View.GONE);
-        }
-        fisheyeCorrectionSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (getContext() != null && appConfig != null) {
-                appConfig.setFisheyeCorrectionEnabled(isChecked);
-                fisheyeCorrectionButtonsLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
-                // 需要重建 session 来切换 Surface（直接 / GL 中间层）
-                MainActivity mainActivity = MainActivity.getInstance();
-                if (mainActivity != null) {
-                    mainActivity.refreshFisheyeCorrection();
-                }
-                String message = isChecked ? "鱼眼矫正已开启" : "鱼眼矫正已关闭";
-                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
-            }
-        });
-        openFisheyeCorrectionFloatingButton.setOnClickListener(v -> {
-            if (getContext() == null) return;
-            if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
-                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                WakeUpHelper.requestOverlayPermission(requireContext());
-                return;
-            }
-            // 先回到主界面再打开悬浮窗，方便实时预览
-            MainActivity mainActivity = MainActivity.getInstance();
-            if (mainActivity != null) {
-                mainActivity.goToRecordingInterface();
-                mainActivity.showFisheyeCorrectionFloating();
-            }
-        });
-        resetFisheyeCorrectionButton.setOnClickListener(v -> {
-            if (getContext() != null && appConfig != null) {
-                appConfig.resetAllFisheyeCorrection();
-                Toast.makeText(getContext(), "所有鱼眼矫正参数已恢复默认", Toast.LENGTH_SHORT).show();
-                MainActivity mainActivity = MainActivity.getInstance();
-                if (mainActivity != null) {
-                    mainActivity.refreshFisheyeCorrection();
-                }
-            }
-        });
+        OptionalFeatureViews.hideCard(view, R.id.switch_preview_correction);
+        OptionalFeatureViews.hideCard(view, R.id.switch_fisheye_correction);
+        OptionalFeatureViews.hideCard(view, R.id.switch_custom_key_wakeup);
 
         // 初始化开机自启动开关
         autoStartSwitch = view.findViewById(R.id.switch_auto_start);
@@ -2221,25 +2129,15 @@ public class SettingsFragment extends Fragment {
     private void initVersionUpdate(View view) {
         currentVersionText = view.findViewById(R.id.tv_current_version);
         checkUpdateButton = view.findViewById(R.id.btn_check_update);
-        
-        if (currentVersionText == null || checkUpdateButton == null || getContext() == null) {
-            return;
+        if (checkUpdateButton != null) checkUpdateButton.setVisibility(View.GONE);
+        if (currentVersionText == null || getContext() == null) return;
+        try {
+            String version = requireContext().getPackageManager()
+                    .getPackageInfo(requireContext().getPackageName(), 0).versionName;
+            currentVersionText.setText("当前版本：v" + version);
+        } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+            AppLog.w(TAG, "Cannot read installed version", e);
         }
-        
-        versionUpdateManager = new VersionUpdateManager(getContext());
-        
-        // 显示当前版本号
-        String currentVersion = versionUpdateManager.getCurrentVersion();
-        currentVersionText.setText("当前版本：v" + currentVersion);
-        
-        // 设置检查更新按钮点击事件（直接检查，已有默认服务器）
-        checkUpdateButton.setOnClickListener(v -> performCheckUpdate());
-        
-        // 长按可以修改更新服务器地址（高级用户）
-        checkUpdateButton.setOnLongClickListener(v -> {
-            showUpdateServerConfigDialog();
-            return true;
-        });
     }
     
     /**
