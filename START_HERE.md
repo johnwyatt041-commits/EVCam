@@ -22,6 +22,13 @@
 
 49 项 JVM 单元测试、Debug/Release 构建、必要 Lint 和模拟器 UI 检查已通过；**未完成 E5 摄像头/HUD 实车回归及 CPU、内存、帧率对照测试**。用户只做过短时间试录，感觉更流畅，尚未确认。
 
+## 新增的本地待发布版本
+
+- `1.6.6-test-11140245`：默认关闭的录像车辆状态水印，显示车速、刹车踏板、左右转向；未收到信号显示未知，E5 刹车字段可用性尚待实车确认。
+- 源码 `03a261e04474e2bce3eda834e87665e6d6da6ddc`，分支 `codex/vehicle-status-watermark`。
+- 本地 APK：`outputs/EVCam-E5-Status-1.6.6-test-11140245.apk`；64 项 JVM 测试、Debug/Release/必要 Lint、1 项模拟器 GPU 测试与设置开关验证通过。
+- GitHub 推送被自动审批拒绝，等待用户对 `johnwyatt041-commits/EVCam` 的本次上传作明确确认。上述“当前可下载版本”仍是旧 GitHub 发布。详情见 `docs/STATUS.md`、`docs/VEHICLE_STATUS_WATERMARK.md`。
+
 ## 目录
 
 | 路径 | 内容 |

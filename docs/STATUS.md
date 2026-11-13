@@ -7,7 +7,7 @@
 | 项目 | 状态 |
 | --- | --- |
 | 主目录 | `E:\GPT\EVCam` |
-| 当前分支 | `e5-ui-layout-test-11140102` |
+| 当前分支 | `codex/vehicle-status-watermark` |
 | 已发布应用提交 | `c9c493ef2eac5d0956677c3b3835f0a67cb31ccb` |
 | 性能/HUD 前一基线 | `273c411f2eba37bd2ec06b21b7b677d0e8b58baf` |
 | 上游基线 | `0876b976bff554ef6bad2c65513cf0149f451d81` |
@@ -84,6 +84,7 @@
 - 新增任务分支 `codex/vehicle-status-watermark`，本地测试版 `1.6.6-test-11140245`，versionCode 77。
 - 已接入默认关闭的刹车踏板/车速/左右转向状态水印。开启时复用小区域 GL 纹理，多路共享信号源；关闭/停止录像释放专用资源，不停止补盲拥有的连接。
 - 64 项 JVM 测试、Debug/Release、Release 必要 Lint 通过；隔离 Android 11 x86 模拟器通过 1 项实际 GPU 绘制测试及设置默认关闭/保存/重启/关闭检查。
-- Release APK v2 签名通过，原 ARM64 native 库保持字节一致。输出 `outputs/EVCam-E5-Status-1.6.6-test-11140245.apk`，25,000,114 字节，SHA-256 `9c3a7169d7598fdfe48a625e6af66574d13454fdc19f4e45e668ed73833ce718`。
+- Release APK v2 签名通过，原 ARM64 native 库保持字节一致。输出 `outputs/EVCam-E5-Status-1.6.6-test-11140245.apk`，25,000,114 字节，SHA-256 `fa8e6249b777653c95e878f3d3b7fd1f87ad33a4f5b2539727e23cfb8508d0b0`。已在提交后重建，APK 内嵌 revision 与源码 `03a261e04474e2bce3eda834e87665e6d6da6ddc` 一致。
 - 刹车仅尝试标准踏板字段，在 E5 是否有数据未实测；缺失、无效或断线显示未知。未测实车三路/四路/HUD、同步延迟和开关前后 CPU/PSS/fps。没有宣称修复旧卡顿。
-- 架构、协议依据、验证与使用说明见 [车辆状态水印](VEHICLE_STATUS_WATERMARK.md)。发布状态与源码提交完成后另行记录。
+- 架构、协议依据、验证与使用说明见 [车辆状态水印](VEHICLE_STATUS_WATERMARK.md)，交付说明在 `outputs/EVCam-E5-Status-notes.md`。
+- **本地完成，尚未上传或发布**。自动审批拒绝向用户 fork `johnwyatt041-commits/EVCam` 推送分支，理由是本次缺少对该外部目标的明确授权；没有换工具绕过。若用户明确确认该目标，再推送此分支并发布新的 prerelease，不覆盖旧发布。

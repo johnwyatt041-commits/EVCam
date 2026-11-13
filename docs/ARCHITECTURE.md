@@ -13,6 +13,7 @@
 | `camera/VideoRecorder.java` | MediaRecorder 路径 |
 | `camera/CodecVideoRecorder.java`、`camera/EglSurfaceEncoder.java` | GL/MediaCodec 路径，输入帧、编码输出与 EOS 收尾 |
 | `camera/FrameTimestampClock.java`、`camera/MuxerTimestampClock.java` | 源帧时序、分段时间轴和回退修复 |
+| `vehicle/`、`camera/VehicleStatusWatermark.java` | 默认关闭的录像状态水印；多路共用 VHAL 信号租约，按需创建小纹理，未知/过期不渲染为关闭；E5 踏板字段尚待验证 |
 | `feishu/`、`remote/` | 飞书长连接、统一命令调度、媒体上传；勿将长期等待放 UI 线程 |
 | `BlindSpotService.java`、`VhalSignalObserver.java` | 车身信号与转向补盲，实车依赖 |
 | `playback/` | 文件列表、播放器与显示/隐藏时释放逻辑 |
