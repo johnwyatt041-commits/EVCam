@@ -11,6 +11,8 @@
 
 按任务参考 `docs/ARCHITECTURE.md`。本地搬迁的校验结果见 `docs/MIGRATION.md`。每次完成工作都更新进度；口头聊天记录不是唯一交接依据。
 
+**新 AI 协作先读 [交接索引](docs/AI_HANDOFF.md)**：当前待实车状态、Smartcam 原 APK/反编译资料的本机绝对路径、验证证据与独立工作树协作规则。Smartcam 资料在忽略目录 `work/`，不随 GitHub clone 或新工作树自动复制；没有完整原作者源码工程。
+
 ## 当前可下载版本
 
 **E5 用户反馈 `11140958` A/B 均停在等待录制。当前分支 `codex/e5-recording-startup-fix`，已上传修正候选 `1.6.6-test-11141103`。请先读 [E5 启动修正](docs/E5_STARTUP_FIX_20261114.md) 和 `docs/STATUS.md`；没有失败现场日志，仍待 E5 实车确认。**
@@ -31,14 +33,14 @@
 
 49 项 JVM 单元测试、Debug/Release 构建、必要 Lint 和模拟器 UI 检查已通过；**未完成 E5 摄像头/HUD 实车回归及 CPU、内存、帧率对照测试**。用户只做过短时间试录，感觉更流畅，尚未确认。
 
-## 后续测试版本与本地文件
+## 历史测试版本与本地文件
 
-**最新：大屏侧栏优化 `1.6.6-test-11140958`**，分支 `codex/large-screen-navigation`。按用户 2560×1600 屏幕放大侧栏按钮/图标/文字，适配不同 DPI；A/B 两版同步。交付说明 `outputs/EVCam-LargeNav-notes.md`，完整状态见 `docs/STATUS.md`。
+**历史：大屏侧栏优化 `1.6.6-test-11140958`**，分支 `codex/large-screen-navigation`。该版用户实车反馈录像不能开始，已由上方 `11141103` 修正候选替代；侧栏改进保留。历史交付说明 `outputs/EVCam-LargeNav-notes.md`。
 
 - A：`outputs/EVCam-A-Independent-LargeUI-1.6.6-test-11140958.apk`；B：`outputs/EVCam-B-Composite-LargeUI-1.6.6-test-11140958.apk`。
 - 源码 `4268f03821bceb82c7489680831e435b48e3b504`。两版构建/签名/源码 revision 校验通过；大屏三种密度、六项边缘触控、深浅色和大字体已验证。原录像对照包仍保留。
 
-当前交付 **录像整改 A/B `1.6.6-test-11140403`**，分支 `codex/recording-ab-comparison`。A 保留日常三路独立文件，B 参考 Smartcam 思路合成单个 H.264 视频；两版同包名顺序覆盖安装，飞书四路都仍独立。详见 [对照试录说明](docs/RECORDING_AB_TEST.md) 和 `docs/STATUS.md`；旧 GitHub 发布尚未更新。
+历史本地交付 **录像整改 A/B `1.6.6-test-11140403`**，分支 `codex/recording-ab-comparison`。A 为独立文件，B 当时为超宽横排合成；当前 E5 B 已改原生尺寸画布。此段是历史记录，当前发布与方式以上方 `11141103` 和 [对照说明](docs/RECORDING_AB_TEST.md) 为准。
 
 - A：`outputs/EVCam-A-Independent-1.6.6-test-11140403.apk`；B：`outputs/EVCam-B-Composite-1.6.6-test-11140403.apk`。
 - 应用源码 `f8a8e6ee60279925f575931da67497c737ce6a79`；每版 73 项 JVM、实际编码分段/GPU 与合成回放检查通过，签名及内嵌源码 revision 已核验。实车性能仍需对照测试。
@@ -46,7 +48,7 @@
 - `1.6.6-test-11140245`：默认关闭的录像车辆状态水印，显示车速、刹车踏板、左右转向；未收到信号显示未知，E5 刹车字段可用性尚待实车确认。
 - 源码 `03a261e04474e2bce3eda834e87665e6d6da6ddc`，分支 `codex/vehicle-status-watermark`。
 - 本地 APK：`outputs/EVCam-E5-Status-1.6.6-test-11140245.apk`；64 项 JVM 测试、Debug/Release/必要 Lint、1 项模拟器 GPU 测试与设置开关验证通过。
-- GitHub 推送被自动审批拒绝，等待用户对 `johnwyatt041-commits/EVCam` 的本次上传作明确确认。上述“当前可下载版本”仍是旧 GitHub 发布。详情见 `docs/STATUS.md`、`docs/VEHICLE_STATUS_WATERMARK.md`。
+- 当时推送曾被自动审批拒绝；用户随后明确要求上传，已完成上方新版本发布。该水印 APK 未单独发布，功能源码已并入当前修正候选。历史详情见 `docs/VEHICLE_STATUS_WATERMARK.md`。
 
 ## 目录
 

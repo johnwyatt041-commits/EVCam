@@ -2,6 +2,8 @@
 
 更新：2026-11-14，Asia/Hong_Kong。后续每个任务结束时更新；读取时同时执行 `git status --short`、`git log -5 --oneline`，避免文档落后于代码。
 
+新 AI 协作交接见 [AI_HANDOFF.md](AI_HANDOFF.md)。当前等待用户实车反馈，没有新的实车成功结论。Smartcam 原 APK 已复制到本机 `work/reference-apks/` 并核对哈希；26个Java反编译摘录/29个指令或索引文件在 `work/smartcam-analysis/`，不是完整原作者源码，不纳入 Git 或云端自动同步。
+
 ## E5 等待录制修正（2026-11-14）
 
 - 用户实车反馈 `11140958` A/B 均停在等待，没有额外提示。**这两个包不能视为实车可用基线**。当前分支 `codex/e5-recording-startup-fix`，候选修正版 `1.6.6-test-11141103`。
@@ -52,12 +54,12 @@
 - B：`outputs/EVCam-B-Composite-1.6.6-test-11140403.apk`，25,032,954 字节，SHA-256 `cecf479f981564e3bc69dc08b9fd99ef8aa919a18d9633a174157fbda1a69a21`。
 - 两 APK v2 签名通过，原 ARM64 库字节一致，无已删除宣传资产；哈希、清单和从 UI 基线起的源码补丁已导出。专用模拟器及 5039 adb 服务已停止，没有操作物理设备。
 
-## 当前基线
+## 历史 UI 基线
 
 | 项目 | 状态 |
 | --- | --- |
 | 主目录 | `E:\GPT\EVCam` |
-| 当前分支 | `codex/e5-recording-startup-fix` |
+| 历史 UI 分支 | `e5-ui-layout-test-11140102` |
 | 已发布应用提交 | `c9c493ef2eac5d0956677c3b3835f0a67cb31ccb` |
 | 性能/HUD 前一基线 | `273c411f2eba37bd2ec06b21b7b677d0e8b58baf` |
 | 上游基线 | `0876b976bff554ef6bad2c65513cf0149f451d81` |
