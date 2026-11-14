@@ -13,11 +13,11 @@
 
 ## 当前可下载版本
 
-**E5 用户已反馈下述 `11140958` A/B 均停在等待录制。当前分支 `codex/e5-recording-startup-fix`，修正候选 `1.6.6-test-11141103`。请先读 [E5 启动修正](docs/E5_STARTUP_FIX_20261114.md) 和 `docs/STATUS.md`，不要把上次模拟器结果当成实车可用。**
+**E5 用户反馈 `11140958` A/B 均停在等待录制。当前分支 `codex/e5-recording-startup-fix`，已上传修正候选 `1.6.6-test-11141103`。请先读 [E5 启动修正](docs/E5_STARTUP_FIX_20261114.md) 和 `docs/STATUS.md`；没有失败现场日志，仍待 E5 实车确认。**
 
-- 最新测试版：`1.6.6-test-11140958`，大屏侧栏优化 + 录像 A/B 对照。
-- [GitHub 下载页](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11140958-e5-recording-ab-large-ui)：Assets 中 A 为三路独立录像，B 为日常合成单视频；同包名顺序覆盖安装。
-- APK 源码提交 `4268f03821bceb82c7489680831e435b48e3b504`。两个 APK 和 7 个说明/校验/预览附件均已上传，GitHub SHA-256 与本地一致，两个公开 APK 链接检查 HTTP 200。
+- 最新测试版：`1.6.6-test-11141103`，E5 启动兼容修正，保留大屏侧栏与 A/B 对照。
+- [GitHub 下载页](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix)：A 为三路独立录像，B 为 E5 原生画布 2×2 三格合成；飞书四路仍独立，同包名顺序覆盖安装。
+- APK 源码提交 `85870d254c9e4fec75dcae60ca01744946aad535`。8 个附件 SHA-256 与本地一致，两个公开 APK 下载链接均 HTTP 200。原视频没有上传。
 - 用户本轮明确要求上传至 GitHub，已解除此前待上传状态；实车性能和触控手感仍待确认。
 
 ## 此前公开 UI 版本（历史）

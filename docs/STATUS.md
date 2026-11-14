@@ -13,8 +13,13 @@
 - 新增模拟器实际 Camera2→管理器→公共 DCIM→首次写入/停止完成回归，补足此前只测试合成输入和私有目录的缺口；B 三色合成/多次分段/PTS/尾部/GPU 水印通过。没有现场失败日志，**不能确认唯一实车根因，也不能宣称已实车修复**。
 - 详细证据、限制与试录步骤见 [E5 启动修正](E5_STARTUP_FIX_20261114.md)，任务 `docs/tasks/e5-recording-startup.md`。
 - 最终 `11141103` 每版 78 项 JVM 测试（总计 156）及 Debug/Release/必要 Lint 通过，日志 `work/verification/build-20261114-110338-526.log`。A/B 实际 GL 分段、Camera2 公共目录首写和水印 GPU 测试各 3 项通过，证据归档 `work/e5-startup/`。模拟器的软件 H.264/单路 Camera2 不代表 E5 多路硬件验证。
+- 应用源码 `85870d254c9e4fec75dcae60ca01744946aad535`，提交后重建 Release，两 APK 内嵌 revision 一致、v2签名及原证书通过、原ARM64库不变；DEX含新增看门狗。日志 `work/verification/e5-startup-source-release.log`。
+- A：`outputs/EVCam-A-E5-StartupFix-1.6.6-test-11141103.apk`，SHA-256 `d16bc4d06a7b4c696f5f577d4c2033eefc16cf3e3b3855405f6b46b121e55677`。
+- B：`outputs/EVCam-B-E5-StartupFix-1.6.6-test-11141103.apk`，SHA-256 `e0d4015032332d7cb7741f8d0036c4fb5e515026714f93cdcacb57df38fd5fc1`。两包均25,042,814字节，说明/清单/校验/源码补丁同目录保留。
+- 已推送任务分支并新建 [v1.6.6-test-11141103-e5-startup-fix](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix) prerelease，标签指向上述 APK 源码提交，8个附件SHA与本地逐一一致，两个公开APK链接均HTTP200。核验 `work/e5-startup/github-release-verified.json`。没有上传用户原ZIP/视频/抽帧。
+- 本次使用 `emulator-5556 emu kill` 真正停止专用模拟器并关闭5039 adb服务，已核对无任务模拟器进程/监听端口；未操作物理设备。后续文档提交不改变APK。
 
-## 最新 GitHub 交付（2026-11-14）
+## 上一轮 GitHub 交付（历史）
 
 - 用户明确要求“传到 github 不然我下载不了”，已授权将当前两个大屏 UI APK 和对应源码上传至此前确认的用户 fork `johnwyatt041-commits/EVCam`。此前自动审批拒绝属于历史状态，本次上传成功。
 - 已推送 `codex/large-screen-navigation`；新建独立 prerelease [v1.6.6-test-11140958-e5-recording-ab-large-ui](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11140958-e5-recording-ab-large-ui)，未覆盖旧版本或上游仓库。
