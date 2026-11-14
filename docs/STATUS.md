@@ -2,13 +2,20 @@
 
 更新：2026-11-14，Asia/Hong_Kong。后续每个任务结束时更新；读取时同时执行 `git status --short`、`git log -5 --oneline`，避免文档落后于代码。
 
+## 最新 GitHub 交付（2026-11-14）
+
+- 用户明确要求“传到 github 不然我下载不了”，已授权将当前两个大屏 UI APK 和对应源码上传至此前确认的用户 fork `johnwyatt041-commits/EVCam`。此前自动审批拒绝属于历史状态，本次上传成功。
+- 已推送 `codex/large-screen-navigation`；新建独立 prerelease [v1.6.6-test-11140958-e5-recording-ab-large-ui](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11140958-e5-recording-ab-large-ui)，未覆盖旧版本或上游仓库。
+- 发布标签与 APK 源码提交均为 `4268f03821bceb82c7489680831e435b48e3b504`。两个 APK、SHA、清单、说明、UI 补丁、深浅色预览及录像对照说明共 9 个附件均为 uploaded，GitHub 返回的 SHA-256 与本地逐一一致。
+- A/B 两个公开下载链接经无认证 HEAD 跟随跳转检查均为 HTTP 200。核验结果 `work/large-navigation/github-release-verified.json`。APK 无修改、无需重建，文件哈希仍为下节记录。
+
 ## 大屏侧栏优化（2026-11-14）
 
 - 用户屏幕 2560×1600，反馈侧边选项太小。分支 `codex/large-screen-navigation`，基于上述 A/B 交付后提交 `dba5808`，版本 `1.6.6-test-11140958`。
 - 同步放大 A/B 的侧栏、整块按钮、文字、图标与间距；按屏幕最小宽度/可用高度使用资源分档，大屏文字 22–30sp、图标 36–52dp、按钮最小高 88–144dp。高度可随字体增长，小屏保留滚动。录像、HUD 与补盲实现未改。
 - 146 项现有 JVM 测试（每版 73）及两版 Debug/Release/必要 Lint 通过，日志 `work/verification/build-20261114-095604-453.log`。
 - 2560×1600 模拟器检查 160/240/320dpi，六项完整可见；240dpi 六项按钮边缘点击切换正确。深浅色与 1.3 倍系统字体通过，紧凑屏可滚动到设置，截图已人工查看。实际按钮分别 176×144、240×170、272×187px。证据 `work/large-navigation/`，任务说明 `docs/tasks/large-screen-navigation.md`。
-- 仍需用户在物理 E5 上确认触控手感；屏幕分辨率不等于逻辑 dp，未读取车机真实 DPI。交付 APK/源码/哈希见 `outputs/EVCam-LargeNav-notes.md`。本次仅本地交付，没有重试此前被拒绝的 GitHub 上传。
+- 仍需用户在物理 E5 上确认触控手感；屏幕分辨率不等于逻辑 dp，未读取车机真实 DPI。交付 APK/源码/哈希见 `outputs/EVCam-LargeNav-notes.md`。起初本地交付，随后按用户明确要求完成上述 GitHub 发布。
 - 源码 `4268f03821bceb82c7489680831e435b48e3b504`，提交后重建 Release，两 APK 内嵌 revision 一致，签名与此前相同、原 ARM64 库保持不变。重建日志 `work/verification/large-nav-source-commit-release.log`。
 - A：`outputs/EVCam-A-Independent-LargeUI-1.6.6-test-11140958.apk`，SHA-256 `3d53d97bfda6ff7ed773e54de8aa4e27d4a4d14f872c08c92e07f8f022ed23b2`。
 - B：`outputs/EVCam-B-Composite-LargeUI-1.6.6-test-11140958.apk`，SHA-256 `30786952c78c3570f88eed6fe73cb1408da44024c392b3fd7113aaceb6b9dee6`。两包均 25,042,814 字节。

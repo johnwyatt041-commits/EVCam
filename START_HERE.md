@@ -13,6 +13,13 @@
 
 ## 当前可下载版本
 
+- 最新测试版：`1.6.6-test-11140958`，大屏侧栏优化 + 录像 A/B 对照。
+- [GitHub 下载页](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11140958-e5-recording-ab-large-ui)：Assets 中 A 为三路独立录像，B 为日常合成单视频；同包名顺序覆盖安装。
+- APK 源码提交 `4268f03821bceb82c7489680831e435b48e3b504`。两个 APK 和 7 个说明/校验/预览附件均已上传，GitHub SHA-256 与本地一致，两个公开 APK 链接检查 HTTP 200。
+- 用户本轮明确要求上传至 GitHub，已解除此前待上传状态；实车性能和触控手感仍待确认。
+
+## 此前公开 UI 版本（历史）
+
 - 版本：`1.6.6-test-11140102`，E5 性能精简、HUD 保留、统一深浅色 UI 和可编辑四路预览布局。
 - 应用源码提交：`c9c493ef2eac5d0956677c3b3835f0a67cb31ccb`。
 - 分支：`e5-ui-layout-test-11140102`。迁移文档可能在此提交之后，使用 `git log -5 --oneline` 看最新状态。
@@ -22,7 +29,7 @@
 
 49 项 JVM 单元测试、Debug/Release 构建、必要 Lint 和模拟器 UI 检查已通过；**未完成 E5 摄像头/HUD 实车回归及 CPU、内存、帧率对照测试**。用户只做过短时间试录，感觉更流畅，尚未确认。
 
-## 新增的本地待发布版本
+## 后续测试版本与本地文件
 
 **最新：大屏侧栏优化 `1.6.6-test-11140958`**，分支 `codex/large-screen-navigation`。按用户 2560×1600 屏幕放大侧栏按钮/图标/文字，适配不同 DPI；A/B 两版同步。交付说明 `outputs/EVCam-LargeNav-notes.md`，完整状态见 `docs/STATUS.md`。
 

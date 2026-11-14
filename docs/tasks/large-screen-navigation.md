@@ -18,4 +18,4 @@
 
 `work/verification/build-20261114-095604-453.log`：146 项现有 JVM 测试（每版 73），零失败/跳过；两版 Debug/Release 与必要 Lint 通过。界面改动没有新增镜像式单元测试；用实际界面布局/边缘点击验证。
 
-本次交付本地 APK。此前 GitHub 上传审批阻塞未获新增授权，不重试外部上传。
+先完成本地 APK，随后用户明确要求上传 GitHub。已推送源码分支并发布 `v1.6.6-test-11140958-e5-recording-ab-large-ui`，9 个附件 SHA-256 与本地一致，两个 APK 公开下载链接 HTTP 200。此前审批阻塞已由本轮明确上传要求解除。核验证据 `work/large-navigation/github-release-verified.json`。
