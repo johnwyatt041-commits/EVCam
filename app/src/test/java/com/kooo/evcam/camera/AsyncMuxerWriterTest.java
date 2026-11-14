@@ -11,6 +11,31 @@ import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.Assert.*;
 
 public class AsyncMuxerWriterTest {
+    @Test public void deniedFileOpenReportsOnceAndNeverWritesOrPublishes() throws Exception {
+        AtomicInteger failures = new AtomicInteger();
+        AtomicInteger writes = new AtomicInteger();
+        CountDownLatch failed = new CountDownLatch(1);
+        java.util.concurrent.atomic.AtomicBoolean published = new java.util.concurrent.atomic.AtomicBoolean();
+        AsyncMuxerWriter writer = new AsyncMuxerWriter(new AsyncMuxerWriter.Sink() {
+            @Override public void start(MediaFormat format) throws Exception {
+                throw new java.io.FileNotFoundException("EPERM opening recording output");
+            }
+            @Override public void write(ByteBuffer data, MediaCodec.BufferInfo info) { writes.incrementAndGet(); }
+            @Override public void finish(boolean publish) { published.set(publish); }
+        }, error -> { failures.incrementAndGet(); failed.countDown(); }, "DeniedVideoOutput");
+        writer.start();
+        assertTrue(failed.await(2, TimeUnit.SECONDS));
+        try {
+            writer.writeSampleData(0, ByteBuffer.allocate(4), metadata(4, 0));
+            fail("Denied output must reject further samples");
+        } catch (IllegalStateException expected) {}
+        try { writer.stop(); fail("Stop must retain the original output failure"); }
+        catch (IllegalStateException expected) { assertTrue(expected.getCause() instanceof java.io.FileNotFoundException); }
+        assertEquals(1, failures.get());
+        assertEquals(0, writes.get());
+        assertFalse(published.get());
+    }
+
     static class Sink implements AsyncMuxerWriter.Sink {
         final CountDownLatch entered = new CountDownLatch(1);
         final CountDownLatch unblock = new CountDownLatch(1);

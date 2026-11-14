@@ -21,6 +21,11 @@ public interface RecordCallback {
      */
     void onRecordError(String cameraId, String error);
 
+    /** Disk/muxer failures cannot be repaired by recreating the camera or encoder. */
+    default void onOutputError(String cameraId, String error) {
+        onRecordError(cameraId, error);
+    }
+
     /**
      * 预分段切换（在停止当前 MediaRecorder 之前调用）
      * 用于通知外部暂停 CaptureSession 的录制输出，避免向即将释放的 Surface 发送帧

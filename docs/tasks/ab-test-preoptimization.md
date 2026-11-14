@@ -1,10 +1,10 @@
 # 任务：A/B 测试版实车前优化（ab-test-preoptimization）
 
-最后更新：2026-11-15 00:26:46 +08:00（Asia/Hong_Kong）
-最后核对：2026-11-15 00:26:46 +08:00
+最后更新：2026-11-15 02:08:30 +08:00（Asia/Hong_Kong）
+最后核对：2026-11-15 02:08:30 +08:00
 任务/执行者：ab-test-preoptimization / Codex
 分支/工作树：`codex/e5-recording-startup-fix` / `E:\GPT\EVCam`（串行执行，无并行工作树）
-状态：已实现、离线验证及本地交付完成；应用源码提交`5f5ce4626a8f7060cc96cc3758150c497eca6257`；等待 E5 实车测试。
+状态：优化已实现、离线通过；用户实车反馈A/B录制均超时失败，B日志定位公共DCIM暂存文件EPERM，修复转[recording-storage-eperm](recording-storage-eperm.md)。源码`5f5ce46`。
 
 ## 当前结论
 

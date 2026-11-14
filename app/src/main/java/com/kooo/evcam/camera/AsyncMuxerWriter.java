@@ -180,7 +180,10 @@ final class AsyncMuxerWriter {
         MediaMuxer muxer;
         int track;
         boolean started;
-        FileSink(String path) { target = new File(path); pending = new File(path + ".pending"); }
+        FileSink(String path) {
+            target = new File(path);
+            pending = com.kooo.evcam.storage.RecordingFiles.pendingFileFor(target);
+        }
         @Override public void start(MediaFormat format) throws IOException {
             if (target.exists() || pending.exists()) throw new IOException("Refusing to overwrite video: " + target);
             muxer = new MediaMuxer(pending.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
