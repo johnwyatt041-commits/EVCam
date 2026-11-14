@@ -20,6 +20,8 @@
 
 脚本不安装 APK、不启动模拟器、不操作设备、不发布。构建成功不等于实车功能验证。
 
+新临时输出放 `work/tmp/<task-id>/`，任务结束按 `PROGRESS_RULES.md` 清理；必要日志/样本留任务证据目录。模拟器重签名APK/idsig不作为长期交付保存，复测先重新生成；共享JDK/依赖/AVD与增量缓存按需保留。
+
 | 产物 | 位置 |
 | --- | --- |
 | A Debug/Release APK | `app/build/outputs/apk/independent/{debug,release}/app-independent-{debug,release}.apk` |

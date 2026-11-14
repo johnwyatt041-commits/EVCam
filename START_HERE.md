@@ -1,6 +1,6 @@
 # EVCam E5 项目入口
 
-更新：2026-11-14 18:34:03 +08:00。项目根目录：`E:\GPT\EVCam`。
+更新：2026-11-14 19:08:17 +08:00。项目根目录：`E:\GPT\EVCam`。
 
 ## 每次任务必读
 
@@ -10,6 +10,21 @@
 4. [需求](docs/REQUIREMENTS.md)与[协作规范](docs/COLLABORATION.md)：保留能力、分工和独立工作树。
 
 同时检查 `git status --short`、`git branch --show-current`、`git log -5 --oneline` 及 `work/ACTIVE_TASKS.md`。不把其他对话口头结论当成已同步。
+
+## 目录索引
+
+| 路径 | 用途 |
+| --- | --- |
+| `app/src/main/` | 应用源码与资源 |
+| `app/src/test/`、`app/src/androidTest/` | 保留的回归测试源码 |
+| `docs/`、`docs/tasks/`、`docs/archive/` | 当前文档、任务进度、按需历史 |
+| `tools/` | 可复用构建/验证流程 |
+| `assets/`、`gradle/`、`keystore/` | 工程依赖资源、构建包装器和既有签名配置 |
+| `outputs/` | 正式/历史交付APK、校验与说明，保留 |
+| `work/` | 本机工具/参考/必要证据，分类见`work/README.md` |
+| `work/tmp/<task-id>/` | 新任务可清理临时文件；结束清理 |
+| `.codex-attachments/` | 用户原附件，保留且不提交 |
+| `.gradle/`、`app/build/`、`build/` | 可重建的构建缓存/产物；按需回收 |
 
 ## 按需读取
 
