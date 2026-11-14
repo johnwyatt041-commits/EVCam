@@ -9,6 +9,10 @@
 - 146 项现有 JVM 测试（每版 73）及两版 Debug/Release/必要 Lint 通过，日志 `work/verification/build-20261114-095604-453.log`。
 - 2560×1600 模拟器检查 160/240/320dpi，六项完整可见；240dpi 六项按钮边缘点击切换正确。深浅色与 1.3 倍系统字体通过，紧凑屏可滚动到设置，截图已人工查看。实际按钮分别 176×144、240×170、272×187px。证据 `work/large-navigation/`，任务说明 `docs/tasks/large-screen-navigation.md`。
 - 仍需用户在物理 E5 上确认触控手感；屏幕分辨率不等于逻辑 dp，未读取车机真实 DPI。交付 APK/源码/哈希见 `outputs/EVCam-LargeNav-notes.md`。本次仅本地交付，没有重试此前被拒绝的 GitHub 上传。
+- 源码 `4268f03821bceb82c7489680831e435b48e3b504`，提交后重建 Release，两 APK 内嵌 revision 一致，签名与此前相同、原 ARM64 库保持不变。重建日志 `work/verification/large-nav-source-commit-release.log`。
+- A：`outputs/EVCam-A-Independent-LargeUI-1.6.6-test-11140958.apk`，SHA-256 `3d53d97bfda6ff7ed773e54de8aa4e27d4a4d14f872c08c92e07f8f022ed23b2`。
+- B：`outputs/EVCam-B-Composite-LargeUI-1.6.6-test-11140958.apk`，SHA-256 `30786952c78c3570f88eed6fe73cb1408da44024c392b3fd7113aaceb6b9dee6`。两包均 25,042,814 字节。
+- 哈希/清单/本次 UI 源码补丁及深浅色预览已导出；专用模拟器和 adb 服务已停止。
 
 ## 本地录像整改 A/B（2026-11-14）
 
