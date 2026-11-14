@@ -1,11 +1,21 @@
 # AGENTS.md
 
+## 强制进度同步（每次执行）
+
+- 本项目所有AI/任务必须遵守 `docs/PROGRESS_RULES.md`。开始先读当前进度、任务登记和相关坑，核对实际Git状态。
+- 每次有效改动、重要发现、用户反馈/要求、踩坑、失败/回退或结论变化后，及时更新 `docs/tasks/<task-id>.md`，阶段交接同步总览；不能只留在聊天里。
+- **每次执行结束必须核对并更新任务文档；未更新进度，不得宣告完成、交付或移交。** 无新发现的只读执行只覆盖最后核对时间/结论，不追加空流水账。
+- 时间戳统一为 `YYYY-MM-DD HH:mm:ss +08:00`（Asia/Hong_Kong）。历史时刻未知就标明，禁止补造；记录结果、证据/源码提交、未解决项和下一步，区分推断与实测。
+- `docs/STATUS.md`只放当前快照/待办/最近5条，最多80行、6000字符；任务文档同样限长并复用。踩坑按ID写入 `docs/PITFALLS.md`，长历史归档到 `docs/archive/YYYY-MM/`，保留证据链接，不默认全读。
+- 并行任务各写自己的任务文档，总览由协调/集成对话维护；未集成结果必须标明。提交代码同步提交任务进度，后续验证/发布补文档提交；纯文档不改APK版本。
+- 独立工作树还须核对主项目 `E:\GPT\EVCam` 的最新规范与总览，不能只依赖本分支旧副本。
+
 ## E5 项目交接入口（2026-11-14）
 
 - 当前独立项目根目录：`E:\GPT\EVCam`，本文件与 `.git`、`app/` 同级。先读 `START_HERE.md`、`docs/REQUIREMENTS.md`、`docs/STATUS.md`，按任务再读 `docs/DEVELOPMENT.md` 与 `docs/ARCHITECTURE.md`。
 - 多个对话并行修改必须遵守 `docs/COLLABORATION.md`：不同工作树和任务分支，明确负责范围；共享同一工作目录不等于不同对话自动知道彼此进度。
 - 本用户的范围是 E5 日常三路录像、飞书四路远程控制、转向补盲和 HUD。不要恢复已停用的功能、个人二维码或联系方式；不要删除 HUD 的副屏/EVCC 或 Wi-Fi/ESP32 输出。
-- 本次迁移仅整理文档和本地开发路径，已发布应用仍为 `1.6.6-test-11140102`。纯文档/搬迁不改应用版本；后续应用代码变更仍按下文更新时间戳。
+- 当前版本、发布与验证状态只看 `docs/STATUS.md`，不要依据历史迁移记录判断。纯文档/搬迁不改应用版本；应用代码变更按下文更新时间戳。
 - `outputs/` 是保留的交付文件，`work/` 是本机工具、历史脚本和证据，均不纳入 Git。历史改写源码脚本不是可重复执行的构建步骤，不要重新运行。
 - 下文保留上游架构说明；其中钉钉/Telegram 等是历史能力，本 E5 分支以 `AppFeatures.java` 和需求文档为准。MediaCodec 路径也可以使用硬件编码器，不能仅据此判定 CPU 软件编码或处理器性能不足。
 
@@ -25,7 +35,9 @@ gradlew.bat assembleDebug
 gradlew.bat assembleRelease
 
 # Install to connected device
-gradlew.bat installDebug
+gradlew.bat :app:installIndependentDebug
+# Alternative B build (stop recording before replacing A)
+gradlew.bat :app:installCompositeDebug
 
 # Run unit tests
 gradlew.bat test
@@ -37,7 +49,7 @@ gradlew.bat connectedAndroidTest
 release.bat
 ```
 
-APK output: `app/build/outputs/apk/{debug|release}/app-{debug|release}.apk`
+APK output: `app/build/outputs/apk/{independent|composite}/{debug|release}/app-{flavor}-{buildType}.apk`. Use `tools/verify.ps1` for this checkout's standard checks; read `docs/DEVELOPMENT.md`. Do not run `release.bat` as an ordinary build check.
 
 Requires JDK 17+ (release.bat auto-detects JDK 17/21/25 from standard install paths).
 
@@ -63,8 +75,8 @@ Single-module Android project (`app/`). Package: `com.kooo.evcam`.
 - **AppConfig** — Application configuration management
 - **MultiCameraManager** — Orchestrates multiple cameras; delegates to `SingleCamera` instances
 - **SingleCamera** — Camera2 API wrapper for a single camera
-- **VideoRecorder** — MediaRecorder-based recording (hardware encoding, used by E5)
-- **CodecVideoRecorder** — OpenGL + MediaCodec recording (software encoding, used by L6/L7)
+- **VideoRecorder** — Optional MediaRecorder recording path
+- **CodecVideoRecorder** — Current automatic GL + MediaCodec path, including E5; selected encoder determines hardware/software
 - **BlindSpotService** — Blind-spot monitoring triggered by turn signals
 - **VhalSignalObserver** — Vehicle API client for turn signal and door detection
 - **StorageHelper** — Storage path management with USB drive detection and fallback
@@ -74,8 +86,8 @@ Single-module Android project (`app/`). Package: `com.kooo.evcam`.
 
 ### Dual Encoding Pipelines
 
-- **MediaRecorder** (hardware): Default for E5 models. Simpler, uses `VideoRecorder`.
-- **OpenGL + MediaCodec** (software): For L6/L7 models. Uses `CodecVideoRecorder` + `EglSurfaceEncoder`.
+- **MediaRecorder**: Optional compatibility path, uses `VideoRecorder`.
+- **OpenGL + MediaCodec**: Current automatic path, including E5. Uses `CodecVideoRecorder` + `EglSurfaceEncoder`; can select a hardware encoder. Read actual configuration/logs, not historical model labels.
 
 ### Remote Control Architecture
 
