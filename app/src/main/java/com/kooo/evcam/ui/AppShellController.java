@@ -107,6 +107,10 @@ public final class AppShellController {
         if (next != null) transaction.replace(R.id.fragment_container, next);
         else if (active != null) transaction.remove(active);
         transaction.commitNow();
+        if (active instanceof com.kooo.evcam.playback.PlaybackFragmentNew
+                || active instanceof com.kooo.evcam.playback.PhotoPlaybackFragmentNew) {
+            com.kooo.evcam.playback.PlaybackImageMemory.clear(activity);
+        }
         restore(destination);
     }
 

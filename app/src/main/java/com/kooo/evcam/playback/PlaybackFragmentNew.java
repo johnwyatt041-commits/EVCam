@@ -583,9 +583,6 @@ public class PlaybackFragmentNew extends Fragment {
     }
     
     /**
-     * 查找第一个有视频的摄像头位置
-     */
-    /**
      * 更新占位符显示（无视频时显示）
      */
     private void updatePlaceholders(VideoGroup group) {
@@ -834,10 +831,18 @@ public class PlaybackFragmentNew extends Fragment {
 
     @Override
     public void onDestroyView() {
-        super.onDestroyView();
+        if (getView() != null) PlaybackImageMemory.clearViews(getView());
+        if (videoList != null) {
+            videoList.setAdapter(null);
+            videoList.getRecycledViewPool().clear();
+        }
         if (playerManager != null) {
             playerManager.release();
+            playerManager = null;
         }
+        PlaybackImageMemory.clear(requireContext());
+        adapter = null;
+        super.onDestroyView();
     }
 
     /**

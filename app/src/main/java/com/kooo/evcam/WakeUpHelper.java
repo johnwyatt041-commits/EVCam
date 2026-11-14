@@ -211,8 +211,7 @@ public class WakeUpHelper {
      * @param userId 钉钉用户ID
      * @param duration 录制时长（仅 record 时有效）
      */
-    public static void launchMainActivityWithCommand(Context context, String action,
-            String conversationId, String conversationType, String userId, int duration) {
+    private static void launchMainActivityWithCommand(Context context, String action) {
         
         AppLog.d(TAG, "Launching MainActivity with command: " + action);
 
@@ -233,10 +232,6 @@ public class WakeUpHelper {
         // 传递命令参数
         intent.putExtra("remote_action", action);
         intent.putExtra("remote_wake_up", true);  // 标记这是从后台唤醒的
-        intent.putExtra("remote_conversation_id", conversationId);
-        intent.putExtra("remote_conversation_type", conversationType);
-        intent.putExtra("remote_user_id", userId);
-        intent.putExtra("remote_duration", duration);
 
         // 启动 Activity
         context.startActivity(intent);
@@ -244,33 +239,17 @@ public class WakeUpHelper {
     }
 
     /**
-     * 启动 MainActivity 执行录制命令
-     */
-    public static void launchForRecording(Context context, String conversationId,
-            String conversationType, String userId, int durationSeconds) {
-        launchMainActivityWithCommand(context, "record", conversationId, conversationType, userId, durationSeconds);
-    }
-
-    /**
-     * 启动 MainActivity 执行拍照命令
-     */
-    public static void launchForPhoto(Context context, String conversationId,
-            String conversationType, String userId) {
-        launchMainActivityWithCommand(context, "photo", conversationId, conversationType, userId, 0);
-    }
-
-    /**
      * 启动 MainActivity 执行启动持续录制命令（等同点击录制按钮）
      */
     public static void launchForStartRecording(Context context) {
-        launchMainActivityWithCommand(context, "start_recording", null, null, null, 0);
+        launchMainActivityWithCommand(context, "start_recording");
     }
 
     /**
      * 启动 MainActivity 执行停止录制命令
      */
     public static void launchForStopRecording(Context context) {
-        launchMainActivityWithCommand(context, "stop_recording", null, null, null, 0);
+        launchMainActivityWithCommand(context, "stop_recording");
     }
 
     /**
@@ -314,62 +293,6 @@ public class WakeUpHelper {
      * 后台切换广播 Action
      */
     public static final String ACTION_MOVE_TO_BACKGROUND = "com.kooo.evcam.ACTION_MOVE_TO_BACKGROUND";
-
-    // ==================== Telegram 相关方法 ====================
-
-    /**
-     * 启动 MainActivity 执行 Telegram 录制命令
-     * @param context 上下文
-     * @param chatId Telegram Chat ID
-     * @param durationSeconds 录制时长
-     */
-    public static void launchForRecordingTelegram(Context context, long chatId, int durationSeconds) {
-        AppLog.d(TAG, "Launching MainActivity for Telegram recording: chatId=" + chatId + ", duration=" + durationSeconds);
-
-        // 获取CPU唤醒锁
-        acquireCpuWakeLock(context);
-
-        Intent intent = new Intent(context, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
-                Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                Intent.FLAG_ACTIVITY_SINGLE_TOP);
-
-        // 传递 Telegram 命令参数
-        intent.putExtra("remote_action", "record");
-        intent.putExtra("remote_wake_up", true);  // 标记这是从后台唤醒的
-        intent.putExtra("remote_source", "telegram");
-        intent.putExtra("telegram_chat_id", chatId);
-        intent.putExtra("remote_duration", durationSeconds);
-
-        context.startActivity(intent);
-        AppLog.d(TAG, "MainActivity launch intent sent for Telegram");
-    }
-
-    /**
-     * 启动 MainActivity 执行 Telegram 拍照命令
-     * @param context 上下文
-     * @param chatId Telegram Chat ID
-     */
-    public static void launchForPhotoTelegram(Context context, long chatId) {
-        AppLog.d(TAG, "Launching MainActivity for Telegram photo: chatId=" + chatId);
-
-        // 获取CPU唤醒锁
-        acquireCpuWakeLock(context);
-
-        Intent intent = new Intent(context, MainActivity.class);
-        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK |
-                Intent.FLAG_ACTIVITY_CLEAR_TOP |
-                Intent.FLAG_ACTIVITY_SINGLE_TOP);
-
-        // 传递 Telegram 命令参数
-        intent.putExtra("remote_action", "photo");
-        intent.putExtra("remote_wake_up", true);  // 标记这是从后台唤醒的
-        intent.putExtra("remote_source", "telegram");
-        intent.putExtra("telegram_chat_id", chatId);
-
-        context.startActivity(intent);
-        AppLog.d(TAG, "MainActivity launch intent sent for Telegram photo");
-    }
 
     // ==================== 飞书相关方法 ====================
 

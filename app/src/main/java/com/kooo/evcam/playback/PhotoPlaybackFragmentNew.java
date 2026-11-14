@@ -57,6 +57,18 @@ import java.util.Set;
  */
 public class PhotoPlaybackFragmentNew extends Fragment {
 
+    @Override public void onDestroyView() {
+        if (getView() != null) PlaybackImageMemory.clearViews(getView());
+        if (photoList != null) {
+            photoList.setAdapter(null);
+            photoList.getRecycledViewPool().clear();
+        }
+        PlaybackImageMemory.clear(requireContext());
+        adapter = null;
+        imageFront = imageBack = imageLeft = imageRight = imageSingle = null;
+        super.onDestroyView();
+    }
+
     // UI 组件
     private RecyclerView photoList;
     private TextView emptyText;

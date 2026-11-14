@@ -307,6 +307,12 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     @Override
+    public void onViewRecycled(@NonNull RecyclerView.ViewHolder holder) {
+        PlaybackImageMemory.clearViews(holder.itemView);
+        super.onViewRecycled(holder);
+    }
+
+    @Override
     public int getItemCount() {
         return flattenedItems.size();
     }

@@ -177,6 +177,12 @@ public class VideoGroupAdapter extends RecyclerView.Adapter<VideoGroupAdapter.Vi
     }
 
     @Override
+    public void onViewRecycled(@NonNull VideoGroupAdapter.ViewHolder holder) {
+        PlaybackImageMemory.clearViews(holder.itemView);
+        super.onViewRecycled(holder);
+    }
+
+    @Override
     public int getItemCount() {
         return videoGroups.size();
     }

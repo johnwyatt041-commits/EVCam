@@ -157,6 +157,12 @@ public class PhotoGroupAdapter extends RecyclerView.Adapter<PhotoGroupAdapter.Vi
     }
 
     @Override
+    public void onViewRecycled(@NonNull PhotoGroupAdapter.ViewHolder holder) {
+        PlaybackImageMemory.clearViews(holder.itemView);
+        super.onViewRecycled(holder);
+    }
+
+    @Override
     public int getItemCount() {
         return photoGroups.size();
     }

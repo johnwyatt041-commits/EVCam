@@ -13,7 +13,6 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
@@ -26,25 +25,14 @@ import com.google.android.material.switchmaterial.SwitchMaterial;
 public class BlindSpotSettingsFragment extends Fragment {
     private static final String TAG = "BlindSpotSettingsFragment";
 
-    private Button openLabButton;
-
     private SwitchMaterial turnSignalLinkageSwitch;
     private SeekBar turnSignalTimeoutSeekBar;
     private TextView tvTurnSignalTimeout;
     private RadioGroup turnSignalPresetGroup;
-    private LinearLayout customKeywordsLayout;
+
     private EditText turnSignalLeftLogEditText;
     private EditText turnSignalRightLogEditText;
     private boolean isUpdatingFromPreset = false; // 防止 TextWatcher 在预设填充时触发
-    
-    // 车门联动UI控件
-    private LinearLayout doorLinkageSectionLayout; // 车门联动区域
-    private SwitchMaterial doorLinkageSwitch; // 车门联动开关
-
-    // 长视模式UI控件
-    private SwitchMaterial longViewModeSwitch; // 长视模式开关
-    private TextView tvLongViewModeDesc; // 长视模式描述
-    private Button longViewAdjustButton; // 长视模式位置和大小调整按钮
 
     // 全景影像避让UI控件
     private SwitchMaterial avmAvoidanceSwitch;
@@ -64,7 +52,7 @@ public class BlindSpotSettingsFragment extends Fragment {
     private SwitchMaterial secondaryBlindSpotSwitch;
     private Button adjustSecondaryBlindSpotWindowButton;
     private Button adjustMjpegStreamButton;
-    private SwitchMaterial mockFloatingSwitch;
+
     private SwitchMaterial floatingWindowAnimationSwitch;
     private RadioGroup statusBarStyleGroup;
     private View statusBarColorPreview;
@@ -92,12 +80,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         initViews(view);
         loadSettings();
         setupListeners();
-        OptionalFeatureViews.hideCard(view, R.id.btn_open_lab);
-        OptionalFeatureViews.hideRow(view, R.id.switch_long_view_mode);
-        OptionalFeatureViews.hideRow(view, R.id.switch_mock_floating);
-        view.findViewById(R.id.btn_long_view_adjust).setVisibility(View.GONE);
-        View doors = view.findViewById(R.id.ll_door_linkage_section);
-        if (doors != null) doors.setVisibility(View.GONE);
+
         return view;
     }
 
@@ -112,14 +95,12 @@ public class BlindSpotSettingsFragment extends Fragment {
         blindSpotGlobalSwitch = view.findViewById(R.id.switch_blind_spot_global);
         subFeaturesContainer = view.findViewById(R.id.blind_spot_sub_features_container);
 
-        openLabButton = view.findViewById(R.id.btn_open_lab);
-
         // 转向灯联动
         turnSignalLinkageSwitch = view.findViewById(R.id.switch_turn_signal_linkage);
         turnSignalTimeoutSeekBar = view.findViewById(R.id.seekbar_turn_signal_timeout);
         tvTurnSignalTimeout = view.findViewById(R.id.tv_turn_signal_timeout_value);
         turnSignalPresetGroup = view.findViewById(R.id.rg_turn_signal_preset);
-        customKeywordsLayout = view.findViewById(R.id.layout_turn_signal_custom_keywords);
+
         turnSignalLeftLogEditText = view.findViewById(R.id.et_turn_signal_left_log);
         turnSignalRightLogEditText = view.findViewById(R.id.et_turn_signal_right_log);
 
@@ -128,34 +109,11 @@ public class BlindSpotSettingsFragment extends Fragment {
         adjustMjpegStreamButton = view.findViewById(R.id.btn_adjust_mjpeg_stream);
         adjustMjpegStreamButton.setVisibility(AppFeatures.NETWORK_STREAMING ? View.VISIBLE : View.GONE);
         
-        // 车门联动UI初始化
-        doorLinkageSectionLayout = view.findViewById(R.id.ll_door_linkage_section);
-        doorLinkageSwitch = view.findViewById(R.id.switch_door_linkage);
-
-        // 长视模式UI初始化
-        longViewModeSwitch = view.findViewById(R.id.switch_long_view_mode);
-        tvLongViewModeDesc = view.findViewById(R.id.tv_long_view_mode_desc);
-        longViewAdjustButton = view.findViewById(R.id.btn_long_view_adjust);
-        
-        // 长视模式调整按钮点击事件
-        if (longViewAdjustButton != null) {
-            longViewAdjustButton.setOnClickListener(v -> {
-                if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
-                    Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                    WakeUpHelper.requestOverlayPermission(requireContext());
-                    return;
-                }
-                // 打开长视模式设置界面（使用超视模式的配置）
-                openLongViewSetupMode();
-            });
-        }
-
         // 全景影像避让UI初始化
         avmAvoidanceSwitch = view.findViewById(R.id.switch_avm_avoidance);
         avmAvoidanceDetailLayout = view.findViewById(R.id.layout_avm_avoidance_detail);
         avmAvoidanceActivityEditText = view.findViewById(R.id.et_avm_avoidance_activity);
 
-        mockFloatingSwitch = view.findViewById(R.id.switch_mock_floating);
         floatingWindowAnimationSwitch = view.findViewById(R.id.switch_floating_window_animation);
         statusBarStyleGroup = view.findViewById(R.id.rg_status_bar_style);
         statusBarColorPreview = view.findViewById(R.id.view_status_bar_color_preview);
@@ -193,8 +151,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         });
     }
 
-
-
     private void loadSettings() {
         // 全局开关
         boolean globalEnabled = appConfig.isBlindSpotGlobalEnabled();
@@ -211,13 +167,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         turnSignalLeftLogEditText.setText(currentLeft);
         turnSignalRightLogEditText.setText(currentRight);
         
-        // 长视模式配置加载
-        boolean longViewEnabled = appConfig.isLongViewModeEnabled();
-        longViewModeSwitch.setChecked(longViewEnabled);
-        if (longViewAdjustButton != null) {
-            longViewAdjustButton.setVisibility(longViewEnabled ? View.VISIBLE : View.GONE);
-        }
-
         // 根据触发模式和当前关键词匹配预设
         if (appConfig.isCarSignalManagerTriggerMode()) {
             // CarSignalManager 模式：根据保存的预设选择恢复 RadioButton
@@ -228,13 +177,13 @@ public class BlindSpotSettingsFragment extends Fragment {
                 // 默认选中 L6/L7
                 turnSignalPresetGroup.check(R.id.rb_preset_l6l7);
             }
-            customKeywordsLayout.setVisibility(View.GONE);
+
             carApiStatusText.setVisibility(View.VISIBLE);
             carApiStatusText.setText("CarSignalManager 服务状态: 检测中...");
             checkCarSignalManagerConnection();
         } else if (appConfig.isVhalGrpcTriggerMode()) {
             turnSignalPresetGroup.check(R.id.rb_preset_car_api);
-            customKeywordsLayout.setVisibility(View.GONE);
+
             carApiStatusText.setVisibility(View.VISIBLE);
             carApiStatusText.setText("车辆API 服务状态: 检测中...");
             checkVhalGrpcConnection();
@@ -242,17 +191,16 @@ public class BlindSpotSettingsFragment extends Fragment {
             int matchedPreset = findMatchingPreset(currentLeft, currentRight);
             if (matchedPreset == 0) {
                 turnSignalPresetGroup.check(R.id.rb_preset_xinghan7);
-                customKeywordsLayout.setVisibility(View.GONE);
+
             } else {
                 turnSignalPresetGroup.check(R.id.rb_preset_custom);
-                customKeywordsLayout.setVisibility(View.VISIBLE);
+
             }
             carApiStatusText.setVisibility(View.GONE);
         }
 
         secondaryBlindSpotSwitch.setChecked(appConfig.isSecondaryDisplayEnabled());
 
-        mockFloatingSwitch.setChecked(appConfig.isMockTurnSignalFloatingEnabled());
         floatingWindowAnimationSwitch.setChecked(appConfig.isFloatingWindowAnimationEnabled());
 
         int statusBarStyle = appConfig.getBlindSpotStatusBarStyle();
@@ -276,12 +224,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         mainFloatingAspectRatioLockSwitch.setChecked(appConfig.isMainFloatingAspectRatioLocked());
         mainFloatingLongPressDragSwitch.setChecked(appConfig.isMainFloatingLongPressDragEnabled());
         
-        // 车门联动配置加载
-        doorLinkageSwitch.setChecked(appConfig.isDoorLinkageEnabled());
-        
-        // 根据转向联动的车型选择，决定是否显示车门联动区域
-        updateDoorLinkageVisibility();
-
         // 全景影像避让配置加载
         boolean avmEnabled = appConfig.isAvmAvoidanceEnabled();
         avmAvoidanceSwitch.setChecked(avmEnabled);
@@ -299,22 +241,6 @@ public class BlindSpotSettingsFragment extends Fragment {
      * 根据转向联动的车型选择，更新车门联动区域的可见性
      * 选择了银河L6/L7、博越L或车载API(E5/星舰7)时，显示车门联动开关
      */
-    private void updateDoorLinkageVisibility() {
-        // 检查车型选择
-        String turnSignalPreset = appConfig.getTurnSignalPresetSelection();
-        boolean supportsDoorLinkage = "l6l7".equals(turnSignalPreset)
-                || "boyue_l".equals(turnSignalPreset)
-                || "car_api".equals(turnSignalPreset);
-
-        // 支持车门联动的车型才显示（不依赖转向联动开关）
-        doorLinkageSectionLayout.setVisibility(supportsDoorLinkage ? View.VISIBLE : View.GONE);
-
-        // 如果不应该显示（切换到其他车型），自动关闭车门联动
-        if (!supportsDoorLinkage && appConfig.isDoorLinkageEnabled()) {
-            appConfig.setDoorLinkageEnabled(false);
-            doorLinkageSwitch.setChecked(false);
-        }
-    }
 
     private void setupListeners() {
         // 全局开关
@@ -330,14 +256,6 @@ public class BlindSpotSettingsFragment extends Fragment {
             }
         });
 
-        openLabButton.setOnClickListener(v -> {
-            if (getActivity() == null) return;
-            androidx.fragment.app.FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-            transaction.replace(R.id.fragment_container, new BlindSpotLabFragment());
-            transaction.addToBackStack(null);
-            transaction.commit();
-        });
-
         turnSignalLinkageSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isChecked && !WakeUpHelper.hasOverlayPermission(requireContext())) {
                 turnSignalLinkageSwitch.setChecked(false);
@@ -346,26 +264,6 @@ public class BlindSpotSettingsFragment extends Fragment {
                 return;
             }
             appConfig.setTurnSignalLinkageEnabled(isChecked);
-            BlindSpotService.update(requireContext());
-        });
-
-        // 长视模式监听器
-        longViewModeSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (isChecked && !WakeUpHelper.hasOverlayPermission(requireContext())) {
-                longViewModeSwitch.setChecked(false);
-                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                WakeUpHelper.requestOverlayPermission(requireContext());
-                return;
-            }
-            appConfig.setLongViewModeEnabled(isChecked);
-            // 显示/隐藏调整按钮
-            if (longViewAdjustButton != null) {
-                longViewAdjustButton.setVisibility(isChecked ? View.VISIBLE : View.GONE);
-            }
-            // 长视模式启用时，显示提示
-            if (isChecked) {
-                Toast.makeText(requireContext(), "长视模式已启用：打转向灯将显示双画面", Toast.LENGTH_SHORT).show();
-            }
             BlindSpotService.update(requireContext());
         });
 
@@ -389,7 +287,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         turnSignalPresetGroup.setOnCheckedChangeListener((group, checkedId) -> {
             if (checkedId == R.id.rb_preset_l6l7 || checkedId == R.id.rb_preset_boyue_l) {
                 // CarSignalManager API 模式
-                customKeywordsLayout.setVisibility(View.GONE);
+
                 carApiStatusText.setVisibility(View.VISIBLE);
                 carApiStatusText.setText("CarSignalManager 服务状态: 检测中...");
                 appConfig.setTurnSignalTriggerMode(AppConfig.TRIGGER_MODE_CAR_SIGNAL_MANAGER);
@@ -401,21 +299,15 @@ public class BlindSpotSettingsFragment extends Fragment {
                     appConfig.setTurnSignalPresetSelection("l6l7");
                 }
                 
-                // 更新车门联动区域可见性
-                updateDoorLinkageVisibility();
-                
                 checkCarSignalManagerConnection();
                 BlindSpotService.update(requireContext());
             } else if (checkedId == R.id.rb_preset_car_api) {
                 // 车辆API 模式
-                customKeywordsLayout.setVisibility(View.GONE);
+
                 carApiStatusText.setVisibility(View.VISIBLE);
                 carApiStatusText.setText("车辆API 服务状态: 检测中...");
                 appConfig.setTurnSignalTriggerMode(AppConfig.TRIGGER_MODE_VHAL_GRPC);
                 appConfig.setTurnSignalPresetSelection("car_api");
-                
-                // 更新车门联动区域可见性（会自动处理关闭逻辑）
-                updateDoorLinkageVisibility();
                 
                 checkVhalGrpcConnection();
                 BlindSpotService.update(requireContext());
@@ -427,19 +319,16 @@ public class BlindSpotSettingsFragment extends Fragment {
                 // 保存具体选择的预设
                 if (checkedId == R.id.rb_preset_custom) {
                     appConfig.setTurnSignalPresetSelection("custom");
-                    customKeywordsLayout.setVisibility(View.VISIBLE);
+
                 } else if (checkedId == R.id.rb_preset_xinghan7) {
                     appConfig.setTurnSignalPresetSelection("xinghan7");
-                    customKeywordsLayout.setVisibility(View.GONE);
+
                     applyPreset(0);
                 } else {
                     appConfig.setTurnSignalPresetSelection("e5");
-                    customKeywordsLayout.setVisibility(View.GONE);
+
                     applyPreset(1);
                 }
-                
-                // 更新车门联动区域可见性（会自动处理关闭逻辑）
-                updateDoorLinkageVisibility();
                 
                 BlindSpotService.update(requireContext());
             }
@@ -511,30 +400,6 @@ public class BlindSpotSettingsFragment extends Fragment {
             }
         });
 
-        mockFloatingSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (isChecked && !WakeUpHelper.hasOverlayPermission(requireContext())) {
-                mockFloatingSwitch.setChecked(false);
-                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                WakeUpHelper.requestOverlayPermission(requireContext());
-                return;
-            }
-            appConfig.setMockTurnSignalFloatingEnabled(isChecked);
-            BlindSpotService.update(requireContext());
-        });
-
-        // ==================== 车门联动监听器 ====================
-        
-        doorLinkageSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            if (isChecked && !WakeUpHelper.hasOverlayPermission(requireContext())) {
-                doorLinkageSwitch.setChecked(false);
-                Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-                WakeUpHelper.requestOverlayPermission(requireContext());
-                return;
-            }
-            appConfig.setDoorLinkageEnabled(isChecked);
-            BlindSpotService.update(requireContext());
-        });
-
         blindSpotCorrectionSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             appConfig.setBlindSpotCorrectionEnabled(isChecked);
             BlindSpotService.update(requireContext());
@@ -588,7 +453,6 @@ public class BlindSpotSettingsFragment extends Fragment {
             transaction.commit();
         });
 
-        // 调整车门副屏悬浮窗位置按钮
         logcatDebugButton.setOnClickListener(v -> {
             String keyword = logFilterEditText.getText().toString().trim();
             if (keyword.isEmpty()) {
@@ -775,41 +639,4 @@ public class BlindSpotSettingsFragment extends Fragment {
                 .show();
     }
     
-    /**
-     * 打开长视模式设置界面
-     * 使用超视模式的配置，显示左右两个画面供用户调整位置和大小
-     */
-    private void openLongViewSetupMode() {
-        if (getContext() == null) return;
-        
-        Context context = getContext();
-        
-        // 创建左视悬浮窗（设置模式）
-        BlindSpotFloatingWindowView leftWindow = new BlindSpotFloatingWindowView(context, true);
-        leftWindow.setCameraPos("left");
-        leftWindow.show();
-        leftWindow.setCamera("left");
-        leftWindow.updateStatusLabel("left");
-        leftWindow.setSupervisionMode(true); // 启用超视模式交互
-        
-        // 创建右视悬浮窗（设置模式）
-        BlindSpotFloatingWindowView rightWindow = new BlindSpotFloatingWindowView(context, true);
-        rightWindow.setCameraPos("right");
-        rightWindow.show();
-        rightWindow.setCamera("right");
-        rightWindow.updateStatusLabel("right");
-        rightWindow.setSupervisionMode(true); // 启用超视模式交互
-        
-        // 设置配对关系，确保调整时同步
-        leftWindow.setSupervisionPartner(rightWindow);
-        rightWindow.setSupervisionPartner(leftWindow);
-        
-        // 启动前台服务（确保摄像头可用）
-        CameraForegroundService.start(context, "长视模式设置", "正在调整长视模式位置和大小");
-        
-        // 确保摄像头已初始化
-        com.kooo.evcam.camera.CameraManagerHolder.getInstance().getOrInit(context);
-        
-        Toast.makeText(context, "拖动窗口调整位置，拖动边缘调整大小\n调整完成后点击保存按钮", Toast.LENGTH_LONG).show();
     }
-}

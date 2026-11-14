@@ -83,30 +83,14 @@ public class VhalSignalObserver {
     }
 
     /**
-     * 车门信号回调接口（与 DoorSignalObserver.DoorSignalListener 方法签名一致）
-     */
-    public interface DoorSignalListener {
-        void onDoorOpen(String side);
-        void onDoorClose(String side);
-        void onConnectionStateChanged(boolean connected);
-    }
-
-    /**
      * 定制键唤醒回调接口
      */
-    public interface CustomKeyListener {
-        /** 按钮触发（值变为1）且速度条件满足 */
-        void onCustomKeyTriggered();
-    }
 
     private final TurnSignalListener listener;
-    private volatile DoorSignalListener doorListener;
-    private volatile CustomKeyListener customKeyListener;
+
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
 
-    // 定制键唤醒状态跟踪
     private volatile float currentSpeed = 0f;
-    private volatile int lastButtonState = -1;
 
     private volatile ManagedChannel grpcChannel;
     private Thread connectThread;
@@ -116,10 +100,9 @@ public class VhalSignalObserver {
     // 上一次的转向灯状态，避免重复回调
     private int lastSignalState = -1;
 
-    // 车门状态跟踪（用于多门关闭逻辑）
-    private volatile boolean isPassDoorOpen = false;     // 副驾门
-    private volatile boolean isLeftRearDoorOpen = false;  // 左后门
-    private volatile boolean isRightRearDoorOpen = false; // 右后门
+         // 副驾门
+      // 左后门
+     // 右后门
 
     // 重连参数
     private static final long RECONNECT_DELAY_MS = 3000;
@@ -130,35 +113,10 @@ public class VhalSignalObserver {
     }
 
     /**
-     * 设置车门信号监听器（可在 start() 前后调用）
-     */
-    public void setDoorSignalListener(DoorSignalListener listener) {
-        this.doorListener = listener;
-    }
-
-    /**
-     * 设置定制键唤醒监听器
-     */
-    public void setCustomKeyListener(CustomKeyListener listener) {
-        this.customKeyListener = listener;
-    }
-
-    /**
      * 获取当前速度值（用于定制键唤醒速度条件判断）
      */
     public float getCurrentSpeed() {
         return currentSpeed;
-    }
-
-    /**
-     * 配置定制键唤醒参数
-     */
-    public void configureCustomKey(int speedPropId, int buttonPropId, float speedThreshold) {
-        if (!VhalNative.isLibraryLoaded()) {
-            AppLog.w(TAG, "Native library not loaded, skipping custom key configuration");
-            return;
-        }
-        VhalNative.configureCustomKey(speedPropId, buttonPropId, speedThreshold);
     }
 
     /**
@@ -168,9 +126,7 @@ public class VhalSignalObserver {
         if (running) return;
         running = true;
         lastSignalState = -1;
-        isPassDoorOpen = false;
-        isLeftRearDoorOpen = false;
-        isRightRearDoorOpen = false;
+
         connectThread = new Thread(this::connectLoop, "VehicleApiConnect");
         connectThread.setDaemon(true);
         connectThread.start();
@@ -448,17 +404,8 @@ public class VhalSignalObserver {
                 case VhalNative.EVT_TURN_SIGNAL:
                     handleTurnSignalEvent(p1);
                     break;
-                case VhalNative.EVT_DOOR_OPEN:
-                    handleDoorPositionEvent(p1, true);
-                    break;
-                case VhalNative.EVT_DOOR_CLOSE:
-                    handleDoorPositionEvent(p1, false);
-                    break;
                 case VhalNative.EVT_SPEED:
                     currentSpeed = Float.intBitsToFloat(p1);
-                    break;
-                case VhalNative.EVT_CUSTOM_KEY:
-                    handleCustomKeyEvent(p1);
                     break;
             }
         }
@@ -497,72 +444,8 @@ public class VhalSignalObserver {
     }
 
     /**
-     * 处理车门位置事件
-     * 多门逻辑: 右侧摄像头仅在副驾 AND 右后门都关闭时才触发 onDoorClose
-     */
-    private void handleDoorPositionEvent(int doorPos, boolean isOpen) {
-        AppLog.d(TAG, "Door event: pos=" + doorPos + ", open=" + isOpen);
-
-        if (doorListener == null) return;
-
-        switch (doorPos) {
-            case VhalNative.DOOR_FL:
-                AppLog.d(TAG, "Driver door state change, ignoring");
-                break;
-            case VhalNative.DOOR_FR:
-                handleDoorSideEvent(isOpen, "right", true);
-                break;
-            case VhalNative.DOOR_RL:
-                handleDoorSideEvent(isOpen, "left", false);
-                break;
-            case VhalNative.DOOR_RR:
-                handleDoorSideEvent(isOpen, "right", false);
-                break;
-        }
-    }
-
-    /**
-     * 处理单个车门事件的辅助方法
-     */
-    private void handleDoorSideEvent(boolean isOpen, String side, boolean isPassenger) {
-        mainHandler.post(() -> {
-            if (doorListener == null) return;
-            if (isOpen) {
-                if (isPassenger) isPassDoorOpen = true;
-                else if ("left".equals(side)) isLeftRearDoorOpen = true;
-                else isRightRearDoorOpen = true;
-                doorListener.onDoorOpen(side);
-            } else {
-                if (isPassenger) {
-                    isPassDoorOpen = false;
-                    if (!isRightRearDoorOpen) doorListener.onDoorClose("right");
-                } else if ("left".equals(side)) {
-                    isLeftRearDoorOpen = false;
-                    doorListener.onDoorClose("left");
-                } else {
-                    isRightRearDoorOpen = false;
-                    if (!isPassDoorOpen) doorListener.onDoorClose("right");
-                }
-            }
-        });
-    }
-
-    /**
      * 处理定制键按钮事件
      */
-    private void handleCustomKeyEvent(int buttonState) {
-        if (buttonState == 1 && lastButtonState != 1) {
-            AppLog.d(TAG, "Custom key button pressed, speed=" + currentSpeed);
-            if (customKeyListener != null) {
-                mainHandler.post(() -> {
-                    if (customKeyListener != null) {
-                        customKeyListener.onCustomKeyTriggered();
-                    }
-                });
-            }
-        }
-        lastButtonState = buttonState;
-    }
 
     private void notifyConnectionState(boolean isConnected) {
         PropertyListener consumer = propertyListener;
@@ -571,9 +454,7 @@ public class VhalSignalObserver {
             if (listener != null) {
                 listener.onConnectionStateChanged(isConnected);
             }
-            if (doorListener != null) {
-                doorListener.onConnectionStateChanged(isConnected);
-            }
+
         });
     }
 

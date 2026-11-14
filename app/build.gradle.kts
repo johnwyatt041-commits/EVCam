@@ -21,7 +21,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 77
-        versionName = "1.6.6-test-11141103"
+        versionName = "1.6.6-test-11150014"
         buildConfigField("boolean", "RECORDING_COMPARISON", "true")
 
 
@@ -45,7 +45,7 @@ android {
         release {
             // 使用签名配置
             signingConfig = signingConfigs.getByName("release")
-            isMinifyEnabled = false
+            isMinifyEnabled = true
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -77,8 +77,6 @@ dependencies {
     implementation(libs.recyclerview)
     implementation(libs.cardview)
 
-    // 钉钉官方 Stream SDK
-    implementation("com.dingtalk.open:app-stream-client:1.3.12")
 
     // 飞书：使用轻量级 OkHttp WebSocket 实现，不再依赖官方 SDK
 

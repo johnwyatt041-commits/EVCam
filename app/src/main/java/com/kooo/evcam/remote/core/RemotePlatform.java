@@ -5,8 +5,6 @@ package com.kooo.evcam.remote.core;
  * 定义支持的远程控制平台类型
  */
 public enum RemotePlatform {
-    DINGTALK("钉钉", "dingtalk"),
-    TELEGRAM("Telegram", "telegram"),
     FEISHU("飞书", "feishu");
 
     private final String displayName;

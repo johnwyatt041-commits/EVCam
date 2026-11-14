@@ -1,6 +1,5 @@
 package com.kooo.evcam;
 
-
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.camera.MultiCameraManager;
 // import android.app.AlarmManager;  // 已移除，使用 TIME_TICK 替代
@@ -72,7 +71,6 @@ public class CameraForegroundService extends Service {
         // 获取 WakeLock 防止系统休眠（车机必须）
         acquireWakeLock();
         
-        // 启动远程服务（钉钉/Telegram）
         // 这样远程服务不依赖 MainActivity，即使 Activity 被杀也能继续运行
         startRemoteServicesIfNeeded();
 
@@ -99,7 +97,7 @@ public class CameraForegroundService extends Service {
                 
                 // 启动补盲选项服务 (副屏/主屏悬浮窗/转向灯联动/模拟按钮)
                 if (appConfig.isSecondaryDisplayEnabled() || appConfig.isMainFloatingEnabled()
-                        || appConfig.isTurnSignalLinkageEnabled() || appConfig.isMockTurnSignalFloatingEnabled()) {
+                        || appConfig.isTurnSignalLinkageEnabled()) {
                     AppLog.d(TAG, "补盲选项已启用，从 Service 启动...");
                     BlindSpotService.update(this);
                 }

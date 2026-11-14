@@ -100,41 +100,7 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="@drawable/ui_card"
-                    android:layout_marginBottom="16dp">
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="实验室（不建议使用）"
-                        android:textColor="@color/text_primary"
-                        android:textSize="18sp"
-                        android:fontFamily="sans-serif-medium" />
-                    <TextView
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="包含主屏悬浮窗、复用主屏等实验性选项"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp"
-                        android:layout_marginTop="4dp" />
-                    <Button
-                        android:id="@+id/btn_open_lab"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="进入实验室"
-                        android:layout_marginTop="12dp"
-                        android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/white"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
-                </LinearLayout>
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -309,52 +275,8 @@
                             android:layout_height="wrap_content"
                             android:layout_marginStart="16dp" />
                     </LinearLayout>
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginTop="16dp">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="长视模式"
-                                android:textColor="@color/text_primary"
-                                android:textSize="15sp" />
-                            <TextView
-                                android:id="@+id/tv_long_view_mode_desc"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="打转向灯时同时显示左右两侧补盲画面，停止转向灯时自动退出"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
-                        </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_long_view_mode"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
-                    <Button
-                        android:id="@+id/btn_long_view_adjust"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="调整位置和大小"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text"
-                        android:layout_marginTop="8dp"
-                        android:visibility="gone"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
+
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -705,42 +627,7 @@
                             android:textColor="@color/text_primary"
                             android:textSize="14sp" />
                     </LinearLayout>
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:layout_marginTop="16dp">
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical">
-                            <LinearLayout
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:orientation="vertical">
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="桌面悬浮模拟按钮"
-                                    android:textColor="@color/text_primary"
-                                    android:textSize="15sp" />
-                                <TextView
-                                    android:layout_width="wrap_content"
-                                    android:layout_height="wrap_content"
-                                    android:text="回到桌面点击左/右按钮，触发补盲 (3秒)"
-                                    android:textColor="@color/text_secondary"
-                                    android:textSize="13sp"
-                                    android:layout_marginTop="4dp" />
-                            </LinearLayout>
-                            <com.google.android.material.switchmaterial.SwitchMaterial
-                                android:id="@+id/switch_mock_floating"
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:layout_marginStart="16dp" />
-                        </LinearLayout>
-                    </LinearLayout>
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
@@ -799,47 +686,7 @@
                         android:fontFamily="sans-serif-medium"
                         android:textAllCaps="false" />
                 </LinearLayout>
-                <LinearLayout
-                    android:id="@+id/ll_door_linkage_section"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="@drawable/ui_card"
-                    android:layout_marginBottom="16dp"
-                    android:visibility="gone">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="车门联动 (左右补盲)"
-                                android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="开启车门时自动弹出对应侧摄像头画面（复用转向联动的配置）"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
-                        </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_door_linkage"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
-                </LinearLayout>
+
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"

@@ -66,6 +66,16 @@ public class RecordingPipelineIntegrationTest {
             Paint text=new Paint(Paint.ANTI_ALIAS_FLAG); text.setColor(Color.WHITE); text.setTextSize(18);
             int[] colors={Color.RED,Color.GREEN,Color.BLUE};
             for (int frame=0; frame<110; frame++) {
+                if (frame == 10) {
+                    InstrumentationRegistry.getInstrumentation().runOnMainSync(() -> {
+                        android.app.Application application = (android.app.Application) context.getApplicationContext();
+                        assertEquals(4L * 1024 * 1024, com.bumptech.glide.Glide.get(context).getBitmapPool().getMaxSize());
+                        Bitmap pooled = Bitmap.createBitmap(32, 32, Bitmap.Config.ARGB_8888);
+                        com.bumptech.glide.Glide.get(context).getBitmapPool().put(pooled);
+                        application.onTrimMemory(android.content.ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN);
+                        assertTrue(pooled.isRecycled());
+                    });
+                }
                 int index=0;
                 for (Map.Entry<String,Surface> entry : surfaces.entrySet()) {
                     Canvas canvas=entry.getValue().lockCanvas(null);
@@ -86,6 +96,10 @@ public class RecordingPipelineIntegrationTest {
         assertNotNull(files);
         int required=BuildConfig.SMARTCAM_COMPOSITE ? 2 : 6;
         assertTrue("Expected actual segments, found "+files.length,files.length>=required);
+        File thumbnail = new File(directory, "feishu-thumbnail.jpg");
+        assertTrue("Relocated Feishu thumbnail extractor failed",
+                com.kooo.evcam.feishu.VideoThumbnailExtractor.extractThumbnail(files[0], thumbnail));
+        assertTrue(thumbnail.length() > 0);
         for (File file : files) {
             MediaExtractor extractor=new MediaExtractor();
             try {

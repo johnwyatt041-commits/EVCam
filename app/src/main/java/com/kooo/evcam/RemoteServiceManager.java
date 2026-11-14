@@ -4,12 +4,6 @@ import android.content.Context;
 
 import java.lang.ref.WeakReference;
 
-import com.kooo.evcam.dingtalk.DingTalkApiClient;
-import com.kooo.evcam.dingtalk.DingTalkConfig;
-import com.kooo.evcam.dingtalk.DingTalkStreamManager;
-import com.kooo.evcam.telegram.TelegramApiClient;
-import com.kooo.evcam.telegram.TelegramBotManager;
-import com.kooo.evcam.telegram.TelegramConfig;
 import com.kooo.evcam.feishu.FeishuApiClient;
 import com.kooo.evcam.feishu.FeishuBotManager;
 import com.kooo.evcam.feishu.FeishuConfig;
@@ -38,24 +32,14 @@ public class RemoteServiceManager {
     private static final String TAG = "RemoteServiceManager";
     private static RemoteServiceManager instance;
 
-    // 钉钉服务（强引用，避免被 GC）
-    private DingTalkStreamManager dingTalkStreamManager;
-    private DingTalkApiClient dingTalkApiClient;
-
-    // Telegram 服务（强引用，避免被 GC）
-    private TelegramBotManager telegramBotManager;
-    private TelegramApiClient telegramApiClient;
-
     // 飞书服务（强引用，避免被 GC）
     private FeishuBotManager feishuBotManager;
     private FeishuApiClient feishuApiClient;
     
     // 启动锁，防止竞态条件
-    private volatile boolean isDingTalkStarting = false;
-    private volatile boolean isTelegramStarting = false;
+
     private volatile boolean isFeishuStarting = false;
-    private final Object dingTalkLock = new Object();
-    private final Object telegramLock = new Object();
+
     private final Object feishuLock = new Object();
     
     // 状态信息提供者（当 MainActivity 启动后会注册，使用弱引用避免内存泄漏）
@@ -127,82 +111,6 @@ public class RemoteServiceManager {
 
     // ==================== DingTalk 服务管理 ====================
 
-    public void setDingTalkService(DingTalkStreamManager manager, DingTalkApiClient apiClient) {
-        this.dingTalkStreamManager = manager;
-        this.dingTalkApiClient = apiClient;
-        AppLog.d(TAG, "DingTalk service registered");
-    }
-
-    public DingTalkStreamManager getDingTalkStreamManager() {
-        return dingTalkStreamManager;
-    }
-
-    public DingTalkApiClient getDingTalkApiClient() {
-        return dingTalkApiClient;
-    }
-
-    public boolean isDingTalkRunning() {
-        return dingTalkStreamManager != null && dingTalkStreamManager.isRunning();
-    }
-    
-    /**
-     * 检查钉钉服务是否正在启动或已在运行
-     * 用于防止竞态条件下创建重复实例
-     */
-    public boolean isDingTalkStartingOrRunning() {
-        synchronized (dingTalkLock) {
-            return isDingTalkRunning() || isDingTalkStarting;
-        }
-    }
-
-    public void clearDingTalkService() {
-        if (dingTalkStreamManager != null) {
-            dingTalkStreamManager.stop();
-        }
-        this.dingTalkStreamManager = null;
-        this.dingTalkApiClient = null;
-        AppLog.d(TAG, "DingTalk service cleared");
-    }
-
-    // ==================== Telegram 服务管理 ====================
-
-    public void setTelegramService(TelegramBotManager manager, TelegramApiClient apiClient) {
-        this.telegramBotManager = manager;
-        this.telegramApiClient = apiClient;
-        AppLog.d(TAG, "Telegram service registered");
-    }
-
-    public TelegramBotManager getTelegramBotManager() {
-        return telegramBotManager;
-    }
-
-    public TelegramApiClient getTelegramApiClient() {
-        return telegramApiClient;
-    }
-
-    public boolean isTelegramRunning() {
-        return telegramBotManager != null && telegramBotManager.isRunning();
-    }
-    
-    /**
-     * 检查 Telegram 服务是否正在启动或已在运行
-     * 用于防止竞态条件下创建重复实例
-     */
-    public boolean isTelegramStartingOrRunning() {
-        synchronized (telegramLock) {
-            return isTelegramRunning() || isTelegramStarting;
-        }
-    }
-
-    public void clearTelegramService() {
-        if (telegramBotManager != null) {
-            telegramBotManager.stop();
-        }
-        this.telegramBotManager = null;
-        this.telegramApiClient = null;
-        AppLog.d(TAG, "Telegram service cleared");
-    }
-
     // ==================== 飞书服务管理 ====================
 
     public void setFeishuService(FeishuBotManager manager, FeishuApiClient apiClient) {
@@ -247,7 +155,7 @@ public class RemoteServiceManager {
      * 检查是否有任何远程服务在运行
      */
     public boolean hasAnyServiceRunning() {
-        return isDingTalkRunning() || isTelegramRunning() || isFeishuRunning();
+        return isFeishuRunning();
     }
 
     /**
@@ -255,8 +163,7 @@ public class RemoteServiceManager {
      */
     public void stopAllServices() {
         AppLog.d(TAG, "Stopping all remote services");
-        clearDingTalkService();
-        clearTelegramService();
+
         clearFeishuService();
     }
 
@@ -265,15 +172,7 @@ public class RemoteServiceManager {
      */
     public String getServiceStatusDescription() {
         StringBuilder sb = new StringBuilder();
-        if (isDingTalkRunning()) {
-            sb.append("钉钉远程服务运行中");
-        }
-        if (isTelegramRunning()) {
-            if (sb.length() > 0) {
-                sb.append(" / ");
-            }
-            sb.append("Telegram 远程服务运行中");
-        }
+
         if (isFeishuRunning()) {
             if (sb.length() > 0) {
                 sb.append(" / ");
@@ -299,232 +198,10 @@ public class RemoteServiceManager {
         // 使用 ApplicationContext 避免 Service 生命周期问题
         Context appContext = context.getApplicationContext();
 
-        // 启动钉钉服务
-        DingTalkConfig dingTalkConfig = new DingTalkConfig(appContext);
-        if (dingTalkConfig.isConfigured() && dingTalkConfig.isAutoStart() && !isDingTalkRunning()) {
-            startDingTalkFromService(appContext, dingTalkConfig);
-        }
-
-        // 启动 Telegram 服务
-        TelegramConfig telegramConfig = new TelegramConfig(appContext);
-        if (telegramConfig.isConfigured() && telegramConfig.isAutoStart() && !isTelegramRunning()) {
-            startTelegramFromService(appContext, telegramConfig);
-        }
-
         // 启动飞书服务
         FeishuConfig feishuConfig = new FeishuConfig(appContext);
         if (feishuConfig.isConfigured() && feishuConfig.isAutoStart() && !isFeishuRunning()) {
             startFeishuFromService(appContext, feishuConfig);
-        }
-    }
-
-    /**
-     * 从 Service 启动钉钉服务
-     */
-    private void startDingTalkFromService(Context context, DingTalkConfig config) {
-        // 防止竞态条件：加锁检查
-        synchronized (dingTalkLock) {
-            if (isDingTalkRunning() || isDingTalkStarting) {
-                AppLog.d(TAG, "钉钉服务已在运行或正在启动，跳过");
-                return;
-            }
-            isDingTalkStarting = true;
-        }
-        
-        AppLog.d(TAG, "从 Service 启动钉钉服务...");
-
-        try {
-            DingTalkApiClient apiClient = new DingTalkApiClient(config);
-
-            DingTalkStreamManager.ConnectionCallback connectionCallback = new DingTalkStreamManager.ConnectionCallback() {
-                @Override
-                public void onConnected() {
-                    AppLog.d(TAG, "钉钉服务已连接（从 Service 启动）");
-                }
-
-                @Override
-                public void onDisconnected() {
-                    AppLog.d(TAG, "钉钉服务已断开（从 Service 启动）");
-                }
-
-                @Override
-                public void onError(String error) {
-                    AppLog.e(TAG, "钉钉服务错误（从 Service 启动）: " + error);
-                }
-            };
-
-            // 简化的命令回调 - 收到命令后通过 WakeUpHelper 唤醒 MainActivity 执行
-            DingTalkStreamManager.CommandCallback commandCallback = new DingTalkStreamManager.CommandCallback() {
-                @Override
-                public void onRecordCommand(String conversationId, String conversationType, String userId, int durationSeconds) {
-                    // 通过 WakeUpHelper 唤醒 MainActivity 执行
-                    WakeUpHelper.launchForRecording(context, conversationId, conversationType, userId, durationSeconds);
-                }
-
-                @Override
-                public void onPhotoCommand(String conversationId, String conversationType, String userId) {
-                    WakeUpHelper.launchForPhoto(context, conversationId, conversationType, userId);
-                }
-
-                @Override
-                public String getStatusInfo() {
-                    // 优先使用 MainActivity 提供的完整状态信息
-                    return RemoteServiceManager.this.getStatusInfo(context);
-                }
-
-                @Override
-                public String onStartRecordingCommand() {
-                    WakeUpHelper.launchForStartRecording(context);
-                    return "✅ 正在启动录制...";
-                }
-
-                @Override
-                public String onStopRecordingCommand() {
-                    WakeUpHelper.launchForStopRecording(context);
-                    return "✅ 正在停止录制...";
-                }
-
-                @Override
-                public String onExitCommand(boolean confirmed) {
-                    if (confirmed) {
-                        // 停止所有服务
-                        stopAllServices();
-                        return "✅ EVCam 已退出";
-                    }
-                    return "⚠️ 发送「确认退出」执行退出操作";
-                }
-
-                @Override
-                public String onForegroundCommand() {
-                    WakeUpHelper.launchForForeground(context);
-                    return "📱 应用已切换到前台";
-                }
-
-                @Override
-                public String onBackgroundCommand() {
-                    // 使用广播通知 Activity 退后台，避免启动 Activity 导致闪屏
-                    WakeUpHelper.sendBackgroundBroadcast(context);
-                    return "📴 应用已切换到后台";
-                }
-            };
-
-            DingTalkStreamManager streamManager = new DingTalkStreamManager(context, config, apiClient, connectionCallback);
-            streamManager.start(commandCallback, true);
-
-            // 注册到管理器
-            setDingTalkService(streamManager, apiClient);
-            AppLog.d(TAG, "钉钉服务启动成功（从 Service）");
-
-        } catch (Exception e) {
-            AppLog.e(TAG, "从 Service 启动钉钉服务失败", e);
-        } finally {
-            synchronized (dingTalkLock) {
-                isDingTalkStarting = false;
-            }
-        }
-    }
-
-    /**
-     * 从 Service 启动 Telegram 服务
-     */
-    private void startTelegramFromService(Context context, TelegramConfig config) {
-        // 防止竞态条件：加锁检查
-        synchronized (telegramLock) {
-            if (isTelegramRunning() || isTelegramStarting) {
-                AppLog.d(TAG, "Telegram 服务已在运行或正在启动，跳过");
-                return;
-            }
-            isTelegramStarting = true;
-        }
-        
-        AppLog.d(TAG, "从 Service 启动 Telegram 服务...");
-
-        try {
-            TelegramApiClient apiClient = new TelegramApiClient(config);
-
-            TelegramBotManager.ConnectionCallback connectionCallback = new TelegramBotManager.ConnectionCallback() {
-                @Override
-                public void onConnected() {
-                    AppLog.d(TAG, "Telegram 服务已连接（从 Service 启动）");
-                }
-
-                @Override
-                public void onDisconnected() {
-                    AppLog.d(TAG, "Telegram 服务已断开（从 Service 启动）");
-                }
-
-                @Override
-                public void onError(String error) {
-                    AppLog.e(TAG, "Telegram 服务错误（从 Service 启动）: " + error);
-                }
-            };
-
-            // 简化的命令回调
-            TelegramBotManager.CommandCallback commandCallback = new TelegramBotManager.CommandCallback() {
-                @Override
-                public void onRecordCommand(long chatId, int durationSeconds) {
-                    WakeUpHelper.launchForRecordingTelegram(context, chatId, durationSeconds);
-                }
-
-                @Override
-                public void onPhotoCommand(long chatId) {
-                    WakeUpHelper.launchForPhotoTelegram(context, chatId);
-                }
-
-                @Override
-                public String getStatusInfo() {
-                    // 优先使用 MainActivity 提供的完整状态信息
-                    return RemoteServiceManager.this.getStatusInfo(context);
-                }
-
-                @Override
-                public String onStartRecordingCommand() {
-                    WakeUpHelper.launchForStartRecording(context);
-                    return "✅ 正在启动录制...";
-                }
-
-                @Override
-                public String onStopRecordingCommand() {
-                    WakeUpHelper.launchForStopRecording(context);
-                    return "✅ 正在停止录制...";
-                }
-
-                @Override
-                public String onExitCommand(boolean confirmed) {
-                    if (confirmed) {
-                        stopAllServices();
-                        return "✅ EVCam 已退出";
-                    }
-                    return "⚠️ 发送「确认退出」执行退出操作";
-                }
-
-                @Override
-                public String onForegroundCommand() {
-                    WakeUpHelper.launchForForeground(context);
-                    return "📱 应用已切换到前台";
-                }
-
-                @Override
-                public String onBackgroundCommand() {
-                    // 使用广播通知 Activity 退后台，避免启动 Activity 导致闪屏
-                    WakeUpHelper.sendBackgroundBroadcast(context);
-                    return "📴 应用已切换到后台";
-                }
-            };
-
-            TelegramBotManager botManager = new TelegramBotManager(context, config, apiClient, connectionCallback);
-            botManager.start(commandCallback);
-
-            // 注册到管理器
-            setTelegramService(botManager, apiClient);
-            AppLog.d(TAG, "Telegram 服务启动成功（从 Service）");
-
-        } catch (Exception e) {
-            AppLog.e(TAG, "从 Service 启动 Telegram 服务失败", e);
-        } finally {
-            synchronized (telegramLock) {
-                isTelegramStarting = false;
-            }
         }
     }
 
@@ -644,8 +321,7 @@ public class RemoteServiceManager {
 
             // 远程服务状态
             sb.append("🌐 远程服务:\n");
-            sb.append("• 钉钉: ").append(isDingTalkRunning() ? "已连接" : "未连接").append("\n");
-            sb.append("• Telegram: ").append(isTelegramRunning() ? "已连接" : "未连接").append("\n");
+
             sb.append("• 飞书: ").append(isFeishuRunning() ? "已连接" : "未连接").append("\n");
 
             // 存储信息

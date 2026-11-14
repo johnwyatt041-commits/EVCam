@@ -1,7 +1,7 @@
 # 项目进度
 
-最后更新/核对：2026-11-14 19:17:43 +08:00（Asia/Hong_Kong）
-维护：Codex / directory-hygiene。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-15 00:25:19 +08:00（Asia/Hong_Kong）
+维护：Codex / ab-test-preoptimization。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
@@ -9,36 +9,37 @@
 | --- | --- |
 | 项目/设备 | E:\GPT\EVCam；银河E5，2560×1600 |
 | 分支 | `codex/e5-recording-startup-fix`；文档HEAD以`git log`为准 |
-| 最新APK | `1.6.6-test-11141103`，A/B同包名，停止后顺序覆盖安装 |
-| APK源码 | `85870d254c9e4fec75dcae60ca01744946aad535`；后续纯文档提交不改变APK |
-| 下载 | [GitHub测试发布](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix)；8附件SHA与本地一致、APK链接已验HTTP200 |
-| 验证 | 每版78项JVM、Debug/Release/必要Lint、每版3项模拟器录像测试通过 |
-| 实车 | **等待用户测试；未确认修复成功，缺少失败当次日志** |
+| 最新APK | `1.6.6-test-11150014`，A/B同包名同签名，停录像后顺序覆盖安装 |
+| APK源码 | 本次优化源码提交见Git及`outputs/EVCam-E5-Preoptimization-1.6.6-test-11150014-manifest.json` |
+| 本地交付 | `outputs/EVCam-E5-{A-Independent,B-Composite}-1.6.6-test-11150014-release.apk`；SHA、R8映射与说明同目录 |
+| GitHub | 新优化包尚未上传；[旧11141103测试发布](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix)保留 |
+| 验证 | 每版79项JVM、Debug/Release R8、5项模拟器录像/扫码、1项R8启动冒烟通过；精确历史基线Lint无新增错误，完整扫描仍有19项既有错误 |
+| 实车 | **等待用户测试；未确认E5卡顿/启动已修复，无量化内存或性能收益结论** |
 
 ## 当前结论
 
-- 上版`11140958` A/B实车均等待不启动。新候选恢复E5兼容配置、修正会话失败/启动顺序、加入20秒首写超时；唯一实车触发点未确认。
-- A保留三路独立文件；B默认1280×800的2×2三格合成，每格约640×400，右下黑；飞书四路仍独立。保留大侧栏、水印、补盲及两条HUD。
-- 模拟器验证了单路软件Camera2→公共DCIM→首写和三路合成输入；不能替代E5多路硬件、HEVC、HUD/VHAL、飞书及长期回归。
-- 关闭预览旧片24.57fps；样本场景不同，不能据此定性CPU不足。原片仅本地保留。
+- 已实施确认的1–5项优化：物理删停用能力/SDK+R8，Glide限额及退场释放，方案3-稳妥时间水印复用/纹理原地更新；保留扫码、飞书、补盲及双HUD。
+- R8首轮冷启动暴露Room反射构造器被裁，已精确保留并通过A/B冷启动。保留无障碍保活心跳及HUD共享旧配置键；见[P013/P014](PITFALLS.md)。
+- A为日常三路独立文件；B仍1280×800三格合成，每格约640×400、右下黑；飞书四路仍独立。合成双GL本轮无改动。
+- 模拟器验证Camera2首写、分段/合成、两种水印、扫码HTTP及飞书封面；录制中清图片缓存不阻断分段。不能替代E5硬件、HEVC、HUD/VHAL、联网飞书及长期测试。
 
 ## 下一步
 
-1. 用户先测A：内置存储、关预览录30秒，再开预览对照；A可录后测B。
-2. 若仍失败，取当次日志和提示，按输入/GL/编码/写盘计数定位，不继续猜参数。
-3. 再回归飞书四路/恢复、补盲、两条HUD、车辆信号与长时间录像。并行AI改代码前先登记并建独立工作树。
+1. 用户实车先测A（内置存储、关预览→开预览），再测B，采集同条件帧率/清晰度、`dumpsys meminfo`与失败当次日志；[优化任务与证据](tasks/ab-test-preoptimization.md)。
+2. 确认原车HUD真实路径与长期选型；选B再深合双GL，后续补`.pending`恢复与状态机收敛。
+3. 19项既有Lint错误仍待独立整改；本轮未通过全局禁用检查掩盖新增问题。
 
 ## 最近更新（最多5条）
 
-- 2026-11-14 19:17:43 +08:00 | 目录 | 已清27个临时文件、117个保留文件SHA不变；补Smartcam参考/分析结论/应用实现的分区落点 | [任务](tasks/directory-hygiene.md)
-- 2026-11-14 18:53:57 +08:00 | 规范 | 禁止私建平行规则；现有CLAUDE/Cursor已转引根AGENTS，入口/链接/篇幅检查通过 | [任务](tasks/progress-documentation-rules.md)
-- 2026-11-14 18:43:23 +08:00 | 规范 | 强制同步/时间戳生效；总览142→43行，历史保留，篇幅/链接检查通过 | [任务](tasks/progress-documentation-rules.md)
-- 2026-11-14（时刻未记录） | 交接 | Smartcam原APK已复制进项目并验SHA，反编译摘录可本机共享 | [索引](AI_HANDOFF.md)
-- 2026-11-14（时刻未记录） | 发布 | `11141103` A/B已上传并验附件，待E5实车 | [启动任务](tasks/e5-recording-startup.md)
+- 2026-11-15 00:25:19 +08:00 | 优化交付 | 新A/B `11150014`通过每版79+5+1、R8与必要Lint；签名/原库/SHA已核验，清46个临时文件并关闭任务模拟器，实车待测 | [任务](tasks/ab-test-preoptimization.md)
+- 2026-11-14 23:24:27 +08:00 | 确认 | 保留扫码、选方案3-稳妥、HUD暂不动，确认范围已落盘 | [任务](tasks/ab-test-preoptimization.md)
+- 2026-11-14 21:43:54 +08:00 | 参考 | Smartcam/EVCam A/B静态内存结构对照，无实车PSS数据 | [任务](tasks/smartcam-feature-inventory.md)
+- 2026-11-14 19:17:43 +08:00 | 目录 | 清27个临时文件、117个保留文件SHA不变，明确参考与实现落点 | [任务](tasks/directory-hygiene.md)
+- 2026-11-14 18:53:57 +08:00 | 规范 | 禁止私建平行规则，CLAUDE/Cursor转引根AGENTS | [任务](tasks/progress-documentation-rules.md)
 
 ## 按需索引
 
-- [需求](REQUIREMENTS.md) · [协作](COLLABORATION.md) · [当前有效坑](PITFALLS.md) · [新AI资料](AI_HANDOFF.md)
-- [E5启动分析](E5_STARTUP_FIX_20261114.md) · [A/B试录](RECORDING_AB_TEST.md) · [本机开发](DEVELOPMENT.md)
-- 本轮证据：`work/e5-startup/`；构建：`work/verification/build-20261114-110338-526.log`；哈希：`outputs/EVCam-E5-StartupFix-manifest.json`。
-- [整理前完整历史快照](archive/2026-11/STATUS_20261114_183403.md)；历史按需查阅，不默认全读。
+- [需求](REQUIREMENTS.md) · [协作](COLLABORATION.md) · [坑](PITFALLS.md) · [新AI资料](AI_HANDOFF.md) · [Smartcam全功能](SMARTCAM_FEATURE_CATALOG.md)
+- [E5启动分析](E5_STARTUP_FIX_20261114.md) · [A/B试录](RECORDING_AB_TEST.md) · [开发](DEVELOPMENT.md)
+- 本轮证据：`work/ab-test-preoptimization/`；历史启动证据仍在`work/e5-startup/`，不默认全读。
+- [整理前历史快照](archive/2026-11/STATUS_20261114_183403.md)；历史按需读取。

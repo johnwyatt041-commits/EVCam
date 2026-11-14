@@ -27,23 +27,14 @@ public class FeatureProfileTest {
         verify(editor, times(1)).apply();
     }
 
-    @Test public void oldEnabledPreferencesCannotRestartRemovedFeatures() {
+    @Test public void storedEnabledPreferencesKeepHudAndBlindSpot() {
         Context context = mock(Context.class);
         SharedPreferences preferences = mock(SharedPreferences.class);
         when(context.getApplicationContext()).thenReturn(context);
         when(context.getSharedPreferences(anyString(), anyInt())).thenReturn(preferences);
         when(preferences.getBoolean(anyString(), anyBoolean())).thenReturn(true);
         AppConfig config = new AppConfig(context);
-        assertFalse(config.isFisheyeCorrectionEnabled());
-        assertFalse(config.isPreviewCorrectionEnabled());
-        assertFalse(config.isImageAdjustEnabled());
         assertTrue(config.isSecondaryDisplayEnabled());
-        assertFalse(config.isDoorSecondaryDisplayEnabled());
-        assertFalse(config.isSupervisionModeEnabled());
-        assertFalse(config.isLongViewModeEnabled());
-        assertFalse(config.isDoorLinkageEnabled());
-        assertFalse(config.isCustomKeyWakeupEnabled());
-        assertFalse(config.isMockTurnSignalFloatingEnabled());
         assertTrue(config.isMjpegStreamEnabled());
         assertTrue(config.isTurnSignalLinkageEnabled());
         assertTrue(config.isBlindSpotGlobalEnabled());

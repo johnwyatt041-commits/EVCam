@@ -1,7 +1,6 @@
 package com.kooo.evcam.feishu;
 
 import com.kooo.evcam.AppLog;
-import com.kooo.evcam.dingtalk.VideoThumbnailExtractor;
 
 import android.content.Context;
 

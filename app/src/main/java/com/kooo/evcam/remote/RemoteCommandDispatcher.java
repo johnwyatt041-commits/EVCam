@@ -3,15 +3,13 @@ package com.kooo.evcam.remote;
 import android.content.Context;
 
 import com.kooo.evcam.AppLog;
-import com.kooo.evcam.dingtalk.DingTalkApiClient;
+
 import com.kooo.evcam.feishu.FeishuApiClient;
 import com.kooo.evcam.remote.core.ChatIdentifier;
 import com.kooo.evcam.remote.core.RemotePlatform;
-import com.kooo.evcam.remote.handler.DingTalkHandler;
+
 import com.kooo.evcam.remote.handler.FeishuHandler;
 import com.kooo.evcam.remote.handler.RemoteCommandHandler;
-import com.kooo.evcam.remote.handler.TelegramHandler;
-import com.kooo.evcam.telegram.TelegramApiClient;
 
 import java.util.EnumMap;
 import java.util.Map;
@@ -36,12 +34,7 @@ public class RemoteCommandDispatcher {
         this.handlers = new EnumMap<>(RemotePlatform.class);
         
         // 预创建各平台处理器（但不设置 API 客户端）
-        if (com.kooo.evcam.AppFeatures.DINGTALK) {
-            handlers.put(RemotePlatform.DINGTALK, new DingTalkHandler(context));
-        }
-        if (com.kooo.evcam.AppFeatures.TELEGRAM) {
-            handlers.put(RemotePlatform.TELEGRAM, new TelegramHandler(context));
-        }
+
         handlers.put(RemotePlatform.FEISHU, new FeishuHandler(context));
         
         AppLog.d(TAG, "RemoteCommandDispatcher 初始化完成");
@@ -72,28 +65,6 @@ public class RemoteCommandDispatcher {
             handler.setRecordingStateListener(listener);
         }
         AppLog.d(TAG, "RecordingStateListener 已设置");
-    }
-    
-    /**
-     * 设置钉钉 API 客户端
-     */
-    public void setDingTalkApiClient(DingTalkApiClient apiClient) {
-        DingTalkHandler handler = (DingTalkHandler) handlers.get(RemotePlatform.DINGTALK);
-        if (handler != null) {
-            handler.setApiClient(apiClient);
-            AppLog.d(TAG, "DingTalk API 客户端已设置");
-        }
-    }
-    
-    /**
-     * 设置 Telegram API 客户端
-     */
-    public void setTelegramApiClient(TelegramApiClient apiClient) {
-        TelegramHandler handler = (TelegramHandler) handlers.get(RemotePlatform.TELEGRAM);
-        if (handler != null) {
-            handler.setApiClient(apiClient);
-            AppLog.d(TAG, "Telegram API 客户端已设置");
-        }
     }
     
     /**
@@ -153,43 +124,6 @@ public class RemoteCommandDispatcher {
         if (handler != null) {
             handler.sendError(chatId, error);
         }
-    }
-    
-    // ==================== 便捷方法 - 钉钉 ====================
-    
-    /**
-     * 钉钉远程录制（便捷方法）
-     */
-    public void startDingTalkRecording(String conversationId, String conversationType, 
-            String userId, int durationSeconds) {
-        ChatIdentifier chatId = ChatIdentifier.dingtalk(conversationId, conversationType, userId);
-        startRemoteRecording(RemotePlatform.DINGTALK, chatId, durationSeconds);
-    }
-    
-    /**
-     * 钉钉远程拍照（便捷方法）
-     */
-    public void startDingTalkPhoto(String conversationId, String conversationType, String userId) {
-        ChatIdentifier chatId = ChatIdentifier.dingtalk(conversationId, conversationType, userId);
-        startRemotePhoto(RemotePlatform.DINGTALK, chatId);
-    }
-    
-    // ==================== 便捷方法 - Telegram ====================
-    
-    /**
-     * Telegram 远程录制（便捷方法）
-     */
-    public void startTelegramRecording(long chatId, int durationSeconds) {
-        ChatIdentifier id = ChatIdentifier.telegram(chatId);
-        startRemoteRecording(RemotePlatform.TELEGRAM, id, durationSeconds);
-    }
-    
-    /**
-     * Telegram 远程拍照（便捷方法）
-     */
-    public void startTelegramPhoto(long chatId) {
-        ChatIdentifier id = ChatIdentifier.telegram(chatId);
-        startRemotePhoto(RemotePlatform.TELEGRAM, id);
     }
     
     // ==================== 便捷方法 - 飞书 ====================

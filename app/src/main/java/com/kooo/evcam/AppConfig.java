@@ -58,19 +58,15 @@ public class AppConfig {
     // 补盲功能全局开关
     private static final String KEY_BLIND_SPOT_GLOBAL_ENABLED = "blind_spot_global_enabled";  // 补盲功能总开关
     
-    // 超视模式配置
-    private static final String KEY_SUPERVISION_MODE_ENABLED = "supervision_mode_enabled";  // 超视模式开关
-    private static final String KEY_SUPERVISION_LEFT_WIDTH = "supervision_left_width";      // 左视悬浮窗宽度
-    private static final String KEY_SUPERVISION_LEFT_HEIGHT = "supervision_left_height";    // 左视悬浮窗高度
-    private static final String KEY_SUPERVISION_LEFT_X = "supervision_left_x";              // 左视悬浮窗X位置
-    private static final String KEY_SUPERVISION_LEFT_Y = "supervision_left_y";              // 左视悬浮窗Y位置
-    private static final String KEY_SUPERVISION_RIGHT_WIDTH = "supervision_right_width";    // 右视悬浮窗宽度
-    private static final String KEY_SUPERVISION_RIGHT_HEIGHT = "supervision_right_height";  // 右视悬浮窗高度
-    private static final String KEY_SUPERVISION_RIGHT_X = "supervision_right_x";            // 右视悬浮窗X位置
-    private static final String KEY_SUPERVISION_RIGHT_Y = "supervision_right_y";            // 右视悬浮窗Y位置
-    
-    // 长视模式配置（转向灯触发双画面模式）
-    private static final String KEY_LONG_VIEW_MODE_ENABLED = "long_view_mode_enabled";  // 长视模式开关
+          // 左视悬浮窗宽度
+        // 左视悬浮窗高度
+                  // 左视悬浮窗X位置
+                  // 左视悬浮窗Y位置
+        // 右视悬浮窗宽度
+      // 右视悬浮窗高度
+                // 右视悬浮窗X位置
+                // 右视悬浮窗Y位置
+
     
     // 补盲选项配置 (原副屏显示)
     private static final String KEY_SECONDARY_DISPLAY_ENABLED = "secondary_display_enabled";  // 副屏显示开关
@@ -93,7 +89,6 @@ public class AppConfig {
     private static final String KEY_MAIN_FLOATING_WIDTH = "main_floating_width";              // 主屏悬浮窗宽度
     private static final String KEY_MAIN_FLOATING_HEIGHT = "main_floating_height";            // 主屏悬浮窗高度
 
-    // MJPEG 流配置（独立 GL 管线推流，鱼眼参数复用副屏现有项）
     private static final String KEY_MJPEG_STREAM_ENABLED = "mjpeg_stream_enabled";            // 总开关
     private static final String KEY_MJPEG_STREAM_CAMERA = "mjpeg_stream_camera";              // 推流摄像头位置 front/back/left/right
     private static final String KEY_MJPEG_STREAM_PORT = "mjpeg_stream_port";                  // 服务端监听端口
@@ -113,13 +108,6 @@ public class AppConfig {
     // 转向灯联动配置 (补盲选项新增)
     private static final String KEY_TURN_SIGNAL_LINKAGE_ENABLED = "turn_signal_linkage_enabled"; // 转向灯联动开关
     private static final String KEY_TURN_SIGNAL_TIMEOUT = "turn_signal_timeout";               // 转向灯熄灭后延迟消失时间 (秒)
-    
-    // 车门联动配置
-    private static final String KEY_DOOR_LINKAGE_ENABLED = "door_linkage_enabled";             // 车门联动开关
-    private static final String KEY_DOOR_TIMEOUT = "door_timeout";                             // 车门关闭后延迟消失时间 (秒)
-    private static final String KEY_DOOR_PRESET_SELECTION = "door_preset_selection";           // 车门联动车型选择 (l6l7/boyue_l)
-    private static final String KEY_DOOR_REUSE_MAIN_FLOATING = "door_reuse_main_floating";     // 车门联动是否复用主屏悬浮窗
-    private static final String KEY_DOOR_SECONDARY_DISPLAY_ENABLED = "door_secondary_display_enabled"; // 车门联动副屏显示开关
     
     private static final String KEY_TURN_SIGNAL_REUSE_MAIN_FLOATING = "turn_signal_reuse_main_floating"; // 是否复用主屏悬浮窗
     private static final String KEY_TURN_SIGNAL_FLOATING_X = "turn_signal_floating_x";          // 独立补盲悬浮窗X
@@ -147,16 +135,11 @@ public class AppConfig {
     // 中转写入配置
     private static final String KEY_RELAY_WRITE_ENABLED = "relay_write_enabled";  // 中转写入开关（U盘存储时）
 
-    // 定制键唤醒配置
-    private static final String KEY_CUSTOM_KEY_WAKEUP_ENABLED = "custom_key_wakeup_enabled"; // 定制键唤醒开关
-    private static final String KEY_CUSTOM_KEY_SPEED_THRESHOLD = "custom_key_speed_threshold"; // 速度阈值（秒速 m/s）
-    private static final String KEY_CUSTOM_KEY_SPEED_PROP_ID = "custom_key_speed_prop_id"; // 速度属性ID
-    private static final String KEY_CUSTOM_KEY_BUTTON_PROP_ID = "custom_key_button_prop_id"; // 按钮属性ID
 
     // 桌面悬浮模拟按钮 (补盲选项新增)
-    private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED = "mock_turn_signal_floating_enabled"; // 悬浮模拟按钮开关
-    private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_X = "mock_turn_signal_floating_x";             // 悬浮模拟按钮X
-    private static final String KEY_MOCK_TURN_SIGNAL_FLOATING_Y = "mock_turn_signal_floating_y";             // 悬浮模拟按钮Y
+     // 悬浮模拟按钮开关
+                 // 悬浮模拟按钮X
+                 // 悬浮模拟按钮Y
 
     // 补盲悬浮窗动效
     private static final String KEY_FLOATING_WINDOW_ANIMATION_ENABLED = "floating_window_animation_enabled"; // 悬浮窗开启/关闭动效
@@ -176,12 +159,6 @@ public class AppConfig {
     private static final String KEY_BLIND_SPOT_DISCLAIMER_ACCEPTED = "blind_spot_disclaimer_accepted";
     
     // 预览画面矫正配置
-    private static final String KEY_PREVIEW_CORRECTION_ENABLED = "preview_correction_enabled";
-    private static final String KEY_PREVIEW_CORRECTION_PREFIX = "preview_correction_";
-
-    // 鱼眼矫正配置
-    private static final String KEY_FISHEYE_CORRECTION_ENABLED = "fisheye_correction_enabled";
-    private static final String KEY_FISHEYE_CORRECTION_PREFIX = "fisheye_correction_";
 
     // 时间角标配置
     private static final String KEY_TIMESTAMP_WATERMARK_ENABLED = "timestamp_watermark_enabled";  // 时间角标开关
@@ -202,8 +179,6 @@ public class AppConfig {
     private static final String KEY_CAMERA_LEFT_VISIBLE = "camera_left_visible";    // 左摄像头画面显示
     private static final String KEY_CAMERA_RIGHT_VISIBLE = "camera_right_visible";  // 右摄像头画面显示
     
-    // 亮度/降噪调节配置
-    private static final String KEY_IMAGE_ADJUST_ENABLED = "image_adjust_enabled";  // 是否启用亮度/降噪调节
     private static final String KEY_EXPOSURE_COMPENSATION = "exposure_compensation";  // 曝光补偿值
     private static final String KEY_AWB_MODE = "awb_mode";  // 白平衡模式
     private static final String KEY_TONEMAP_MODE = "tonemap_mode";  // 色调映射模式
@@ -1548,146 +1523,6 @@ public class AppConfig {
         return prefs.getBoolean(KEY_BLIND_SPOT_GLOBAL_ENABLED, false);
     }
     
-    // ==================== 超视模式配置相关方法 ====================
-    
-    /**
-     * 设置超视模式开关
-     * @param enabled true 表示启用超视模式
-     */
-    public void setSupervisionModeEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_SUPERVISION_MODE_ENABLED, enabled).apply();
-        AppLog.d(TAG, "超视模式设置: " + (enabled ? "启用" : "禁用"));
-    }
-    
-    /**
-     * 获取超视模式开关状态
-     * @return true 表示超视模式已启用
-     */
-    public boolean isSupervisionModeEnabled() {
-        if (!AppFeatures.SUPERVISION) return false;
-        return prefs.getBoolean(KEY_SUPERVISION_MODE_ENABLED, false);
-    }
-    
-    /**
-     * 设置左视悬浮窗位置和大小
-     */
-    public void setSupervisionLeftBounds(int x, int y, int width, int height) {
-        AppLog.i(TAG, "💾 保存左视窗: x=" + x + ", y=" + y + ", w=" + width + ", h=" + height);
-        prefs.edit()
-            .putInt(KEY_SUPERVISION_LEFT_X, x)
-            .putInt(KEY_SUPERVISION_LEFT_Y, y)
-            .putInt(KEY_SUPERVISION_LEFT_WIDTH, width)
-            .putInt(KEY_SUPERVISION_LEFT_HEIGHT, height)
-            .commit(); // 使用commit()同步保存
-        AppLog.i(TAG, "💾 保存左视窗完成，当前读取: x=" + getSupervisionLeftX());
-    }
-    
-    public int getSupervisionLeftX() {
-        int val = prefs.getInt(KEY_SUPERVISION_LEFT_X, 100);
-        AppLog.d(TAG, "📍 读取左视窗X: " + val + " (key=" + KEY_SUPERVISION_LEFT_X + ")");
-        return val;
-    }
-
-    public int getSupervisionLeftY() {
-        int val = prefs.getInt(KEY_SUPERVISION_LEFT_Y, 100);
-        AppLog.d(TAG, "📍 读取左视窗Y: " + val);
-        return val;
-    }
-
-    public int getSupervisionLeftWidth() {
-        int val = prefs.getInt(KEY_SUPERVISION_LEFT_WIDTH, 800);
-        AppLog.d(TAG, "📍 读取左视窗Width: " + val);
-        return val;
-    }
-
-    public int getSupervisionLeftHeight() {
-        int val = prefs.getInt(KEY_SUPERVISION_LEFT_HEIGHT, 600);
-        AppLog.d(TAG, "📍 读取左视窗Height: " + val);
-        return val;
-    }
-    
-    /**
-     * 设置右视悬浮窗位置和大小
-     */
-    public void setSupervisionRightBounds(int x, int y, int width, int height) {
-        AppLog.i(TAG, "💾 保存右视窗: x=" + x + ", y=" + y + ", w=" + width + ", h=" + height);
-        prefs.edit()
-            .putInt(KEY_SUPERVISION_RIGHT_X, x)
-            .putInt(KEY_SUPERVISION_RIGHT_Y, y)
-            .putInt(KEY_SUPERVISION_RIGHT_WIDTH, width)
-            .putInt(KEY_SUPERVISION_RIGHT_HEIGHT, height)
-            .commit(); // 使用commit()同步保存
-        AppLog.i(TAG, "💾 保存右视窗完成，当前读取: x=" + getSupervisionRightX());
-    }
-
-    public int getSupervisionRightX() {
-        // 右视窗X默认值：左视窗默认X(100) + 默认宽度(800) + 10 = 910
-        int val = prefs.getInt(KEY_SUPERVISION_RIGHT_X, 910);
-        AppLog.d(TAG, "📍 读取右视窗X: " + val + " (key=" + KEY_SUPERVISION_RIGHT_X + ")");
-        return val;
-    }
-    
-    public int getSupervisionRightY() {
-        // 右视窗Y默认值：与左视窗默认Y相同
-        return prefs.getInt(KEY_SUPERVISION_RIGHT_Y, 100);
-    }
-    
-    public int getSupervisionRightWidth() {
-        return prefs.getInt(KEY_SUPERVISION_RIGHT_WIDTH, 800);
-    }
-    
-    public int getSupervisionRightHeight() {
-        return prefs.getInt(KEY_SUPERVISION_RIGHT_HEIGHT, 600);
-    }
-    
-    /**
-     * 设置长视模式开关
-     * @param enabled true 表示启用长视模式
-     */
-    public void setLongViewModeEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_LONG_VIEW_MODE_ENABLED, enabled).apply();
-        AppLog.d(TAG, "长视模式设置: " + (enabled ? "启用" : "禁用"));
-    }
-    
-    /**
-     * 获取长视模式开关状态
-     * @return true 表示长视模式已启用
-     */
-    public boolean isLongViewModeEnabled() {
-        if (!AppFeatures.SUPERVISION) return false;
-        return prefs.getBoolean(KEY_LONG_VIEW_MODE_ENABLED, false);
-    }
-    
-    /**
-     * 重置超视模式悬浮窗位置和大小为默认值
-     * 左右两个画面在同一水平线上，相距10dp
-     */
-    public void resetSupervisionBounds() {
-        // 使用补盲画面尺寸作为默认尺寸
-        int width = getTurnSignalFloatingWidth();
-        int height = getTurnSignalFloatingHeight();
-        // 使用补盲画面位置作为右窗口默认位置
-        int rightX = getTurnSignalFloatingX();
-        int rightY = getTurnSignalFloatingY();
-        int gap = 10; // 10dp间距
-        // 左窗口在右窗口左侧，水平对齐（Y坐标相同）
-        int leftX = rightX - width - gap;
-        int leftY = rightY;
-        
-        prefs.edit()
-            .putInt(KEY_SUPERVISION_LEFT_X, leftX)
-            .putInt(KEY_SUPERVISION_LEFT_Y, leftY)
-            .putInt(KEY_SUPERVISION_LEFT_WIDTH, width)
-            .putInt(KEY_SUPERVISION_LEFT_HEIGHT, height)
-            .putInt(KEY_SUPERVISION_RIGHT_X, rightX)
-            .putInt(KEY_SUPERVISION_RIGHT_Y, rightY)
-            .putInt(KEY_SUPERVISION_RIGHT_WIDTH, width)
-            .putInt(KEY_SUPERVISION_RIGHT_HEIGHT, height)
-            .apply();
-        
-        AppLog.i(TAG, "🎯 重置超视模式默认位置: 左窗口(" + leftX + "," + leftY + "), 右窗口(" + rightX + "," + rightY + "), 尺寸=" + width + "x" + height);
-    }
-    
     /**
      * 强制将所有待处理的SharedPreferences写入磁盘
      * 用于确保保存操作立即生效
@@ -1930,181 +1765,17 @@ public class AppConfig {
 
     // ==================== 预览画面矫正配置相关方法 ====================
 
-    /**
-     * 设置预览画面矫正开关
-     */
-    public void setPreviewCorrectionEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_PREVIEW_CORRECTION_ENABLED, enabled).apply();
-        AppLog.d(TAG, "预览画面矫正设置: " + (enabled ? "启用" : "禁用"));
-    }
-
-    /**
-     * 获取预览画面矫正开关
-     */
-    public boolean isPreviewCorrectionEnabled() {
-        if (!AppFeatures.PREVIEW_CORRECTION) return false;
-        return prefs.getBoolean(KEY_PREVIEW_CORRECTION_ENABLED, false);
-    }
-
-    private String getPreviewCorrectionKey(String cameraPos, String suffix) {
-        return KEY_PREVIEW_CORRECTION_PREFIX + cameraPos + "_" + suffix;
-    }
-
-    public void setPreviewCorrectionScaleX(String cameraPos, float scaleX) {
-        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), scaleX).apply();
-    }
-
-    public void setPreviewCorrectionScaleY(String cameraPos, float scaleY) {
-        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), scaleY).apply();
-    }
-
-    public void setPreviewCorrectionTranslateX(String cameraPos, float translateX) {
-        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), translateX).apply();
-    }
-
-    public void setPreviewCorrectionTranslateY(String cameraPos, float translateY) {
-        prefs.edit().putFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), translateY).apply();
-    }
-
-    public float getPreviewCorrectionScaleX(String cameraPos) {
-        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), 1.0f);
-    }
-
-    public float getPreviewCorrectionScaleY(String cameraPos) {
-        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), 1.0f);
-    }
-
-    public float getPreviewCorrectionTranslateX(String cameraPos) {
-        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), 0.0f);
-    }
-
-    public float getPreviewCorrectionTranslateY(String cameraPos) {
-        return prefs.getFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), 0.0f);
-    }
-
-    /**
-     * 重置单路摄像头的预览矫正参数
-     */
-    public void resetPreviewCorrection(String cameraPos) {
-        prefs.edit()
-                .putFloat(getPreviewCorrectionKey(cameraPos, "scale_x"), 1.0f)
-                .putFloat(getPreviewCorrectionKey(cameraPos, "scale_y"), 1.0f)
-                .putFloat(getPreviewCorrectionKey(cameraPos, "translate_x"), 0.0f)
-                .putFloat(getPreviewCorrectionKey(cameraPos, "translate_y"), 0.0f)
-                .apply();
-    }
-
-    /**
-     * 重置所有摄像头的预览矫正参数
-     */
-    public void resetAllPreviewCorrection() {
-        resetPreviewCorrection("front");
-        resetPreviewCorrection("back");
-        resetPreviewCorrection("left");
-        resetPreviewCorrection("right");
-        AppLog.d(TAG, "所有预览画面矫正参数已重置");
-    }
-
-    // ==================== 鱼眼矫正配置相关方法 ====================
-
-    /**
-     * 设置鱼眼矫正开关
-     */
-    public void setFisheyeCorrectionEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_FISHEYE_CORRECTION_ENABLED, enabled).apply();
-        AppLog.d(TAG, "鱼眼矫正设置: " + (enabled ? "启用" : "禁用"));
-    }
-
-    /**
-     * 获取鱼眼矫正开关
-     */
-    public boolean isFisheyeCorrectionEnabled() {
-        if (!AppFeatures.FISHEYE_CORRECTION) return false;
-        return prefs.getBoolean(KEY_FISHEYE_CORRECTION_ENABLED, false);
-    }
-
-    private String getFisheyeCorrectionKey(String cameraPos, String suffix) {
-        return KEY_FISHEYE_CORRECTION_PREFIX + cameraPos + "_" + suffix;
-    }
-
     // --- K1 (主畸变系数) ---
-    public void setFisheyeCorrectionK1(String cameraPos, float k1) {
-        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k1"), k1).apply();
-    }
-
-    public float getFisheyeCorrectionK1(String cameraPos) {
-        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k1"), 0.0f);
-    }
 
     // --- K2 (二次畸变系数) ---
-    public void setFisheyeCorrectionK2(String cameraPos, float k2) {
-        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k2"), k2).apply();
-    }
-
-    public float getFisheyeCorrectionK2(String cameraPos) {
-        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k2"), 0.0f);
-    }
 
     // --- Zoom (矫正后缩放) ---
-    public void setFisheyeCorrectionZoom(String cameraPos, float zoom) {
-        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), zoom).apply();
-    }
-
-    public float getFisheyeCorrectionZoom(String cameraPos) {
-        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), 1.0f);
-    }
 
     // --- CenterX (畸变中心X偏移) ---
-    public void setFisheyeCorrectionCenterX(String cameraPos, float cx) {
-        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), cx).apply();
-    }
-
-    public float getFisheyeCorrectionCenterX(String cameraPos) {
-        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), 0.5f);
-    }
 
     // --- CenterY (畸变中心Y偏移) ---
-    public void setFisheyeCorrectionCenterY(String cameraPos, float cy) {
-        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), cy).apply();
-    }
-
-    public float getFisheyeCorrectionCenterY(String cameraPos) {
-        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), 0.5f);
-    }
 
     // --- Rotation (旋转角度) ---
-    public void setFisheyeCorrectionRotation(String cameraPos, int rotation) {
-        prefs.edit().putInt(getFisheyeCorrectionKey(cameraPos, "rotation"), rotation).apply();
-    }
-
-    public int getFisheyeCorrectionRotation(String cameraPos) {
-        return prefs.getInt(getFisheyeCorrectionKey(cameraPos, "rotation"), 0);
-    }
-
-    /**
-     * 重置单路摄像头的鱼眼矫正参数
-     */
-    public void resetFisheyeCorrection(String cameraPos) {
-        prefs.edit()
-                .putFloat(getFisheyeCorrectionKey(cameraPos, "k1"), 0.0f)
-                .putFloat(getFisheyeCorrectionKey(cameraPos, "k2"), 0.0f)
-                .putFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), 1.0f)
-                .putFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), 0.5f)
-                .putFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), 0.5f)
-                .putInt(getFisheyeCorrectionKey(cameraPos, "rotation"), 0)
-                .apply();
-    }
-
-    /**
-     * 重置所有摄像头的鱼眼矫正参数
-     */
-    public void resetAllFisheyeCorrection() {
-        resetFisheyeCorrection("front");
-        resetFisheyeCorrection("back");
-        resetFisheyeCorrection("left");
-        resetFisheyeCorrection("right");
-        AppLog.d(TAG, "所有鱼眼矫正参数已重置");
-    }
 
     // ==================== 全屏预览窗口位置和大小配置 ====================
 
@@ -2347,72 +2018,6 @@ public class AppConfig {
         return prefs.getString(KEY_TURN_SIGNAL_PRESET_SELECTION, "l6l7"); // 默认返回 l6l7
     }
 
-    // ==================== 车门联动配置 ====================
-    
-    /**
-     * 设置车门联动开关（左右补盲）
-     */
-    public void setDoorLinkageEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_DOOR_LINKAGE_ENABLED, enabled).apply();
-        AppLog.d(TAG, "车门联动设置: " + (enabled ? "启用" : "禁用"));
-    }
-
-    public boolean isDoorLinkageEnabled() {
-        if (!AppFeatures.DOOR_LINKAGE) return false;
-        return prefs.getBoolean(KEY_DOOR_LINKAGE_ENABLED, false);
-    }
-
-    /**
-     * 设置车门关闭后延迟消失时间
-     */
-    public void setDoorTimeout(int seconds) {
-        prefs.edit().putInt(KEY_DOOR_TIMEOUT, seconds).apply();
-    }
-
-    public int getDoorTimeout() {
-        return prefs.getInt(KEY_DOOR_TIMEOUT, 10); // 默认10秒
-    }
-
-    /**
-     * 保存用户选择的车门联动预设选项（用于恢复具体的 RadioButton 选择）
-     * @param presetName 预设名称，如 "l6l7" 或 "boyue_l"
-     */
-    public void setDoorPresetSelection(String presetName) {
-        prefs.edit().putString(KEY_DOOR_PRESET_SELECTION, presetName).apply();
-        AppLog.d(TAG, "保存车门联动预设选择: " + presetName);
-    }
-
-    /**
-     * 获取用户选择的车门联动预设选项
-     * @return 预设名称，如 "l6l7" 或 "boyue_l"
-     */
-    public String getDoorPresetSelection() {
-        return prefs.getString(KEY_DOOR_PRESET_SELECTION, "l6l7"); // 默认返回 l6l7
-    }
-
-    /**
-     * 设置车门联动是否复用主屏悬浮窗
-     */
-    public void setDoorReuseMainFloating(boolean reuse) {
-        prefs.edit().putBoolean(KEY_DOOR_REUSE_MAIN_FLOATING, reuse).apply();
-    }
-
-    public boolean isDoorReuseMainFloating() {
-        return prefs.getBoolean(KEY_DOOR_REUSE_MAIN_FLOATING, true); // 默认复用
-    }
-
-    /**
-     * 设置车门联动副屏显示开关
-     */
-    public void setDoorSecondaryDisplayEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_DOOR_SECONDARY_DISPLAY_ENABLED, enabled).apply();
-    }
-
-    public boolean isDoorSecondaryDisplayEnabled() {
-        if (!AppFeatures.DOOR_LINKAGE || !AppFeatures.SECONDARY_DISPLAY) return false;
-        return prefs.getBoolean(KEY_DOOR_SECONDARY_DISPLAY_ENABLED, false); // 默认关闭
-    }
-
     /**
      * 设置独立补盲悬浮窗位置和大小
      */
@@ -2453,30 +2058,6 @@ public class AppConfig {
     }
 
     // ==================== 桌面悬浮模拟按钮配置相关方法 ====================
-
-    public void setMockTurnSignalFloatingEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED, enabled).apply();
-    }
-
-    public boolean isMockTurnSignalFloatingEnabled() {
-        if (!AppFeatures.MOCK_SIGNALS) return false;
-        return prefs.getBoolean(KEY_MOCK_TURN_SIGNAL_FLOATING_ENABLED, false);
-    }
-
-    public void setMockTurnSignalFloatingPosition(int x, int y) {
-        prefs.edit()
-                .putInt(KEY_MOCK_TURN_SIGNAL_FLOATING_X, x)
-                .putInt(KEY_MOCK_TURN_SIGNAL_FLOATING_Y, y)
-                .apply();
-    }
-
-    public int getMockTurnSignalFloatingX() {
-        return prefs.getInt(KEY_MOCK_TURN_SIGNAL_FLOATING_X, 200);
-    }
-
-    public int getMockTurnSignalFloatingY() {
-        return prefs.getInt(KEY_MOCK_TURN_SIGNAL_FLOATING_Y, 200);
-    }
 
     // ==================== 悬浮窗动效配置 ====================
 
@@ -2751,26 +2332,6 @@ public class AppConfig {
         return name;
     }
     
-    // ==================== 亮度/降噪调节配置相关方法 ====================
-    
-    /**
-     * 设置是否启用亮度/降噪调节
-     * @param enabled true 表示启用
-     */
-    public void setImageAdjustEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_IMAGE_ADJUST_ENABLED, enabled).apply();
-        AppLog.d(TAG, "亮度/降噪调节设置: " + (enabled ? "启用" : "禁用"));
-    }
-    
-    /**
-     * 获取是否启用亮度/降噪调节
-     * @return true 表示启用
-     */
-    public boolean isImageAdjustEnabled() {
-        if (!AppFeatures.IMAGE_ADJUSTMENT) return false;
-        return prefs.getBoolean(KEY_IMAGE_ADJUST_ENABLED, false);
-    }
-    
     /**
      * 设置曝光补偿值
      * @param value 曝光补偿值（范围取决于设备，通常 -12 到 +12）
@@ -2888,22 +2449,6 @@ public class AppConfig {
      */
     public int getSceneMode() {
         return prefs.getInt(KEY_SCENE_MODE, -1);
-    }
-    
-    /**
-     * 重置所有亮度/降噪调节参数为默认值
-     */
-    public void resetImageAdjustParams() {
-        prefs.edit()
-            .putInt(KEY_EXPOSURE_COMPENSATION, 0)
-            .putInt(KEY_AWB_MODE, AWB_MODE_DEFAULT)
-            .putInt(KEY_TONEMAP_MODE, TONEMAP_MODE_DEFAULT)
-            .putInt(KEY_EDGE_MODE, EDGE_MODE_DEFAULT)
-            .putInt(KEY_NOISE_REDUCTION_MODE, NOISE_REDUCTION_DEFAULT)
-            .putInt(KEY_EFFECT_MODE, EFFECT_MODE_DEFAULT)
-            .putInt(KEY_SCENE_MODE, -1)
-            .apply();
-        AppLog.d(TAG, "亮度/降噪调节参数已重置为默认值");
     }
     
     /**
@@ -3166,67 +2711,6 @@ public class AppConfig {
      */
     public String getAvmAvoidanceActivity() {
         return prefs.getString(KEY_AVM_AVOIDANCE_ACTIVITY, "com.geely.avm_app.AvmRenderActivity");
-    }
-
-    // ==================== 定制键唤醒配置相关方法 ====================
-
-    /**
-     * 设置定制键唤醒开关
-     */
-    public void setCustomKeyWakeupEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_CUSTOM_KEY_WAKEUP_ENABLED, enabled).apply();
-        AppLog.d(TAG, "定制键唤醒设置: " + (enabled ? "启用" : "禁用"));
-    }
-
-    /**
-     * 获取定制键唤醒开关状态
-     */
-    public boolean isCustomKeyWakeupEnabled() {
-        if (!AppFeatures.CUSTOM_KEYS) return false;
-        return prefs.getBoolean(KEY_CUSTOM_KEY_WAKEUP_ENABLED, false);
-    }
-
-    /**
-     * 设置速度阈值（秒速 m/s）
-     */
-    public void setCustomKeySpeedThreshold(float threshold) {
-        prefs.edit().putFloat(KEY_CUSTOM_KEY_SPEED_THRESHOLD, threshold).apply();
-        AppLog.d(TAG, "定制键速度阈值: " + threshold + " m/s");
-    }
-
-    /**
-     * 获取速度阈值（秒速 m/s），默认8.34
-     */
-    public float getCustomKeySpeedThreshold() {
-        return prefs.getFloat(KEY_CUSTOM_KEY_SPEED_THRESHOLD, 8.34f);
-    }
-
-    /**
-     * 设置速度属性ID
-     */
-    public void setCustomKeySpeedPropId(int propId) {
-        prefs.edit().putInt(KEY_CUSTOM_KEY_SPEED_PROP_ID, propId).apply();
-    }
-
-    /**
-     * 获取速度属性ID，默认291504647
-     */
-    public int getCustomKeySpeedPropId() {
-        return prefs.getInt(KEY_CUSTOM_KEY_SPEED_PROP_ID, 291504647);
-    }
-
-    /**
-     * 设置按钮属性ID
-     */
-    public void setCustomKeyButtonPropId(int propId) {
-        prefs.edit().putInt(KEY_CUSTOM_KEY_BUTTON_PROP_ID, propId).apply();
-    }
-
-    /**
-     * 获取按钮属性ID，默认557872183
-     */
-    public int getCustomKeyButtonPropId() {
-        return prefs.getInt(KEY_CUSTOM_KEY_BUTTON_PROP_ID, 557872183);
     }
 
     // ==================== 前轮/后轮模式视图配置相关方法 ====================
@@ -3666,7 +3150,6 @@ public class AppConfig {
 
     // ==================== MJPEG 流配置 ====================
     // 默认值：820×320 横屏 / 端口 8080 / 质量 30 / pan 居中 / cover 1.0
-    // 鱼眼参数复用 getFisheyeCorrection*(cameraPos) 系列方法，按摄像头位置取值。
 
     public boolean isMjpegStreamEnabled() {
         return AppFeatures.NETWORK_STREAMING && prefs.getBoolean(KEY_MJPEG_STREAM_ENABLED, false);
@@ -3820,4 +3303,65 @@ public class AppConfig {
     public void setMjpegStreamAutoDiscover(boolean enabled) {
         prefs.edit().putBoolean(KEY_MJPEG_STREAM_AUTO_DISCOVER, enabled).apply();
     }
+
+    // Legacy keys are still used by Wi-Fi HUD rotation/settings; no camera correction pipeline.
+    private static final String KEY_FISHEYE_CORRECTION_PREFIX = "fisheye_correction_";
+    private String getFisheyeCorrectionKey(String cameraPos, String suffix) {
+        return KEY_FISHEYE_CORRECTION_PREFIX + cameraPos + "_" + suffix;
+    }
+
+    // --- K1 (主畸变系数) ---
+    public void setFisheyeCorrectionK1(String cameraPos, float k1) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k1"), k1).apply();
+    }
+
+    public float getFisheyeCorrectionK1(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k1"), 0.0f);
+    }
+
+    // --- K2 (二次畸变系数) ---
+    public void setFisheyeCorrectionK2(String cameraPos, float k2) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "k2"), k2).apply();
+    }
+
+    public float getFisheyeCorrectionK2(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "k2"), 0.0f);
+    }
+
+    // --- Zoom (矫正后缩放) ---
+    public void setFisheyeCorrectionZoom(String cameraPos, float zoom) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), zoom).apply();
+    }
+
+    public float getFisheyeCorrectionZoom(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "zoom"), 1.0f);
+    }
+
+    // --- CenterX (畸变中心X偏移) ---
+    public void setFisheyeCorrectionCenterX(String cameraPos, float cx) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), cx).apply();
+    }
+
+    public float getFisheyeCorrectionCenterX(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_x"), 0.5f);
+    }
+
+    // --- CenterY (畸变中心Y偏移) ---
+    public void setFisheyeCorrectionCenterY(String cameraPos, float cy) {
+        prefs.edit().putFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), cy).apply();
+    }
+
+    public float getFisheyeCorrectionCenterY(String cameraPos) {
+        return prefs.getFloat(getFisheyeCorrectionKey(cameraPos, "center_y"), 0.5f);
+    }
+
+    // --- Rotation (旋转角度) ---
+    public void setFisheyeCorrectionRotation(String cameraPos, int rotation) {
+        prefs.edit().putInt(getFisheyeCorrectionKey(cameraPos, "rotation"), rotation).apply();
+    }
+
+    public int getFisheyeCorrectionRotation(String cameraPos) {
+        return prefs.getInt(getFisheyeCorrectionKey(cameraPos, "rotation"), 0);
+    }
+
 }

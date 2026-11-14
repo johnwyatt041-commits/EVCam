@@ -23,8 +23,6 @@ import com.kooo.evcam.AppLog;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 import java.util.Locale;
 
 /**
@@ -174,7 +172,9 @@ public class EglSurfaceEncoder {
     private String lastWatermarkTime = "";
     private static final int WATERMARK_WIDTH = 400;   // 水印纹理宽度（需容纳19字符的时间戳）
     private static final int WATERMARK_HEIGHT = 44;   // 水印纹理高度
-    private final SimpleDateFormat watermarkDateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault());
+    private Canvas watermarkCanvas;
+    private Paint watermarkShadowPaint;
+    private Paint watermarkTextPaint;
     
     // 性能优化：水印更新控制
     private long lastWatermarkUpdateMs = 0;
@@ -355,7 +355,7 @@ public class EglSurfaceEncoder {
     private void drawFrameWithWatermark() {
         // 性能优化：控制水印更新频率（每秒最多更新一次）
         long currentTimeMs = System.currentTimeMillis();
-        if (currentTimeMs - lastWatermarkUpdateMs >= WATERMARK_UPDATE_INTERVAL_MS) {
+        if (currentTimeMs / WATERMARK_UPDATE_INTERVAL_MS != lastWatermarkUpdateMs / WATERMARK_UPDATE_INTERVAL_MS) {
             updateWatermarkBitmap();
             lastWatermarkUpdateMs = currentTimeMs;
         }
@@ -533,9 +533,15 @@ public class EglSurfaceEncoder {
             }
 
             if (watermarkBitmap != null) {
+                watermarkCanvas = null;
+                watermarkShadowPaint = null;
+                watermarkTextPaint = null;
                 watermarkBitmap.recycle();
                 watermarkBitmap = null;
             }
+            lastWatermarkTime = "";
+            lastWatermarkUpdateMs = 0;
+            watermarkPositionCached = false;
 
             // 释放 EGL 资源
             if (eglDisplay != EGL14.EGL_NO_DISPLAY) {
@@ -730,6 +736,11 @@ public class EglSurfaceEncoder {
 
         // 创建初始水印位图
         watermarkBitmap = Bitmap.createBitmap(WATERMARK_WIDTH, WATERMARK_HEIGHT, Bitmap.Config.ARGB_8888);
+        watermarkCanvas = new Canvas(watermarkBitmap);
+        watermarkShadowPaint = createWatermarkPaint(Color.BLACK);
+        watermarkTextPaint = createWatermarkPaint(Color.WHITE);
+        GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, watermarkBitmap, 0);
+        lastWatermarkTime = "";
         updateWatermarkBitmap();
 
         AppLog.d(TAG, "Camera " + cameraId + " Watermark OpenGL resources initialized, textureId=" + watermarkTextureId);
@@ -743,7 +754,7 @@ public class EglSurfaceEncoder {
             return;
         }
 
-        String currentTime = watermarkDateFormat.format(new Date());
+        String currentTime = TimestampTextCache.get(System.currentTimeMillis());
         
         // 只有时间变化时才更新
         if (currentTime.equals(lastWatermarkTime)) {
@@ -754,32 +765,24 @@ public class EglSurfaceEncoder {
         // 清除位图
         watermarkBitmap.eraseColor(Color.TRANSPARENT);
 
-        Canvas canvas = new Canvas(watermarkBitmap);
-
-        // 设置画笔 - 阴影
-        Paint shadowPaint = new Paint();
-        shadowPaint.setColor(Color.BLACK);
-        shadowPaint.setTextSize(28);
-        shadowPaint.setAntiAlias(true);
-        shadowPaint.setTypeface(Typeface.MONOSPACE);
-
-        // 设置画笔 - 主文字
-        Paint textPaint = new Paint();
-        textPaint.setColor(Color.WHITE);
-        textPaint.setTextSize(28);
-        textPaint.setAntiAlias(true);
-        textPaint.setTypeface(Typeface.MONOSPACE);
-
         // 绘制阴影（偏移2像素）
-        canvas.drawText(currentTime, 8, 32, shadowPaint);
+        watermarkCanvas.drawText(currentTime, 8, 32, watermarkShadowPaint);
         // 绘制主文字
-        canvas.drawText(currentTime, 6, 30, textPaint);
+        watermarkCanvas.drawText(currentTime, 6, 30, watermarkTextPaint);
 
         // 上传纹理到 GPU
         if (watermarkTextureId != 0) {
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, watermarkTextureId);
-            GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, watermarkBitmap, 0);
+            GLUtils.texSubImage2D(GLES20.GL_TEXTURE_2D, 0, 0, 0, watermarkBitmap);
         }
+    }
+
+    private static Paint createWatermarkPaint(int color) {
+        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        paint.setColor(color);
+        paint.setTextSize(28);
+        paint.setTypeface(Typeface.MONOSPACE);
+        return paint;
     }
 
     /**

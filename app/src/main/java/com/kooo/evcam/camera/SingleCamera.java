@@ -1,6 +1,5 @@
 package com.kooo.evcam.camera;
 
-
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.StorageHelper;
@@ -84,14 +83,8 @@ public class SingleCamera {
     private ImageReader imageReader;  // 用于拍照的ImageReader
     private boolean singleOutputMode = false;  // 单一输出模式（用于不支持多路输出的车机平台）
     
-    // 鱼眼矫正
-    private FisheyeCorrector fisheyeCorrector;
-    private boolean fisheyePrimaryIsFloating = false; // 鱼眼矫正主输出是否为悬浮窗 Surface（无 TextureView 时）
-    
-    // 亮度/降噪调节相关
     private CaptureRequest.Builder currentRequestBuilder;  // 当前的请求构建器（用于实时更新参数）
     private CameraCharacteristics cameraCharacteristics;  // 摄像头特性（缓存）
-    private boolean imageAdjustEnabled = false;  // 是否启用亮度/降噪调节
     
     // 当前相机实际使用的参数（从 CaptureResult 读取）
     private int actualExposureCompensation = 0;
@@ -187,7 +180,7 @@ public class SingleCamera {
             }
             previewSurface = null;
         }
-        releaseFisheyeCorrector();
+
     }
 
     /** 主界面不可见时停用预览；录像、补盲及远程输出独立保留。 */
@@ -428,15 +421,8 @@ public class SingleCamera {
     public void setMainFloatingSurface(Surface surface, android.graphics.SurfaceTexture surfaceTexture) {
         this.mainFloatingSurface = surface;
         this.mainFloatingSurfaceTexture = surfaceTexture;
-        // 鱼眼模式：清除时立即从 FisheyeCorrector 移除 EGL 输出，
         // 释放 native window 连接，确保新摄像头的 FisheyeCorrector 能成功连接
-        if (surface == null && fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null) fisheyeCorrector.removeOutputSurface("mainFloating");
-                });
-            }
-        }
+
         if (surface != null) {
             AppLog.d(TAG, "Main floating surface set for camera " + cameraId + ": " + surface + ", isValid=" + surface.isValid());
         } else {
@@ -457,15 +443,8 @@ public class SingleCamera {
     public void setSecondaryDisplaySurface(Surface surface, android.graphics.SurfaceTexture surfaceTexture) {
         this.secondaryDisplaySurface = surface;
         this.secondaryDisplaySurfaceTexture = surfaceTexture;
-        // 鱼眼模式：清除时立即从 FisheyeCorrector 移除 EGL 输出，
         // 释放 native window 连接，确保新摄像头的 FisheyeCorrector 能成功连接
-        if (surface == null && fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null) fisheyeCorrector.removeOutputSurface("secondaryDisplay");
-                });
-            }
-        }
+
         if (surface != null) {
             AppLog.d(TAG, "Secondary display surface set for camera " + cameraId + ": " + surface + ", isValid=" + surface.isValid());
         } else {
@@ -508,7 +487,6 @@ public class SingleCamera {
             // Main preview and daily front recording may both be disabled.
             // A HUD stream is an independent demand for this camera.
             if (surface.isValid() && !isConnected()) openCamera();
-            // 动态加入 session（鱼眼模式不影响，streamSurface 自带 GL 管线，不走 FisheyeCorrector）
             addStreamSurfaceToSession();
         } else {
             AppLog.d(TAG, "Camera " + cameraId + " stream surface cleared");
@@ -598,21 +576,6 @@ public class SingleCamera {
             previewOnlyBuilder.addTarget(previewSurface);
             
             // 应用当前的图像调节参数（如果启用）
-            if (imageAdjustEnabled && currentRequestBuilder != null) {
-                // 复制关键参数
-                try {
-                    Integer exposure = currentRequestBuilder.get(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION);
-                    if (exposure != null) {
-                        previewOnlyBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, exposure);
-                    }
-                    Integer awbMode = currentRequestBuilder.get(CaptureRequest.CONTROL_AWB_MODE);
-                    if (awbMode != null) {
-                        previewOnlyBuilder.set(CaptureRequest.CONTROL_AWB_MODE, awbMode);
-                    }
-                } catch (Exception e) {
-                    // 忽略参数复制错误
-                }
-            }
             
             // 替换当前的重复请求（预览继续，但不再向录制 Surface 发送帧）
             captureSession.setRepeatingRequest(previewOnlyBuilder.build(), null, backgroundHandler);
@@ -1385,53 +1348,18 @@ public class SingleCamera {
                         previewSurface = null;
                     }
 
-                    // 鱼眼矫正：通过 GL 中间层渲染到 TextureView
-                    AppConfig fisheyeConfig = new AppConfig(context);
-                    if (fisheyeConfig.isFisheyeCorrectionEnabled()) {
-                        try {
-                            releaseFisheyeCorrector();
-                            fisheyePrimaryIsFloating = false;
-                            int pw = previewSize != null ? previewSize.getWidth() : textureView.getWidth();
-                            int ph = previewSize != null ? previewSize.getHeight() : textureView.getHeight();
-                            fisheyeCorrector = new FisheyeCorrector(cameraId, cameraPosition, pw, ph);
-                            Surface tvSurface = new Surface(surfaceTexture);
-                            previewSurface = fisheyeCorrector.initialize(tvSurface, backgroundHandler);
-                            fisheyeCorrector.loadParams(fisheyeConfig);
-                            AppLog.d(TAG, "Camera " + cameraId + " fisheye corrector active, using intermediate surface");
-                        } catch (Exception e) {
-                            AppLog.e(TAG, "Camera " + cameraId + " fisheye init failed, falling back", e);
-                            releaseFisheyeCorrector();
-                            previewSurface = new Surface(surfaceTexture);
-                        }
-                    } else {
-                        releaseFisheyeCorrector();
+                    {
+
                         previewSurface = new Surface(surfaceTexture);
                     }
                     AppLog.d(TAG, "Camera " + cameraId + " Created NEW preview surface: " + previewSurface);
                 }
-            } else if (fisheyeCorrector == null && mainFloatingSurface != null && mainFloatingSurface.isValid()) {
-                // 无 TextureView（补盲等场景），但有悬浮窗 Surface 时，也初始化鱼眼矫正
-                // 解决补盲冷启动时 FisheyeCorrector 未创建导致鱼眼矫正不生效的问题
+            } else if (mainFloatingSurface != null && mainFloatingSurface.isValid()) {
                 if (previewSurface != null) {
                     try { previewSurface.release(); } catch (Exception e) {}
                     previewSurface = null;
                 }
-                AppConfig fisheyeConfig = new AppConfig(context);
-                if (fisheyeConfig.isFisheyeCorrectionEnabled()) {
-                    try {
-                        releaseFisheyeCorrector();
-                        fisheyePrimaryIsFloating = true;
-                        int pw = previewSize != null ? previewSize.getWidth() : 1920;
-                        int ph = previewSize != null ? previewSize.getHeight() : 1080;
-                        fisheyeCorrector = new FisheyeCorrector(cameraId, cameraPosition, pw, ph);
-                        previewSurface = fisheyeCorrector.initialize(mainFloatingSurface, backgroundHandler);
-                        fisheyeCorrector.loadParams(fisheyeConfig);
-                        AppLog.d(TAG, "Camera " + cameraId + " fisheye corrector active (no textureView, using mainFloatingSurface)");
-                    } catch (Exception e) {
-                        AppLog.e(TAG, "Camera " + cameraId + " fisheye init failed (floating surface), falling back", e);
-                        releaseFisheyeCorrector();
-                    }
-                }
+
             } else {
                 if (previewSurface != null) {
                     try { previewSurface.release(); } catch (Exception e) {}
@@ -1503,13 +1431,7 @@ public class SingleCamera {
                 AppLog.i(TAG,"E5 recording source camera="+cameraId+", HAL default FPS (working baseline)");
             }
             
-            // 保存请求构建器引用（用于实时更新亮度/降噪参数）
             currentRequestBuilder = previewRequestBuilder;
-            
-            // 如果启用了亮度/降噪调节，应用配置中保存的参数
-            if (imageAdjustEnabled) {
-                applyImageAdjustParamsFromConfig(previewRequestBuilder);
-            }
             
             // 准备所有输出Surface
             java.util.List<Surface> surfaces = new java.util.ArrayList<>();
@@ -1524,56 +1446,8 @@ public class SingleCamera {
             } else {
                 // 正常模式：使用 OutputConfiguration 实现 Surface Sharing (API 28+)
                 // 将所有预览性质的 Surface (主预览、主悬浮、副悬浮) 组合成一个硬件流
-                boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
 
-                if (fisheyeActive) {
-                    // 鱼眼矫正模式：Camera2 只输出到 FisheyeCorrector 的中间 Surface（单路）
-                    // 悬浮窗/副屏由 FisheyeCorrector GL 管线统一输出（矫正后画面）
-                    AppLog.d(TAG, "Camera " + cameraId + " FISHEYE MODE: single output to GL pipeline");
-
-                    if (surface != null && surface.isValid()) {
-                        OutputConfiguration previewConfig = new OutputConfiguration(surface);
-                        // MJPEG 流 Surface（StreamGlEncoder 独立 GL 管线）需要直接接 Camera2 原始输出，
-                        // 与 FisheyeCorrector 的 intermediate Surface 共享同一 OutputConfiguration
-                        if (streamSurface != null && streamSurface.isValid() && streamSurface != surface) {
-                            previewConfig.enableSurfaceSharing();
-                            previewConfig.addSurface(streamSurface);
-                            surfaces.add(streamSurface);
-                            previewRequestBuilder.addTarget(streamSurface);
-                            AppLog.d(TAG, "Added stream surface to FISHEYE preview stream");
-                        }
-                        activePreviewConfig = previewConfig;
-                        surfaces.add(surface);
-                        previewRequestBuilder.addTarget(surface);
-                        outputConfigs.add(previewConfig);
-                    }
-
-                    // 同步 FisheyeCorrector 的附加输出与当前 Surface 状态
-                    // 确保已清除的 Surface 被移除（防止 EGL "already connected" 竞争）
-                    // 注意：如果 mainFloatingSurface 已经是鱼眼矫正的主输出（无 TextureView 场景），
-                    // 不能再作为附加输出添加，否则同一 Surface 会被 EGL 连接两次导致错误
-                    if (fisheyePrimaryIsFloating) {
-                        fisheyeCorrector.removeOutputSurface("mainFloating");
-                    } else if (mainFloatingSurface != null && mainFloatingSurface.isValid()) {
-                        fisheyeCorrector.addOutputSurface("mainFloating", mainFloatingSurface);
-                        AppLog.d(TAG, "Registered main floating surface to fisheye GL pipeline");
-                    } else {
-                        fisheyeCorrector.removeOutputSurface("mainFloating");
-                    }
-                    if (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid()) {
-                        fisheyeCorrector.addOutputSurface("secondaryDisplay", secondaryDisplaySurface);
-                        AppLog.d(TAG, "Registered secondary display surface to fisheye GL pipeline");
-                    } else {
-                        fisheyeCorrector.removeOutputSurface("secondaryDisplay");
-                    }
-                    if (fullscreenPreviewSurface != null && fullscreenPreviewSurface.isValid()) {
-                        fisheyeCorrector.addOutputSurface("fullscreenPreview", fullscreenPreviewSurface);
-                        AppLog.d(TAG, "Registered fullscreen preview surface to fisheye GL pipeline");
-                    } else {
-                        fisheyeCorrector.removeOutputSurface("fullscreenPreview");
-                    }
-                } else {
-                    // 非鱼眼模式：使用 Surface Sharing
+                {
                     AppLog.d(TAG, "Camera " + cameraId + " Using Surface Sharing for preview streams");
 
                     // 统一设置所有共享 Surface 的 buffer 尺寸，确保与相机输出一致
@@ -1770,7 +1644,7 @@ public class SingleCamera {
                     }
                     
                     // 重试逻辑
-                    boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
+
                     if (recordSurface != null) {
                         // Never turn a failed recording session into a successful preview-only
                         // session, or silently discard HUD/blind-spot surfaces.
@@ -1800,10 +1674,9 @@ public class SingleCamera {
                             }
                         } else {
                             // 重试耗尽，丢弃副屏 Surface 后尝试只用主 Surface
-                            // 鱼眼模式下 secondary 不在 Camera2 session 中，不需要丢弃
                             AppLog.e(TAG, "Camera " + cameraId + " config retries exhausted (" + configFailRetryCount + "), dropping secondary display surface");
                             configFailRetryCount = 0;
-                            if (!fisheyeActive && secondaryDisplaySurface != null) {
+                            if (secondaryDisplaySurface != null) {
                                 secondaryDisplaySurface = null;
                                 if (backgroundHandler != null) {
                                     backgroundHandler.postDelayed(() -> {
@@ -1855,15 +1728,14 @@ public class SingleCamera {
             String message = e.getMessage();
             if (message != null && message.contains("abandoned")) {
                 AppLog.e(TAG, "Camera " + cameraId + " detected abandoned Surface, attempting recovery...");
-                // 鱼眼模式下 floating/secondary 由 FisheyeCorrector 管理，不在 Camera2 session 中
-                boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
+
                 boolean cleared = false;
-                if (!fisheyeActive && secondaryDisplaySurface != null) {
+                if (secondaryDisplaySurface != null) {
                     secondaryDisplaySurface = null;
                     cleared = true;
                     AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned secondaryDisplaySurface and retrying");
                 }
-                if (!fisheyeActive && !cleared && mainFloatingSurface != null) {
+                if (!cleared && mainFloatingSurface != null) {
                     mainFloatingSurface = null;
                     cleared = true;
                     AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned mainFloatingSurface and retrying");
@@ -2003,24 +1875,6 @@ public class SingleCamera {
 
         if (surface == null || !surface.isValid()) return;
 
-        // 鱼眼矫正模式：通过 FisheyeCorrector GL 管线输出，无需重建 Camera2 session
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            // 如果 mainFloatingSurface 已经是鱼眼矫正的主输出，不能再作为附加输出
-            if (isMainFloating && fisheyePrimaryIsFloating) {
-                AppLog.d(TAG, "Camera " + cameraId + " mainFloatingSurface is fisheye primary output, skipping addOutputSurface");
-                return;
-            }
-            String tag = isMainFloating ? "mainFloating" : "secondaryDisplay";
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-                        fisheyeCorrector.addOutputSurface(tag, surface);
-                    }
-                });
-            }
-            return;
-        }
-
         // 2. 如果 Session 正忙，新 Surface 会被进行中的 createCameraPreviewSession 自动包含
         synchronized (sessionLock) {
             if (isConfiguring || isSessionClosing) {
@@ -2063,19 +1917,6 @@ public class SingleCamera {
             surfaceToRemove = this.secondaryDisplaySurface;
             this.secondaryDisplaySurface = null;
             AppLog.d(TAG, "Secondary display surface cleared for camera " + cameraId);
-        }
-
-        // 鱼眼矫正模式：从 GL 管线移除，无需碰 Camera2 session
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            String tag = isMainFloating ? "mainFloating" : "secondaryDisplay";
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-                        fisheyeCorrector.removeOutputSurface(tag);
-                    }
-                });
-            }
-            return;
         }
 
         // 2. 立即停止推帧，防止 Surface 销毁后 queueBuffer abandoned
@@ -2512,9 +2353,6 @@ public class SingleCamera {
                 cameraDevice = null;
             }
 
-            // 释放鱼眼矫正器
-            releaseFisheyeCorrector();
-
             // 释放预览 Surface
             if (previewSurface != null) {
                 try {
@@ -2572,52 +2410,11 @@ public class SingleCamera {
         }
     }
 
-    // ==================== 鱼眼矫正相关方法 ====================
-
-    /**
-     * 释放鱼眼矫正器
-     */
-    private void releaseFisheyeCorrector() {
-        if (fisheyeCorrector != null) {
-            try {
-                fisheyeCorrector.release();
-            } catch (Exception e) {
-                AppLog.d(TAG, "Camera " + cameraId + " ignored exception releasing fisheye corrector: " + e.getMessage());
-            }
-            fisheyeCorrector = null;
-        }
-        fisheyePrimaryIsFloating = false;
-    }
-
-    /**
-     * 实时更新鱼眼矫正参数（由悬浮窗调参时调用，无需重建 session）
-     */
-    public void updateFisheyeParams(AppConfig appConfig) {
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            fisheyeCorrector.loadParams(appConfig);
-        }
-    }
-
-    /**
-     * 实时更新鱼眼矫正参数（直接传入参数值，用于全屏预览对话框）
-     */
-    public void updateFisheyeParamsRealtime(float k1, float k2, float zoom, float centerX, float centerY) {
-        updateFisheyeParamsRealtime(k1, k2, zoom, centerX, centerY, 0);
-    }
-
-    public void updateFisheyeParamsRealtime(float k1, float k2, float zoom, float centerX, float centerY, int rotation) {
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            fisheyeCorrector.updateParams(k1, k2, zoom, centerX, centerY, rotation);
-        }
-    }
-
     /**
      * 获取预览的 SurfaceTexture（用于全屏预览对话框）
      */
     public android.graphics.SurfaceTexture getPreviewSurfaceTexture() {
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            return fisheyeCorrector.getIntermediateSurfaceTexture();
-        }
+
         if (textureView != null && textureView.isAvailable()) {
             return textureView.getSurfaceTexture();
         }
@@ -2625,19 +2422,10 @@ public class SingleCamera {
     }
 
     /**
-     * 检查是否启用了鱼眼矫正
-     */
-    public boolean isFisheyeCorrectionEnabled() {
-        return fisheyeCorrector != null && fisheyeCorrector.isInitialized();
-    }
-
-    /**
      * 恢复主界面预览的 SurfaceTexture（全屏预览关闭时调用）
      */
     public void restoreMainPreviewSurfaceTexture() {
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            return;
-        }
+
         if (textureView != null && textureView.isAvailable()) {
             android.graphics.SurfaceTexture st = textureView.getSurfaceTexture();
             if (st != null) {
@@ -2668,7 +2456,7 @@ public class SingleCamera {
     public void setFullscreenPreviewSurface(Surface surface, android.graphics.SurfaceTexture surfaceTexture) {
         AppLog.d(TAG, "Camera " + cameraId + " setFullscreenPreviewSurface called, surface=" + surface +
                 ", isValid=" + (surface != null && surface.isValid()) +
-                ", fisheyeMode=" + (fisheyeCorrector != null && fisheyeCorrector.isInitialized()));
+                ", fisheyeMode=" + (false));
 
         this.fullscreenPreviewSurface = surface;
         this.fullscreenPreviewSurfaceTexture = surfaceTexture;
@@ -2683,16 +2471,7 @@ public class SingleCamera {
             return;
         }
 
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null && surface.isValid()) {
-                        fisheyeCorrector.addOutputSurface("fullscreenPreview", surface);
-                        AppLog.d(TAG, "Camera " + cameraId + " added fullscreen preview surface to FisheyeCorrector");
-                    }
-                });
-            }
-        } else {
+        {
             AppLog.d(TAG, "Camera " + cameraId + " recreating session for fullscreen preview surface");
             recreateSession(true);
         }
@@ -2760,16 +2539,7 @@ public class SingleCamera {
         this.fullscreenPreviewSurface = null;
         this.fullscreenPreviewSurfaceTexture = null;
 
-        if (fisheyeCorrector != null && fisheyeCorrector.isInitialized()) {
-            if (backgroundHandler != null) {
-                backgroundHandler.post(() -> {
-                    if (fisheyeCorrector != null) {
-                        fisheyeCorrector.removeOutputSurface("fullscreenPreview");
-                        AppLog.d(TAG, "Camera " + cameraId + " removed fullscreen preview surface from FisheyeCorrector");
-                    }
-                });
-            }
-        } else {
+        {
             AppLog.d(TAG, "Camera " + cameraId + " recreating session to remove fullscreen preview surface");
             if (backgroundHandler != null) {
                 backgroundHandler.postDelayed(() -> recreateSession(true), 100);
@@ -2778,21 +2548,6 @@ public class SingleCamera {
             }
         }
         AppLog.d(TAG, "Camera " + cameraId + " fullscreen preview surface cleared");
-    }
-
-    /**
-     * 鱼眼矫正开关切换后需要重建预览 session
-     * 因为需要切换 Surface（直接 / 中间 GL）
-     *
-     * 注意：不能直接 release previewSurface，因为旧 session 可能仍在使用它。
-     * 只需释放 FisheyeCorrector 并置空 previewSurface 引用，
-     * session 关闭时会自然断开 SurfaceTexture 的 producer 连接。
-     */
-    public void recreateForFisheyeToggle() {
-        AppLog.d(TAG, "Camera " + cameraId + " recreating session for fisheye toggle");
-        releaseFisheyeCorrector();
-        previewSurface = null; // 不 release，让 session 关闭时自然断开
-        recreateSession();
     }
 
     /**
@@ -2993,100 +2748,6 @@ public class SingleCamera {
         }
     }
     
-    // ==================== 亮度/降噪调节相关方法 ====================
-    
-    /**
-     * 设置是否启用亮度/降噪调节
-     * @param enabled true 表示启用
-     */
-    public void setImageAdjustEnabled(boolean enabled) {
-        this.imageAdjustEnabled = enabled;
-        AppLog.d(TAG, "Camera " + cameraId + " image adjust: " + (enabled ? "ENABLED" : "DISABLED"));
-    }
-    
-    /**
-     * 从配置中读取并应用亮度/降噪调节参数
-     * @param requestBuilder 请求构建器
-     */
-    private void applyImageAdjustParamsFromConfig(CaptureRequest.Builder requestBuilder) {
-        try {
-            AppConfig appConfig = new AppConfig(context);
-            
-            // 应用曝光补偿
-            int exposureComp = appConfig.getExposureCompensation();
-            if (exposureComp != 0) {
-                Range<Integer> range = getExposureCompensationRange();
-                if (range != null) {
-                    int clampedValue = Math.max(range.getLower(), Math.min(exposureComp, range.getUpper()));
-                    requestBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedValue);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied exposure compensation: " + clampedValue);
-                }
-            }
-            
-            // 应用白平衡模式
-            int awbMode = appConfig.getAwbMode();
-            if (awbMode >= 0) {
-                int[] supportedModes = getSupportedAwbModes();
-                if (supportedModes != null && isModeSupported(supportedModes, awbMode)) {
-                    requestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, awbMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied AWB mode: " + awbMode);
-                }
-            }
-            
-            // 应用色调映射模式
-            int tonemapMode = appConfig.getTonemapMode();
-            if (tonemapMode >= 0) {
-                int[] supportedModes = getSupportedTonemapModes();
-                if (supportedModes != null && isModeSupported(supportedModes, tonemapMode)) {
-                    requestBuilder.set(CaptureRequest.TONEMAP_MODE, tonemapMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied tonemap mode: " + tonemapMode);
-                }
-            }
-            
-            // 应用边缘增强模式
-            int edgeMode = appConfig.getEdgeMode();
-            if (edgeMode >= 0) {
-                int[] supportedModes = getSupportedEdgeModes();
-                if (supportedModes != null && isModeSupported(supportedModes, edgeMode)) {
-                    requestBuilder.set(CaptureRequest.EDGE_MODE, edgeMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied edge mode: " + edgeMode);
-                }
-            }
-            
-            // 应用降噪模式
-            int noiseReductionMode = appConfig.getNoiseReductionMode();
-            if (noiseReductionMode >= 0) {
-                int[] supportedModes = getSupportedNoiseReductionModes();
-                if (supportedModes != null && isModeSupported(supportedModes, noiseReductionMode)) {
-                    requestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, noiseReductionMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied noise reduction mode: " + noiseReductionMode);
-                }
-            }
-            
-            // 应用特效模式
-            int effectMode = appConfig.getEffectMode();
-            if (effectMode >= 0) {
-                int[] supportedModes = getSupportedEffectModes();
-                if (supportedModes != null && isModeSupported(supportedModes, effectMode)) {
-                    requestBuilder.set(CaptureRequest.CONTROL_EFFECT_MODE, effectMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " applied effect mode: " + effectMode);
-                }
-            }
-            
-            AppLog.d(TAG, "Camera " + cameraId + " image adjust params applied from config");
-            
-        } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " failed to apply image adjust params from config", e);
-        }
-    }
-    
-    /**
-     * 获取是否启用亮度/降噪调节
-     */
-    public boolean isImageAdjustEnabled() {
-        return imageAdjustEnabled;
-    }
-    
     /**
      * 获取曝光补偿范围
      * @return 曝光补偿范围 [min, max]，如果不支持返回 null
@@ -3213,114 +2874,6 @@ public class SingleCamera {
         } catch (CameraAccessException e) {
             AppLog.e(TAG, "Camera " + cameraId + " failed to get characteristics", e);
             return null;
-        }
-    }
-    
-    /**
-     * 实时更新亮度/降噪调节参数
-     * 参数会立即应用到预览和录制
-     * 
-     * @param exposureCompensation 曝光补偿值（Integer.MIN_VALUE 表示不设置）
-     * @param awbMode 白平衡模式（-1 表示不设置）
-     * @param tonemapMode 色调映射模式（-1 表示不设置）
-     * @param edgeMode 边缘增强模式（-1 表示不设置）
-     * @param noiseReductionMode 降噪模式（-1 表示不设置）
-     * @param effectMode 特效模式（-1 表示不设置）
-     * @return true 表示成功，false 表示失败
-     */
-    public boolean updateImageAdjustParams(int exposureCompensation, int awbMode, int tonemapMode,
-                                           int edgeMode, int noiseReductionMode, int effectMode) {
-        if (!imageAdjustEnabled) {
-            AppLog.d(TAG, "Camera " + cameraId + " image adjust not enabled, skip update");
-            return false;
-        }
-        
-        if (cameraDevice == null || captureSession == null || currentRequestBuilder == null) {
-            AppLog.w(TAG, "Camera " + cameraId + " not ready for image adjust update");
-            return false;
-        }
-        
-        try {
-            // 应用曝光补偿
-            if (exposureCompensation != Integer.MIN_VALUE) {
-                Range<Integer> range = getExposureCompensationRange();
-                if (range != null) {
-                    // 确保值在有效范围内
-                    int clampedValue = Math.max(range.getLower(), Math.min(exposureCompensation, range.getUpper()));
-                    currentRequestBuilder.set(CaptureRequest.CONTROL_AE_EXPOSURE_COMPENSATION, clampedValue);
-                    AppLog.d(TAG, "Camera " + cameraId + " set exposure compensation: " + clampedValue + " (range: " + range + ")");
-                }
-            }
-            
-            // 应用白平衡模式
-            if (awbMode >= 0) {
-                int[] supportedModes = getSupportedAwbModes();
-                if (supportedModes != null && isModeSupported(supportedModes, awbMode)) {
-                    currentRequestBuilder.set(CaptureRequest.CONTROL_AWB_MODE, awbMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " set AWB mode: " + awbMode);
-                } else {
-                    AppLog.w(TAG, "Camera " + cameraId + " AWB mode " + awbMode + " not supported");
-                }
-            }
-            
-            // 应用色调映射模式
-            if (tonemapMode >= 0) {
-                int[] supportedModes = getSupportedTonemapModes();
-                if (supportedModes != null && isModeSupported(supportedModes, tonemapMode)) {
-                    currentRequestBuilder.set(CaptureRequest.TONEMAP_MODE, tonemapMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " set tonemap mode: " + tonemapMode);
-                } else {
-                    AppLog.w(TAG, "Camera " + cameraId + " tonemap mode " + tonemapMode + " not supported");
-                }
-            }
-            
-            // 应用边缘增强模式
-            if (edgeMode >= 0) {
-                int[] supportedModes = getSupportedEdgeModes();
-                if (supportedModes != null && isModeSupported(supportedModes, edgeMode)) {
-                    currentRequestBuilder.set(CaptureRequest.EDGE_MODE, edgeMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " set edge mode: " + edgeMode);
-                } else {
-                    AppLog.w(TAG, "Camera " + cameraId + " edge mode " + edgeMode + " not supported");
-                }
-            }
-            
-            // 应用降噪模式
-            if (noiseReductionMode >= 0) {
-                int[] supportedModes = getSupportedNoiseReductionModes();
-                if (supportedModes != null && isModeSupported(supportedModes, noiseReductionMode)) {
-                    currentRequestBuilder.set(CaptureRequest.NOISE_REDUCTION_MODE, noiseReductionMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " set noise reduction mode: " + noiseReductionMode);
-                } else {
-                    AppLog.w(TAG, "Camera " + cameraId + " noise reduction mode " + noiseReductionMode + " not supported");
-                }
-            }
-            
-            // 应用特效模式
-            if (effectMode >= 0) {
-                int[] supportedModes = getSupportedEffectModes();
-                if (supportedModes != null && isModeSupported(supportedModes, effectMode)) {
-                    currentRequestBuilder.set(CaptureRequest.CONTROL_EFFECT_MODE, effectMode);
-                    AppLog.d(TAG, "Camera " + cameraId + " set effect mode: " + effectMode);
-                } else {
-                    AppLog.w(TAG, "Camera " + cameraId + " effect mode " + effectMode + " not supported");
-                }
-            }
-            
-            // 重新提交请求（实时生效）
-            captureSession.setRepeatingRequest(currentRequestBuilder.build(), null, backgroundHandler);
-            AppLog.d(TAG, "Camera " + cameraId + " image adjust params updated successfully");
-            return true;
-            
-        } catch (CameraAccessException e) {
-            AppLog.e(TAG, "Camera " + cameraId + " failed to update image adjust params", e);
-            return false;
-        } catch (IllegalStateException e) {
-            AppLog.e(TAG, "Camera " + cameraId + " session invalid during image adjust update", e);
-            return false;
-        } catch (Exception e) {
-            AppLog.e(TAG, "Camera " + cameraId + " unexpected error during image adjust update", e);
-            return false;
         }
     }
     
