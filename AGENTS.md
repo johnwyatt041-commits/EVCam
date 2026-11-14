@@ -2,6 +2,8 @@
 
 ## 强制进度同步（每次执行）
 
+- **项目唯一规范入口是根目录 `AGENTS.md`，细则沿用其引用的现有文档。** 未经用户明确要求，不得另建平行规则、子目录AGENTS、私有规则/Skill来覆盖本规范；任务记录不能变成另一套规则。已有Claude/Cursor入口仅转引本文件。
+
 - 本项目所有AI/任务必须遵守 `docs/PROGRESS_RULES.md`。开始先读当前进度、任务登记和相关坑，核对实际Git状态。
 - 每次有效改动、重要发现、用户反馈/要求、踩坑、失败/回退或结论变化后，及时更新 `docs/tasks/<task-id>.md`，阶段交接同步总览；不能只留在聊天里。
 - **每次执行结束必须核对并更新任务文档；未更新进度，不得宣告完成、交付或移交。** 无新发现的只读执行只覆盖最后核对时间/结论，不追加空流水账。
@@ -95,7 +97,7 @@ All 3 platforms (DingTalk, Telegram, Feishu) route through `remote/RemoteCommand
 
 ## Coding Conventions
 
-These rules originate from `.cursor/rules/` and apply at all times.
+These are the canonical project conventions. Existing tool entry files only refer here and do not maintain separate copies.
 
 ### 1. 代码可维护性 — 避免在 MainActivity 中堆积业务逻辑
 
