@@ -13,6 +13,8 @@
 
 ## 当前可下载版本
 
+**E5 用户已反馈下述 `11140958` A/B 均停在等待录制。当前分支 `codex/e5-recording-startup-fix`，修正候选 `1.6.6-test-11141103`。请先读 [E5 启动修正](docs/E5_STARTUP_FIX_20261114.md) 和 `docs/STATUS.md`，不要把上次模拟器结果当成实车可用。**
+
 - 最新测试版：`1.6.6-test-11140958`，大屏侧栏优化 + 录像 A/B 对照。
 - [GitHub 下载页](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11140958-e5-recording-ab-large-ui)：Assets 中 A 为三路独立录像，B 为日常合成单视频；同包名顺序覆盖安装。
 - APK 源码提交 `4268f03821bceb82c7489680831e435b48e3b504`。两个 APK 和 7 个说明/校验/预览附件均已上传，GitHub SHA-256 与本地一致，两个公开 APK 链接检查 HTTP 200。

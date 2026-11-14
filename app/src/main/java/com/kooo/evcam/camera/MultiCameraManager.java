@@ -86,6 +86,31 @@ public class MultiCameraManager {
     private volatile int expectedSessionCount = 0;
     private Runnable pendingRecordingStart = null;
     private android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private java.util.function.Consumer<String> recordingStartupFailureCallback;
+    private final RecordingStartupWatchdog startupWatchdog = new RecordingStartupWatchdog(mainHandler,20000,
+            this::recordingStartupDiagnostics,this::failRecordingStartup);
+
+    public void setRecordingStartupFailureCallback(java.util.function.Consumer<String> callback) {
+        recordingStartupFailureCallback=callback;
+    }
+
+    private String recordingStartupDiagnostics() {
+        Map<String,Boolean> ready;
+        synchronized (sessionLock) { ready=new LinkedHashMap<>(cameraSessionReady); }
+        StringBuilder detail=new StringBuilder("Recording startup timeout; sessionReady="+ready);
+        for (Map.Entry<String,CodecVideoRecorder> entry : codecRecorders.entrySet()) {
+            detail.append("; ").append(entry.getKey()).append(':').append(entry.getValue().startupDiagnostics());
+        }
+        return detail.toString();
+    }
+
+    private void failRecordingStartup(String detail) {
+        AppLog.e(TAG,detail);
+        // Clear the waiting UI immediately, even if a failing storage device is slow to close.
+        stopRecording(false);
+        if (recordingStartupFailureCallback!=null) recordingStartupFailureCallback.accept(
+                "录像启动超时，未收到有效视频数据，请在设置中保存日志");
+    }
     private Runnable sessionTimeoutRunnable = null;
     private final Object sessionLock = new Object();  // 用于同步 session 配置计数
     
@@ -691,6 +716,7 @@ public class MultiCameraManager {
             @Override
             public void onFirstDataWritten(String cameraId) {
                 AppLog.d(TAG, "First data written for camera " + cameraId);
+                startupWatchdog.cancel();
                 // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
                 if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
                     hasNotifiedFirstDataWritten = true;
@@ -1318,6 +1344,7 @@ public class MultiCameraManager {
             codecRecorder.setSegmentDuration(segmentDurationMs);
             codecRecorder.setBitRate(bitrate);
             codecRecorder.setFrameRate(targetFrameRate);
+            codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
             camera.setRecordingFrameRate(targetFrameRate);
             codecRecorder.setQualityLevel(3);  // 设置最高画质
             codecRecorder.setForceH264(appConfig.isForceH264Encoding());
@@ -1395,6 +1422,7 @@ public class MultiCameraManager {
                 @Override
                 public void onFirstDataWritten(String cameraId) {
                     AppLog.d(TAG, "Codec first data written for camera " + cameraId);
+                    startupWatchdog.cancel();
                     // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
                     if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
                         hasNotifiedFirstDataWritten = true;
@@ -1445,15 +1473,14 @@ public class MultiCameraManager {
             cameraRecordingActive.clear();
         }
 
+        final List<String> recordingKeys = new ArrayList<>(keys);
+        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false);
         for (String key : keys) {
             SingleCamera camera = cameras.get(key);
             if (camera != null) {
                 camera.recreateSession();
             }
         }
-
-        final List<String> recordingKeys = new ArrayList<>(keys);
-        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false);
 
         // 设置超时机制
         sessionTimeoutRunnable = () -> {
@@ -1470,6 +1497,7 @@ public class MultiCameraManager {
         };
         mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
 
+        startupWatchdog.start();
         return true;
     }
 
@@ -1674,6 +1702,7 @@ public class MultiCameraManager {
             codecRecorder.setSegmentDuration(appConfig.getSegmentDurationMs());
             codecRecorder.setBitRate(appConfig.getActualBitrate(previewSize.getWidth(), previewSize.getHeight(), 25));  // 使用25fps降低CPU占用
             codecRecorder.setFrameRate(appConfig.getActualFrameRate(25));  // 使用25fps降低CPU占用
+            codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
             camera.setRecordingFrameRate(appConfig.getActualFrameRate(25));
             codecRecorder.setQualityLevel(3);  // 设置最高画质
             codecRecorder.setForceH264(appConfig.isForceH264Encoding());
@@ -1755,6 +1784,7 @@ public class MultiCameraManager {
     }
 
     public void stopRecording(boolean skipRelayTransfer, Runnable onStopped) {
+        startupWatchdog.cancel();
         synchronized (this) {
             if (onStopped != null) recordingStoppedCallbacks.add(onStopped);
             if (stoppingRecording) return;
@@ -2199,6 +2229,7 @@ public class MultiCameraManager {
      * 添加完善的清理逻辑和异常保护
      */
     public void release() {
+        startupWatchdog.cancel();
         AppLog.d(TAG, "Releasing MultiCameraManager resources");
         
         try {
@@ -2316,6 +2347,7 @@ public class MultiCameraManager {
             }
             @Override public void onRecordingRebuildRequested(String id,String reason) { AppLog.w(TAG,"Composite recovery: "+reason); }
             @Override public void onFirstDataWritten(String id) {
+                startupWatchdog.cancel();
                 if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback!=null) {
                     hasNotifiedFirstDataWritten=true;
                     mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());

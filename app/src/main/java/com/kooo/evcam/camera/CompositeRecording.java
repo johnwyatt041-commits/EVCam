@@ -26,14 +26,16 @@ final class CompositeRecording implements AutoCloseable {
             maxHeight = Math.max(maxHeight, size.getHeight());
         }
         boolean debugEmulator = BuildConfig.DEBUG && ("ranchu".equals(Build.HARDWARE) || "goldfish".equals(Build.HARDWARE));
+        boolean e5=RecordingDeviceProfile.isE5(config.getCarModel());
         Exception failure = null;
         for (double scale : new double[]{1, .75, .5}) {
             int cellWidth = Math.max(16, ((int) (maxWidth * scale) / 16) * 16);
             int height = Math.max(16, ((int) (maxHeight * scale) / 2) * 2);
-            int width = cellWidth * cameras.size();
+            int width = e5 ? cellWidth : cellWidth * cameras.size();
             CodecVideoRecorder recorder = new CodecVideoRecorder("combined", width, height);
             try {
                 recorder.setHardwareOnly(!debugEmulator);
+                recorder.setE5Compatibility(e5);
                 recorder.setForceH264(true);
                 recorder.setFrameRate(config.getActualFrameRate(25));
                 recorder.setBitRate(config.getActualBitrate(width,height,config.getActualFrameRate(25)));
@@ -46,9 +48,9 @@ final class CompositeRecording implements AutoCloseable {
                 String path = new File(directory,timestamp+"_combined.mp4").getAbsolutePath();
                 if (recorder.prepareRecording(path) == null) throw new IllegalStateException("Composite encoder preparation failed");
                 MultiCameraCompositor compositor = new MultiCameraCompositor(recorder.getRecordSurface(),cameras,
-                        width,height,config.getActualFrameRate(25));
+                        width,height,config.getActualFrameRate(25),e5 ? 2 : cameras.size());
                 AppLog.i("CompositeRecording","Selected mosaic size="+width+"x"+height+", scale="+scale
-                        +", inputs="+cameras+", debugEmulator="+debugEmulator);
+                        +", inputs="+cameras+", e5Grid="+e5+", debugEmulator="+debugEmulator);
                 return new CompositeRecording(recorder,compositor);
             } catch (Exception e) {
                 failure=e;

@@ -384,6 +384,7 @@ public class SingleCamera {
 
     // 当前录制模式（用于调试模式区分）
     private boolean isCodecRecording = false;
+    private boolean recordingPreviewTemplate;
 
     /**
      * 设置录制Surface
@@ -403,6 +404,7 @@ public class SingleCamera {
      * @param isCodec true 表示 Codec 模式，false 表示 MediaRecorder 模式
      */
     public void setRecordSurface(Surface surface, boolean isCodec) {
+        if (this.recordSurface != surface) recordingPreviewTemplate=false;
         this.recordSurface = surface;
         this.isCodecRecording = isCodec;
         if (surface != null) {
@@ -1474,7 +1476,8 @@ public class SingleCamera {
             }
 
             AppLog.d(TAG, "Camera " + cameraId + " Creating capture request...");
-            int template = (recordSurface != null) ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW;
+            int template = (recordSurface != null && !recordingPreviewTemplate)
+                    ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW;
             CaptureRequest.Builder requestBuilder;
             try { requestBuilder = cameraDevice.createCaptureRequest(template); }
             catch (IllegalArgumentException unsupported) {
@@ -1483,7 +1486,7 @@ public class SingleCamera {
                 AppLog.w(TAG, "RECORD template unsupported; retaining PREVIEW template with recording target");
             }
             final CaptureRequest.Builder previewRequestBuilder = requestBuilder;
-            if (recordSurface != null) {
+            if (recordSurface != null && !RecordingDeviceProfile.isE5(new AppConfig(context).getCarModel())) {
                 try {
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
@@ -1496,6 +1499,8 @@ public class SingleCamera {
                 } catch (Exception e) {
                     AppLog.w(TAG, "Camera rejected optional FPS range; retaining HAL default: " + e.getMessage());
                 }
+            } else if (recordSurface != null) {
+                AppLog.i(TAG,"E5 recording source camera="+cameraId+", HAL default FPS (working baseline)");
             }
             
             // 保存请求构建器引用（用于实时更新亮度/降噪参数）
@@ -1767,28 +1772,17 @@ public class SingleCamera {
                     // 重试逻辑
                     boolean fisheyeActive = (fisheyeCorrector != null && fisheyeCorrector.isInitialized());
                     if (recordSurface != null) {
-                        // 录制中：丢弃可选 Surface 后重试
-                        // 注意：鱼眼模式下 floating/secondary 由 FisheyeCorrector 管理，
-                        // 不在 Camera2 session 中，清除它们对恢复无帮助
-                        boolean droppedOptionalSurface = false;
-                        if (!fisheyeActive && secondaryDisplaySurface != null) {
-                            secondaryDisplaySurface = null;
-                            droppedOptionalSurface = true;
-                            AppLog.w(TAG, "Retrying without secondary display surface...");
-                        }
-                        if (!fisheyeActive && !droppedOptionalSurface && mainFloatingSurface != null) {
-                            mainFloatingSurface = null;
-                            droppedOptionalSurface = true;
-                            AppLog.w(TAG, "Retrying without main floating surface...");
-                        }
-                        if (!droppedOptionalSurface) {
-                            AppLog.w(TAG, "Retrying without recording surface...");
-                            recordSurface = null;
-                        }
-                        if (backgroundHandler != null) {
+                        // Never turn a failed recording session into a successful preview-only
+                        // session, or silently discard HUD/blind-spot surfaces.
+                        recordingPreviewTemplate=true;
+                        configFailRetryCount++;
+                        AppLog.w(TAG,"Retry recording with PREVIEW template, keeping all outputs; attempt="+configFailRetryCount);
+                        if (backgroundHandler != null && configFailRetryCount<=MAX_CONFIG_FAIL_RETRIES) {
                             backgroundHandler.postDelayed(() -> {
                                 if (cameraDevice != null) createCameraPreviewSession();
                             }, 500);
+                        } else if (callback!=null) {
+                            callback.onCameraError(cameraId,-3);
                         }
                     } else {
                         configFailRetryCount++;

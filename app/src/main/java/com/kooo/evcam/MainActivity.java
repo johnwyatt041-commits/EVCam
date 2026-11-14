@@ -2292,6 +2292,7 @@ public class MainActivity extends AppCompatActivity {
             // 后台已初始化，复用实例并绑定 TextureView
             AppLog.d(TAG, "复用后台已初始化的摄像头管理器，绑定 TextureView");
             cameraManager = existingManager;
+            cameraManager.setRecordingStartupFailureCallback(this::onRecordingStartupFailure);
             cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
 
             // --- 补全后台初始化时缺失的回调 ---
@@ -2434,6 +2435,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         cameraManager = new MultiCameraManager(this);
+        cameraManager.setRecordingStartupFailureCallback(this::onRecordingStartupFailure);
         cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
         cameraManager.setMaxOpenCameras(configuredCameraCount);
         // 注册到全局 Holder
@@ -3895,6 +3897,11 @@ public class MainActivity extends AppCompatActivity {
             AppLog.d(TAG, "用户手动开始录制，自动录制检查已启用");
             startRecording();
         }
+    }
+
+    private void onRecordingStartupFailure(String message) {
+        stopRecording();
+        Toast.makeText(this,message,Toast.LENGTH_LONG).show();
     }
 
     private void startRecording() {

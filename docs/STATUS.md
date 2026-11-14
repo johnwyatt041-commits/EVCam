@@ -2,6 +2,18 @@
 
 更新：2026-11-14，Asia/Hong_Kong。后续每个任务结束时更新；读取时同时执行 `git status --short`、`git log -5 --oneline`，避免文档落后于代码。
 
+## E5 等待录制修正（2026-11-14）
+
+- 用户实车反馈 `11140958` A/B 均停在等待，没有额外提示。**这两个包不能视为实车可用基线**。当前分支 `codex/e5-recording-startup-fix`，候选修正版 `1.6.6-test-11141103`。
+- 原作者当前 master 与原始 `0876b97` 相同；实际自动模式为 Codec，不能根据历史 README 误认 E5 当前用 MediaRecorder。重新检查 Smartcam 初始化；没有复制代码。
+- 用户新片关闭预览：HEVC 1280×800，1477 帧/60.1195秒=24.5677fps，p95间隔40.0111ms，3次>100ms，无PTS回退。原片/截图仅本地保存，不随源码或 Release 上传。
+- E5 回到 HAL 默认 FPS、旧版编码 profile 优先，不加新 operating-rate/priority/VBR/max-B 参数；修正会话失败删除录像/HUD/补盲输出而继续预览的假成功、启动回调登记顺序，以及没有终止等待的启动错误反馈。
+- 20 秒首次写入看门狗，超时停止并提示保存日志，包含输入/GL提交/编码/写入计数；不会用补帧或“请求成功”假定录制成功。
+- B 默认原生画布 1280×800 的 2×2 三格，每格约640×400，右下留黑；不再首先尝试超宽3840×800，清晰度代价明确说明，飞书四路不变。大屏侧栏保留。
+- 新增模拟器实际 Camera2→管理器→公共 DCIM→首次写入/停止完成回归，补足此前只测试合成输入和私有目录的缺口；B 三色合成/多次分段/PTS/尾部/GPU 水印通过。没有现场失败日志，**不能确认唯一实车根因，也不能宣称已实车修复**。
+- 详细证据、限制与试录步骤见 [E5 启动修正](E5_STARTUP_FIX_20261114.md)，任务 `docs/tasks/e5-recording-startup.md`。
+- 最终 `11141103` 每版 78 项 JVM 测试（总计 156）及 Debug/Release/必要 Lint 通过，日志 `work/verification/build-20261114-110338-526.log`。A/B 实际 GL 分段、Camera2 公共目录首写和水印 GPU 测试各 3 项通过，证据归档 `work/e5-startup/`。模拟器的软件 H.264/单路 Camera2 不代表 E5 多路硬件验证。
+
 ## 最新 GitHub 交付（2026-11-14）
 
 - 用户明确要求“传到 github 不然我下载不了”，已授权将当前两个大屏 UI APK 和对应源码上传至此前确认的用户 fork `johnwyatt041-commits/EVCam`。此前自动审批拒绝属于历史状态，本次上传成功。
@@ -40,7 +52,7 @@
 | 项目 | 状态 |
 | --- | --- |
 | 主目录 | `E:\GPT\EVCam` |
-| 当前分支 | `codex/large-screen-navigation` |
+| 当前分支 | `codex/e5-recording-startup-fix` |
 | 已发布应用提交 | `c9c493ef2eac5d0956677c3b3835f0a67cb31ccb` |
 | 性能/HUD 前一基线 | `273c411f2eba37bd2ec06b21b7b677d0e8b58baf` |
 | 上游基线 | `0876b976bff554ef6bad2c65513cf0149f451d81` |

@@ -59,6 +59,8 @@ public class CodecVideoRecorder {
     private int keyFrameIntervalSeconds = I_FRAME_INTERVAL;
     public void setKeyFrameIntervalSeconds(int seconds) { keyFrameIntervalSeconds = Math.max(1, seconds); }
     private boolean hardwareOnly;
+    private boolean e5Compatibility;
+    public void setE5Compatibility(boolean enabled) { e5Compatibility = enabled; }
     public void setHardwareOnly(boolean required) { hardwareOnly = required; }
     
     // 画质等级：0=低, 1=中, 2=高, 3=最高
@@ -865,7 +867,8 @@ public class CodecVideoRecorder {
         int hevcBitrate = calculateOptimalBitrate(MIME_TYPE_HEVC);
 
         RecordingEncoderSelector.Result selected = RecordingEncoderSelector.create(width, height,
-                effectiveFrameRate, avcBitrate, hevcBitrate, forceH264, keyFrameIntervalSeconds, hardwareOnly);
+                effectiveFrameRate, avcBitrate, hevcBitrate, forceH264, keyFrameIntervalSeconds, hardwareOnly,
+                e5Compatibility);
         encoder = selected.codec;
         mimeType = selected.mime;
         outputFormat = null;
@@ -1057,6 +1060,14 @@ public class CodecVideoRecorder {
         AppLog.i(TAG, "Recording codec poll camera=" + cameraId + ", avgUs="
                 + (codecPolls == 0 ? 0 : totalCodecPollUs / codecPolls) + ", maxUs=" + maxCodecPollUs);
         if (eglEncoder != null) AppLog.i(TAG, "Recording input camera=" + cameraId + ", " + eglEncoder.frameStats());
+    }
+
+    public String startupDiagnostics() {
+        AsyncMuxerWriter writer = muxer;
+        return "camera=" + cameraId + ", started=" + isRecording.get() + ", inputCallbacks=" + inputFrameCallbacks
+                + ", submitted=" + recordedFrameCount + ", encoded=" + encodedOutputFrameCount
+                + ", muxerStarted=" + muxerStarted + ", written=" + (writer == null ? 0 : writer.getWrittenSamples())
+                + ", healthy=" + encoderHealthy + ", e5Compatibility=" + e5Compatibility;
     }
 
     /**

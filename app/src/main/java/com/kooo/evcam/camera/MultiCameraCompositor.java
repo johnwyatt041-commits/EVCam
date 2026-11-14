@@ -34,6 +34,7 @@ final class MultiCameraCompositor implements AutoCloseable {
     private final HandlerThread thread = new HandlerThread("RecordingCompositor");
     private final Handler handler;
     private final int width, height;
+    private final int columns, rows;
     private final long intervalNs;
     private final FloatBuffer positions = floats(new float[]{-1,-1,1,-1,-1,1,1,1});
     private final FloatBuffer uv = floats(new float[]{0,0,1,0,0,1,1,1});
@@ -48,7 +49,12 @@ final class MultiCameraCompositor implements AutoCloseable {
 
     MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps)
             throws Exception {
+        this(output,sources,width,height,fps,sources.size());
+    }
+    MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps,int columns)
+            throws Exception {
         this.width = width; this.height = height; intervalNs = 1_000_000_000L / fps;
+        this.columns=Math.max(1,columns); this.rows=(sources.size()+this.columns-1)/this.columns;
         for (String name : new String[]{"left", "back", "right", "front"}) {
             if (sources.containsKey(name)) inputs.put(name, new Input(name, sources.get(name)));
         }
@@ -129,12 +135,14 @@ final class MultiCameraCompositor implements AutoCloseable {
             GLES20.glEnableVertexAttribArray(positionLocation); GLES20.glEnableVertexAttribArray(uvLocation);
             GLES20.glVertexAttribPointer(positionLocation,2,GLES20.GL_FLOAT,false,0,positions);
             GLES20.glVertexAttribPointer(uvLocation,2,GLES20.GL_FLOAT,false,0,uv);
-            int cellWidth=width/inputs.size(), index=0;
+            int cellWidth=width/columns, cellHeight=height/rows, index=0;
             for (Input input : inputs.values()) {
                 if (input.lastLatch>0 && now-input.lastLatch<1_500_000_000L) {
-                    float scale=Math.min((float)cellWidth/input.size.getWidth(),(float)height/input.size.getHeight());
+                    float scale=Math.min((float)cellWidth/input.size.getWidth(),(float)cellHeight/input.size.getHeight());
                     int w=Math.max(1,Math.round(input.size.getWidth()*scale)), h=Math.max(1,Math.round(input.size.getHeight()*scale));
-                    GLES20.glViewport(index*cellWidth+(cellWidth-w)/2,(height-h)/2,w,h);
+                    int x=(index%columns)*cellWidth+(cellWidth-w)/2;
+                    int y=height-(index/columns+1)*cellHeight+(cellHeight-h)/2;
+                    GLES20.glViewport(x,y,w,h);
                     GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,input.id);
                     GLES20.glUniformMatrix4fv(matrixLocation,1,false,input.matrix,0);
                     GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP,0,4);

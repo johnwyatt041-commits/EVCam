@@ -46,6 +46,7 @@ public class RecordingPipelineIntegrationTest {
         try {
             if (BuildConfig.SMARTCAM_COMPOSITE) {
                 AppConfig config=new AppConfig(context);
+                config.setCarModel(AppConfig.CAR_MODEL_GALAXY_E5);
                 config.setTimestampWatermarkEnabled(false);
                 config.setVehicleStatusWatermarkEnabled(false);
                 composite=CompositeRecording.prepare(sizes,directory,timestamp,config,1200,callback,null);
@@ -55,6 +56,7 @@ public class RecordingPipelineIntegrationTest {
                 for (String name : sizes.keySet()) {
                     CodecVideoRecorder recorder=new CodecVideoRecorder(name,192,128);
                     recorder.setBitRate(600000); recorder.setFrameRate(25); recorder.setSegmentDuration(1200);
+                    recorder.setE5Compatibility(true);
                     recorder.setForceH264(true); recorder.setCallback(callback);
                     assertNotNull(recorder.prepareRecording(new File(directory,timestamp+"_"+name+".mp4").getAbsolutePath()));
                     recorders.add(recorder); surfaces.put(name,recorder.getRecordSurface());
@@ -111,8 +113,8 @@ public class RecordingPipelineIntegrationTest {
                 Bitmap image=retriever.getFrameAtTime(500000,MediaMetadataRetriever.OPTION_CLOSEST);
                 assertNotNull(image);
                 // Left/rear/right are independent source textures, not three copies of one camera.
-                int y=image.getHeight()*3/4, w=image.getWidth();
-                int left=image.getPixel(w/6,y), back=image.getPixel(w/2,y), right=image.getPixel(w*5/6,y);
+                int h=image.getHeight(), w=image.getWidth();
+                int left=image.getPixel(w/4,h/4), back=image.getPixel(w*3/4,h/4), right=image.getPixel(w/4,h*3/4);
                 assertTrue(Color.red(left)>180 && Color.green(left)<90 && Color.blue(left)<90);
                 assertTrue(Color.green(back)>180 && Color.red(back)<90 && Color.blue(back)<90);
                 assertTrue(Color.blue(right)>180 && Color.red(right)<90 && Color.green(right)<90);
