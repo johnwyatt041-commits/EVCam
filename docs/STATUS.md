@@ -1,6 +1,6 @@
 # 项目进度
 
-最后更新/核对：2026-11-15 00:25:19 +08:00（Asia/Hong_Kong）
+最后更新/核对：2026-11-15 00:26:46 +08:00（Asia/Hong_Kong）
 维护：Codex / ab-test-preoptimization。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
@@ -10,7 +10,7 @@
 | 项目/设备 | E:\GPT\EVCam；银河E5，2560×1600 |
 | 分支 | `codex/e5-recording-startup-fix`；文档HEAD以`git log`为准 |
 | 最新APK | `1.6.6-test-11150014`，A/B同包名同签名，停录像后顺序覆盖安装 |
-| APK源码 | 本次优化源码提交见Git及`outputs/EVCam-E5-Preoptimization-1.6.6-test-11150014-manifest.json` |
+| APK源码 | `5f5ce4626a8f7060cc96cc3758150c497eca6257`；manifest已关联，后续文档提交不改变APK |
 | 本地交付 | `outputs/EVCam-E5-{A-Independent,B-Composite}-1.6.6-test-11150014-release.apk`；SHA、R8映射与说明同目录 |
 | GitHub | 新优化包尚未上传；[旧11141103测试发布](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix)保留 |
 | 验证 | 每版79项JVM、Debug/Release R8、5项模拟器录像/扫码、1项R8启动冒烟通过；精确历史基线Lint无新增错误，完整扫描仍有19项既有错误 |
