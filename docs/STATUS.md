@@ -1,6 +1,6 @@
 # 项目进度
 
-最后更新/核对：2026-11-14 19:08:17 +08:00（Asia/Hong_Kong）
+最后更新/核对：2026-11-14 19:17:43 +08:00（Asia/Hong_Kong）
 维护：Codex / directory-hygiene。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
@@ -30,7 +30,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-14 19:08:17 +08:00 | 目录 | 补现有索引/强制收尾清理，删27个临时文件约236MiB，117个保留文件SHA不变 | [任务](tasks/directory-hygiene.md)
+- 2026-11-14 19:17:43 +08:00 | 目录 | 已清27个临时文件、117个保留文件SHA不变；补Smartcam参考/分析结论/应用实现的分区落点 | [任务](tasks/directory-hygiene.md)
 - 2026-11-14 18:53:57 +08:00 | 规范 | 禁止私建平行规则；现有CLAUDE/Cursor已转引根AGENTS，入口/链接/篇幅检查通过 | [任务](tasks/progress-documentation-rules.md)
 - 2026-11-14 18:43:23 +08:00 | 规范 | 强制同步/时间戳生效；总览142→43行，历史保留，篇幅/链接检查通过 | [任务](tasks/progress-documentation-rules.md)
 - 2026-11-14（时刻未记录） | 交接 | Smartcam原APK已复制进项目并验SHA，反编译摘录可本机共享 | [索引](AI_HANDOFF.md)
