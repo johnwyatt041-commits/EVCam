@@ -273,7 +273,6 @@ public class FileTransferManager {
         
         for (File file : files) {
             long fileAge = now - file.lastModified();
-            if (com.kooo.evcam.storage.RecordingFiles.isPendingVideoName(file.getName())) continue;
             if (fileAge > TEMP_FILE_EXPIRE_MS) {
                 long fileSize = file.length();
                 if (file.delete()) {

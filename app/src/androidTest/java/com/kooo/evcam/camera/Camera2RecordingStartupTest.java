@@ -44,7 +44,6 @@ public class Camera2RecordingStartupTest {
             File file=new File(StorageHelper.getRecordingDir(context),stamp+"_right.mp4");
             assertTrue("No finalized Camera2 video",file.isFile() && file.length()>1024);
             assertFalse(new File(file+".pending").exists());
-            assertFalse(com.kooo.evcam.storage.RecordingFiles.pendingFileFor(file).exists());
         } finally { manager.release(); }
     }
 }

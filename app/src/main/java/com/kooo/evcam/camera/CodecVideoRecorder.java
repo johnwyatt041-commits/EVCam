@@ -954,8 +954,8 @@ public class CodecVideoRecorder {
     private void createMuxer(String filePath) throws IOException {
         muxer = new AsyncMuxerWriter(filePath, error -> {
             encoderHealthy = false;
-            AppLog.e(TAG, "Camera " + cameraId + " Video output failed; unfinished video is not published", error);
-            if (callback != null) callback.onOutputError(cameraId, "Video writer failed: " + error.getMessage());
+            AppLog.e(TAG, "Camera " + cameraId + " Writer failed; incomplete video remains .pending", error);
+            if (callback != null) callback.onRecordError(cameraId, "Video writer failed: " + error.getMessage());
         });
         videoTrackIndex = -1;
         muxerStarted = false;
@@ -1414,7 +1414,7 @@ public class CodecVideoRecorder {
 
         fileSizeCheckRunnable = () -> {
             if (!stopRequested && isRecording.get() && currentFilePath != null) {
-                File file = com.kooo.evcam.storage.RecordingFiles.pendingFileFor(new File(currentFilePath));
+                File file = new File(currentFilePath + ".pending");
                 if (!file.exists()) file = new File(currentFilePath);
                 long currentSize = file.exists() ? file.length() : 0;
                 long sizeIncrease = currentSize - lastFileSize;

@@ -41,7 +41,7 @@ public class MediaFileFinder {
         File tempDir = new File(context.getCacheDir(), FileTransferManager.TEMP_VIDEO_DIR);
         if (tempDir.exists() && tempDir.isDirectory()) {
             File[] tempFiles = tempDir.listFiles((dir, name) -> 
-                com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(name) &&
+                name.endsWith(".mp4") && 
                 name.startsWith(timestamp + "_") && 
                 new File(dir, name).length() > 0
             );
@@ -60,7 +60,7 @@ public class MediaFileFinder {
         }
         
         File[] files = videoDir.listFiles((dir, name) -> 
-            name.startsWith(timestamp) && com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(name)
+            name.startsWith(timestamp) && name.endsWith(".mp4")
         );
         
         if (files == null || files.length == 0) {
@@ -91,7 +91,7 @@ public class MediaFileFinder {
         File tempDir = new File(context.getCacheDir(), FileTransferManager.TEMP_VIDEO_DIR);
         if (tempDir.exists() && tempDir.isDirectory()) {
             File[] tempFiles = tempDir.listFiles((dir, name) -> {
-                if (!com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(name) || new File(dir, name).length() == 0) {
+                if (!name.endsWith(".mp4") || new File(dir, name).length() == 0) {
                     return false;
                 }
                 for (String ts : timestamps) {
@@ -112,7 +112,7 @@ public class MediaFileFinder {
         File videoDir = StorageHelper.getVideoDir(context);
         if (videoDir != null && videoDir.exists()) {
             File[] files = videoDir.listFiles((dir, name) -> {
-                if (!com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(name)) {
+                if (!name.endsWith(".mp4")) {
                     return false;
                 }
                 for (String ts : timestamps) {

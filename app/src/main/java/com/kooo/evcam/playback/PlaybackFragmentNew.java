@@ -616,7 +616,7 @@ public class PlaybackFragmentNew extends Fragment {
             return;
         }
 
-        File[] files = saveDir.listFiles((dir, name) -> com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(name));
+        File[] files = saveDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".mp4"));
         if (files == null || files.length == 0) {
             showEmptyState();
             return;

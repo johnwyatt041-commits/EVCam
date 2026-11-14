@@ -87,7 +87,6 @@ public class MultiCameraManager {
     private Runnable pendingRecordingStart = null;
     private android.os.Handler mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
     private java.util.function.Consumer<String> recordingStartupFailureCallback;
-    private final java.util.concurrent.atomic.AtomicLong recordingRequestId = new java.util.concurrent.atomic.AtomicLong();
     private final RecordingStartupWatchdog startupWatchdog = new RecordingStartupWatchdog(mainHandler,20000,
             this::recordingStartupDiagnostics,this::failRecordingStartup);
 
@@ -111,16 +110,6 @@ public class MultiCameraManager {
         stopRecording(false);
         if (recordingStartupFailureCallback!=null) recordingStartupFailureCallback.accept(
                 "录像启动超时，未收到有效视频数据，请在设置中保存日志");
-    }
-
-    private void onRecordingOutputFailure(long requestId, String cameraId, String error) {
-        mainHandler.post(() -> {
-            if (requestId != recordingRequestId.get() || stoppingRecording) return;
-            AppLog.e(TAG, "Recording file output failed for " + cameraId + ": " + error);
-            stopRecording(false);
-            if (recordingStartupFailureCallback != null) recordingStartupFailureCallback.accept(
-                    "录像文件写入失败，请检查存储权限和存储位置，并在设置中保存日志");
-        });
     }
     private Runnable sessionTimeoutRunnable = null;
     private final Object sessionLock = new Object();  // 用于同步 session 配置计数
@@ -1209,7 +1198,6 @@ public class MultiCameraManager {
      * @param enabledCameras 要录制的摄像头位置集合，为 null 时录制所有摄像头
      */
     private boolean startCodecRecording(String timestamp, Set<String> enabledCameras) {
-        final long requestId = recordingRequestId.incrementAndGet();
         AppLog.d(TAG, "Starting CODEC recording with timestamp: " + timestamp);
 
         // 重置首次写入通知标志（每次录制只通知一次）
@@ -1295,7 +1283,7 @@ public class MultiCameraManager {
                     sourceSizes.put(key,camera.getPreviewSize());
                 }
                 compositeRecording = CompositeRecording.prepare(sourceSizes,saveDir,timestamp,appConfig,
-                        segmentDurationMs,compositeCallback(requestId),segmentTimestampProvider);
+                        segmentDurationMs,compositeCallback(),segmentTimestampProvider);
                 registerCodecRecorder("combined",compositeRecording.recorder);
                 for (String key : keys) {
                     SingleCamera camera = cameras.get(key);
@@ -1386,10 +1374,6 @@ public class MultiCameraManager {
                     AppLog.e(TAG, "Codec recording error for camera " + cameraId + ": " + error);
                 }
 
-                @Override public void onOutputError(String cameraId, String error) {
-                    onRecordingOutputFailure(requestId, cameraId, error);
-                }
-
                 @Override
                 public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {
                     AppLog.d(TAG, "Codec prepare segment switch for camera " + cameraId + " (current segment: " + currentSegmentIndex + ")");
@@ -1437,7 +1421,6 @@ public class MultiCameraManager {
 
                 @Override
                 public void onFirstDataWritten(String cameraId) {
-                    if (requestId != recordingRequestId.get()) return;
                     AppLog.d(TAG, "Codec first data written for camera " + cameraId);
                     startupWatchdog.cancel();
                     // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
@@ -1491,7 +1474,7 @@ public class MultiCameraManager {
         }
 
         final List<String> recordingKeys = new ArrayList<>(keys);
-        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false, requestId);
+        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false);
         for (String key : keys) {
             SingleCamera camera = cameras.get(key);
             if (camera != null) {
@@ -1518,8 +1501,7 @@ public class MultiCameraManager {
         return true;
     }
 
-    private void executeCodecRecordingStart(List<String> keys, int stableAttempt, boolean forcedReopen, long requestId) {
-        if (requestId != recordingRequestId.get() || stoppingRecording) return;
+    private void executeCodecRecordingStart(List<String> keys, int stableAttempt, boolean forcedReopen) {
         AppLog.d(TAG, "Attempting to start codec recording...");
         if (isRecording) {
             AppLog.w(TAG, "Codec recording already active, skipping duplicate start");
@@ -1543,7 +1525,7 @@ public class MultiCameraManager {
             if (stableAttempt < MAX_STABLE_WAIT_ATTEMPTS) {
                 AppLog.w(TAG, "Waiting for stable frames before codec recording, attempt " + (stableAttempt + 1) +
                         "/" + MAX_STABLE_WAIT_ATTEMPTS + ", unstable=" + unstable);
-                mainHandler.postDelayed(() -> executeCodecRecordingStart(keys, stableAttempt + 1, forcedReopen, requestId), STABLE_WAIT_INTERVAL_MS);
+                mainHandler.postDelayed(() -> executeCodecRecordingStart(keys, stableAttempt + 1, forcedReopen), STABLE_WAIT_INTERVAL_MS);
                 return;
             }
             if (!forcedReopen) {
@@ -1551,7 +1533,6 @@ public class MultiCameraManager {
                 forceReopenAllCameras();
                 // 延迟等待摄像头重新打开和会话配置完成
                 mainHandler.postDelayed(() -> {
-                    if (requestId != recordingRequestId.get() || stoppingRecording) return;
                     // 检查哪些摄像头实际可用且会话已配置
                     List<String> availableKeys = new ArrayList<>();
                     for (String key : keys) {
@@ -1563,7 +1544,7 @@ public class MultiCameraManager {
                     }
                     AppLog.d(TAG, "After force reopen, available cameras with ready session: " + availableKeys);
                     if (!availableKeys.isEmpty()) {
-                        executeCodecRecordingStart(availableKeys, 0, true, requestId);
+                        executeCodecRecordingStart(availableKeys, 0, true);
                     } else {
                         // 没有摄像头会话就绪，尝试只为实际打开的摄像头重新准备录制
                         AppLog.w(TAG, "No camera sessions ready after force reopen, re-preparing for available cameras only");
@@ -1578,7 +1559,7 @@ public class MultiCameraManager {
                         AppLog.d(TAG, "Opened cameras: " + openedCameras);
                         if (!openedCameras.isEmpty()) {
                             // 重新准备只为这些摄像头
-                            reprepareCodecRecordingForCameras(openedCameras, requestId);
+                            reprepareCodecRecordingForCameras(openedCameras);
                         } else {
                             AppLog.e(TAG, "No cameras opened after force reopen");
                             isRecording = false;
@@ -1664,12 +1645,11 @@ public class MultiCameraManager {
      * 重新准备 Codec 录制（只为指定的摄像头）
      * 用于强制重新打开后，只为实际可用的摄像头准备录制
      */
-    private void reprepareCodecRecordingForCameras(List<String> cameraKeys, long requestId) {
-        if (requestId != recordingRequestId.get() || stoppingRecording) return;
+    private void reprepareCodecRecordingForCameras(List<String> cameraKeys) {
         if (compositeRecording != null) {
             synchronized (sessionLock) {
                 sessionConfiguredCount=0; expectedSessionCount=cameraKeys.size(); cameraSessionReady.clear();
-                pendingRecordingStart=() -> executeCodecRecordingStart(cameraKeys,0,true,requestId);
+                pendingRecordingStart=() -> executeCodecRecordingStart(cameraKeys,0,true);
             }
             for (String key : cameraKeys) {
                 SingleCamera camera=cameras.get(key);
@@ -1772,7 +1752,7 @@ public class MultiCameraManager {
 
         // 设置待处理的录制启动任务
         final List<String> recordingKeys = new ArrayList<>(cameraKeys);
-        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, true, requestId);
+        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, true);
 
         // 设置超时机制
         sessionTimeoutRunnable = () -> {
@@ -1804,7 +1784,6 @@ public class MultiCameraManager {
     }
 
     public void stopRecording(boolean skipRelayTransfer, Runnable onStopped) {
-        recordingRequestId.incrementAndGet();
         startupWatchdog.cancel();
         synchronized (this) {
             if (onStopped != null) recordingStoppedCallbacks.add(onStopped);
@@ -2250,7 +2229,6 @@ public class MultiCameraManager {
      * 添加完善的清理逻辑和异常保护
      */
     public void release() {
-        recordingRequestId.incrementAndGet();
         startupWatchdog.cancel();
         AppLog.d(TAG, "Releasing MultiCameraManager resources");
         
@@ -2352,12 +2330,11 @@ public class MultiCameraManager {
         }
     }
 
-    private RecordCallback compositeCallback(long requestId) {
+    private RecordCallback compositeCallback() {
         return new RecordCallback() {
             @Override public void onRecordStart(String id) {}
             @Override public void onRecordStop(String id) {}
             @Override public void onRecordError(String id,String error) { AppLog.e(TAG,"Composite: "+error); }
-            @Override public void onOutputError(String id,String error) { onRecordingOutputFailure(requestId,id,error); }
             @Override public void onPrepareSegmentSwitch(String id,int index) {}
             @Override public void onSegmentSwitch(String id,int index,String path) {
                 if (useRelayWrite && finalSaveDir!=null && path!=null) scheduleRelayTransfer(path);
@@ -2370,7 +2347,6 @@ public class MultiCameraManager {
             }
             @Override public void onRecordingRebuildRequested(String id,String reason) { AppLog.w(TAG,"Composite recovery: "+reason); }
             @Override public void onFirstDataWritten(String id) {
-                if (requestId != recordingRequestId.get()) return;
                 startupWatchdog.cancel();
                 if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback!=null) {
                     hasNotifiedFirstDataWritten=true;

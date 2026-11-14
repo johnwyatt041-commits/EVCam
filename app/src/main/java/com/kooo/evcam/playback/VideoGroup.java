@@ -80,7 +80,7 @@ public class VideoGroup {
      * @return 位置，如 "front"
      */
     public static String extractPosition(String fileName) {
-        if (!com.kooo.evcam.storage.RecordingFiles.isCompletedVideoName(fileName)) return null;
+        if (!fileName.toLowerCase(Locale.ROOT).endsWith(".mp4")) return null;
         // 移除扩展名
         String nameWithoutExt = fileName;
         int dotIndex = fileName.lastIndexOf('.');

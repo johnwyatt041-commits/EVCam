@@ -1,10 +1,10 @@
 # E5 A/B 等待录制修正
 
-最后更新/核对：2026-11-15 02:30:34 +08:00（历史结果保留，新失败转存储修正任务）
+最后更新/核对：2026-11-15 02:41:26 +08:00（历史结果保留，新权限结论见撤回任务）
 任务/执行者：e5-recording-startup / Codex 当前对话
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：历史候选记录保留；11150014新实车失败已定位公共DCIM暂存文件EPERM，0220候选待E5复测。
-当前结论：本页11141103历史离线结果不变；新日志/受限存储复现/修正与验证见[recording-storage-eperm](recording-storage-eperm.md)。不再笼统称“尚无新实车日志”。
+状态：本页11141103历史记录保留；后续11150014超时已由用户确认是车机权限不足。
+当前结论：用户要求撤销2082be7存储改造，现恢复11150014；新日志/用户更正及撤回见[recording-storage-eperm](recording-storage-eperm.md)，不据旧历史否定最新权限结论。
 
 用户反馈最新 `11140958` A/B 均不能开始，无其他错误提示，要求核查原作者与 Smartcam 并提供关闭预览旧片。串行分支 `codex/e5-recording-startup-fix`，基线 `112f2a0`。用户原 ZIP 留在 `.codex-attachments/`，仅作为数据读取，不加入 Git 或上传。
 

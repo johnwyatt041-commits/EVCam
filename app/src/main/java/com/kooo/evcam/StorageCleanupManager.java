@@ -190,7 +190,7 @@ public class StorageCleanupManager {
             return result;
         }
         
-        File[] files = directory.listFiles(com.kooo.evcam.storage.RecordingFiles::canAutomaticallyDelete);
+        File[] files = directory.listFiles(File::isFile);
         if (files == null || files.length == 0) {
             return result;
         }
@@ -271,7 +271,7 @@ public class StorageCleanupManager {
         }
         
         // 获取目录中所有文件（不筛选格式）
-        File[] files = directory.listFiles(com.kooo.evcam.storage.RecordingFiles::canAutomaticallyDelete);
+        File[] files = directory.listFiles(File::isFile);
         
         if (files == null || files.length == 0) {
             AppLog.d(TAG, typeName + "目录为空");

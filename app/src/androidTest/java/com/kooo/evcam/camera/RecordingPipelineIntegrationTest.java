@@ -35,9 +35,7 @@ public class RecordingPipelineIntegrationTest {
 
     @Test public void recordsRealFilesAcrossKeyframeSegmentsAndFinalizesBeforeReturning() throws Exception {
         Context context=InstrumentationRegistry.getInstrumentation().getTargetContext();
-        File directory=new File(android.os.Environment.getExternalStoragePublicDirectory(
-                android.os.Environment.DIRECTORY_DCIM),"EVCam_ScopedRecording_"+BuildConfig.FLAVOR);
-        if (android.os.Build.VERSION.SDK_INT >= 30) assertFalse(android.os.Environment.isExternalStorageManager());
+        File directory=new File(context.getFilesDir(),"recording-ab-"+BuildConfig.FLAVOR);
         assertTrue(directory.isDirectory() || directory.mkdirs());
         String timestamp=new SimpleDateFormat("yyyyMMdd_HHmmss",Locale.US).format(new Date());
         Map<String,Size> sizes=new LinkedHashMap<>();
@@ -119,7 +117,6 @@ public class RecordingPipelineIntegrationTest {
                 }
                 assertTrue("Empty video "+file,count>0);
                 assertFalse(new File(file.getAbsolutePath()+".pending").exists());
-                assertFalse(com.kooo.evcam.storage.RecordingFiles.pendingFileFor(file).exists());
             } finally { extractor.release(); }
         }
         if (BuildConfig.SMARTCAM_COMPOSITE) {
