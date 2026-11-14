@@ -65,6 +65,12 @@ public final class AppShellController {
         for (int i = 0; i < buttons.length; i++) {
             final int id = destinations[i];
             TextView item = shell.findViewById(buttons[i]);
+            int iconSize = activity.getResources().getDimensionPixelSize(R.dimen.ui_nav_icon_size);
+            android.graphics.drawable.Drawable[] icons = item.getCompoundDrawables();
+            for (android.graphics.drawable.Drawable icon : icons) {
+                if (icon != null) icon.setBounds(0, 0, iconSize, iconSize);
+            }
+            item.setCompoundDrawables(icons[0], icons[1], icons[2], icons[3]);
             item.setCompoundDrawableTintList(ContextCompat.getColorStateList(activity, R.color.ui_nav_text));
             item.setOnClickListener(v -> navigate.accept(id));
         }

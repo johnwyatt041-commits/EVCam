@@ -24,6 +24,8 @@
 
 ## 新增的本地待发布版本
 
+**最新：大屏侧栏优化 `1.6.6-test-11140958`**，分支 `codex/large-screen-navigation`。按用户 2560×1600 屏幕放大侧栏按钮/图标/文字，适配不同 DPI；A/B 两版同步。交付说明 `outputs/EVCam-LargeNav-notes.md`，完整状态见 `docs/STATUS.md`。
+
 当前交付 **录像整改 A/B `1.6.6-test-11140403`**，分支 `codex/recording-ab-comparison`。A 保留日常三路独立文件，B 参考 Smartcam 思路合成单个 H.264 视频；两版同包名顺序覆盖安装，飞书四路都仍独立。详见 [对照试录说明](docs/RECORDING_AB_TEST.md) 和 `docs/STATUS.md`；旧 GitHub 发布尚未更新。
 
 - A：`outputs/EVCam-A-Independent-1.6.6-test-11140403.apk`；B：`outputs/EVCam-B-Composite-1.6.6-test-11140403.apk`。

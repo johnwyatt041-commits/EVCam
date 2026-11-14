@@ -2,6 +2,14 @@
 
 更新：2026-11-14，Asia/Hong_Kong。后续每个任务结束时更新；读取时同时执行 `git status --short`、`git log -5 --oneline`，避免文档落后于代码。
 
+## 大屏侧栏优化（2026-11-14）
+
+- 用户屏幕 2560×1600，反馈侧边选项太小。分支 `codex/large-screen-navigation`，基于上述 A/B 交付后提交 `dba5808`，版本 `1.6.6-test-11140958`。
+- 同步放大 A/B 的侧栏、整块按钮、文字、图标与间距；按屏幕最小宽度/可用高度使用资源分档，大屏文字 22–30sp、图标 36–52dp、按钮最小高 88–144dp。高度可随字体增长，小屏保留滚动。录像、HUD 与补盲实现未改。
+- 146 项现有 JVM 测试（每版 73）及两版 Debug/Release/必要 Lint 通过，日志 `work/verification/build-20261114-095604-453.log`。
+- 2560×1600 模拟器检查 160/240/320dpi，六项完整可见；240dpi 六项按钮边缘点击切换正确。深浅色与 1.3 倍系统字体通过，紧凑屏可滚动到设置，截图已人工查看。实际按钮分别 176×144、240×170、272×187px。证据 `work/large-navigation/`，任务说明 `docs/tasks/large-screen-navigation.md`。
+- 仍需用户在物理 E5 上确认触控手感；屏幕分辨率不等于逻辑 dp，未读取车机真实 DPI。交付 APK/源码/哈希见 `outputs/EVCam-LargeNav-notes.md`。本次仅本地交付，没有重试此前被拒绝的 GitHub 上传。
+
 ## 本地录像整改 A/B（2026-11-14）
 
 - 分支 `codex/recording-ab-comparison`，版本 `1.6.6-test-11140403`。A 保留 GL/MediaCodec 多路独立文件；B 日常三路横排合成、硬件 H.264 单文件，飞书四路仍独立。两版同包名同签名，顺序覆盖安装，桌面名称区分。
@@ -21,7 +29,7 @@
 | 项目 | 状态 |
 | --- | --- |
 | 主目录 | `E:\GPT\EVCam` |
-| 当前分支 | `codex/recording-ab-comparison` |
+| 当前分支 | `codex/large-screen-navigation` |
 | 已发布应用提交 | `c9c493ef2eac5d0956677c3b3835f0a67cb31ccb` |
 | 性能/HUD 前一基线 | `273c411f2eba37bd2ec06b21b7b677d0e8b58baf` |
 | 上游基线 | `0876b976bff554ef6bad2c65513cf0149f451d81` |

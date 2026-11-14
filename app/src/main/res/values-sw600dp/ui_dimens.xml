@@ -1,1 +1,10 @@
-<resources><dimen name="ui_rail_width">96dp</dimen><dimen name="ui_page_padding">24dp</dimen></resources>
+<resources>
+    <dimen name="ui_rail_width">160dp</dimen>
+    <dimen name="ui_page_padding">24dp</dimen>
+    <dimen name="ui_rail_padding">12dp</dimen>
+    <dimen name="ui_rail_brand_height">56dp</dimen>
+    <dimen name="ui_nav_height">88dp</dimen>
+    <dimen name="ui_nav_gap">8dp</dimen>
+    <dimen name="ui_nav_text_size">22sp</dimen>
+    <dimen name="ui_nav_icon_size">36dp</dimen>
+</resources>

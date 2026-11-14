@@ -11,10 +11,12 @@
     <style
         name="Widget.EVCam.Navigation"
         parent="">
-        <item name="android:layout_width">match_parent</item><item name="android:layout_height">64dp</item>
-        <item name="android:layout_marginBottom">6dp</item><item name="android:padding">8dp</item>
-        <item name="android:gravity">center</item><item name="android:textSize">13sp</item>
-        <item name="android:fontFamily">sans-serif-medium</item><item name="android:drawablePadding">5dp</item>
+        <item name="android:layout_width">match_parent</item><item name="android:layout_height">wrap_content</item>
+        <item name="android:minHeight">@dimen/ui_nav_height</item>
+        <item name="android:layout_marginBottom">@dimen/ui_nav_gap</item><item name="android:padding">@dimen/ui_nav_padding</item>
+        <item name="android:gravity">center</item><item name="android:textSize">@dimen/ui_nav_text_size</item>
+        <item name="android:fontFamily">sans-serif-medium</item><item name="android:drawablePadding">@dimen/ui_nav_icon_gap</item>
+        <item name="android:maxLines">1</item>
         <item name="android:textColor">@color/ui_nav_text</item><item name="android:background">@drawable/ui_nav_item</item>
         <item name="android:clickable">true</item><item name="android:focusable">true</item>
     </style>
