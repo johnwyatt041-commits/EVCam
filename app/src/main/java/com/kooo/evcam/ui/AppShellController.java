@@ -23,6 +23,7 @@ import androidx.fragment.app.FragmentTransaction;
 
 import com.kooo.evcam.R;
 
+import java.util.function.Consumer;
 import java.util.function.IntConsumer;
 
 /**
@@ -58,6 +59,11 @@ public final class AppShellController {
     private int currentRoot = R.id.nav_recording;
     private boolean previewEnabled;
     private boolean layoutEditing;
+    private boolean fullscreenPreview;
+    private int lastSysTopInset;
+    private PreviewMode activePreviewMode = PreviewMode.MODE_B;
+    @Nullable
+    private Consumer<Boolean> fullscreenListener;
     @ColorRes
     private int currentRecordingColor = R.color.text_primary;
 
@@ -117,6 +123,26 @@ public final class AppShellController {
         updateHeader();
     }
 
+    public void bindPreviewModeControls(Consumer<PreviewMode> onModeSelect,
+                                        Runnable onToggleFullscreen,
+                                        @Nullable Consumer<Boolean> onFullscreenChanged) {
+        this.fullscreenListener = onFullscreenChanged;
+        View btnB = shell.findViewById(R.id.ui_mode_b);
+        if (btnB != null) {
+            btnB.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_B));
+        }
+        View btnC = shell.findViewById(R.id.ui_mode_c);
+        if (btnC != null) {
+            btnC.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_C));
+        }
+        View btnFullscreen = shell.findViewById(R.id.ui_fullscreen_toggle);
+        if (btnFullscreen != null) {
+            btnFullscreen.setOnClickListener(v -> onToggleFullscreen.run());
+        }
+        applyPreviewModeColors(activity);
+        updateHeader();
+    }
+
     private void scaleNavDrawable(TextView item) {
         int iconSize = activity.getResources().getDimensionPixelSize(R.dimen.ui_nav_icon_size);
         Drawable[] icons = item.getCompoundDrawables();
@@ -137,17 +163,51 @@ public final class AppShellController {
         ViewCompat.setOnApplyWindowInsetsListener(shell, (v, insets) -> {
             androidx.core.graphics.Insets sys = insets.getInsets(
                     WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.navigationBars());
+            lastSysTopInset = sys.top;
             rail.setPadding(rail.getPaddingLeft(), railTop + sys.top, rail.getPaddingRight(), railBottom);
             if (topBar.getLayoutParams() != null && topBarHeight > 0) {
                 topBar.getLayoutParams().height = topBarHeight + sys.top;
             }
             topBar.setPadding(topBar.getPaddingLeft(), topBarTop + sys.top, topBar.getPaddingRight(), topBar.getPaddingBottom());
             v.setPadding(sys.left, v.getPaddingTop(), sys.right, sys.bottom);
+            applyContentTopInset();
             return new WindowInsetsCompat.Builder(insets)
                     .setInsets(WindowInsetsCompat.Type.systemBars(), androidx.core.graphics.Insets.NONE)
                     .build();
         });
         ViewCompat.requestApplyInsets(shell);
+    }
+
+    private void applyContentTopInset() {
+        View content = shell.findViewById(R.id.ui_content);
+        if (content == null) return;
+        int topPadding = fullscreenPreview ? lastSysTopInset : 0;
+        if (content.getPaddingTop() != topPadding) {
+            content.setPadding(content.getPaddingLeft(), topPadding,
+                    content.getPaddingRight(), content.getPaddingBottom());
+        }
+    }
+
+    public boolean isFullscreenPreview() {
+        return fullscreenPreview;
+    }
+
+    public void setFullscreenPreview(boolean fullscreen) {
+        boolean target = fullscreen
+                && currentRoot == R.id.nav_recording
+                && activity.findViewById(R.id.ui_preview_layout) != null;
+        if (fullscreenPreview == target) return;
+        fullscreenPreview = target;
+        int chromeVisibility = target ? View.GONE : View.VISIBLE;
+        shell.findViewById(R.id.ui_rail).setVisibility(chromeVisibility);
+        shell.findViewById(R.id.ui_rail_divider).setVisibility(chromeVisibility);
+        shell.findViewById(R.id.ui_top_bar).setVisibility(chromeVisibility);
+        shell.findViewById(R.id.ui_topbar_divider).setVisibility(chromeVisibility);
+        applyContentTopInset();
+        applyPreviewModeColors(activity);
+        if (fullscreenListener != null) {
+            fullscreenListener.accept(fullscreenPreview);
+        }
     }
 
     public int getCurrentRoot() {
@@ -156,6 +216,9 @@ public final class AppShellController {
 
     public void showRoot(int destination, @Nullable Fragment fragment) {
         currentRoot = destination;
+        if (destination != R.id.nav_recording && fullscreenPreview) {
+            setFullscreenPreview(false);
+        }
         boolean recording = destination == R.id.nav_recording;
         activity.findViewById(R.id.main).setVisibility(recording ? View.VISIBLE : View.GONE);
         View container = activity.findViewById(R.id.fragment_container);
@@ -194,12 +257,26 @@ public final class AppShellController {
         applyEditButtonColors(activity);
     }
 
+    public void setPreviewModeUi(PreviewMode mode) {
+        this.activePreviewMode = (mode != null) ? mode : PreviewMode.MODE_B;
+        applyPreviewModeColors(activity);
+    }
+
     public void setRecordingState(String text, @ColorRes int color) {
         this.currentRecordingColor = color;
-        TextView status = activity.findViewById(R.id.ui_recording_status);
-        if (status != null) {
-            status.setText(text);
-            status.setTextColor(ContextCompat.getColor(activity, color));
+        int resolvedColor = ContextCompat.getColor(activity, color);
+        TextView topStatus = shell.findViewById(R.id.ui_recording_status);
+        if (topStatus != null) {
+            topStatus.setText(text);
+            topStatus.setTextColor(resolvedColor);
+        }
+        View content = shell.findViewById(R.id.ui_content);
+        if (content != null) {
+            TextView contentStatus = content.findViewById(R.id.ui_recording_status);
+            if (contentStatus != null) {
+                contentStatus.setText(text);
+                contentStatus.setTextColor(resolvedColor);
+            }
         }
     }
 
@@ -237,6 +314,7 @@ public final class AppShellController {
         }
         applyPreviewButtonColors(themedContext);
         applyEditButtonColors(themedContext);
+        applyPreviewModeColors(themedContext);
     }
 
     private void repaintNavItem(@Nullable TextView item, Context themedContext, @Nullable ColorStateList navTextColors) {
@@ -269,6 +347,27 @@ public final class AppShellController {
         edit.setTag(R.id.ui_theme_text_role, layoutEditing ? "on_accent" : null);
     }
 
+    private void applyPreviewModeColors(Context themedContext) {
+        styleShellToggle(shell.findViewById(R.id.ui_mode_b), themedContext,
+                activePreviewMode == PreviewMode.MODE_B);
+        styleShellToggle(shell.findViewById(R.id.ui_mode_c), themedContext,
+                activePreviewMode == PreviewMode.MODE_C);
+        Button fullscreenBtn = shell.findViewById(R.id.ui_fullscreen_toggle);
+        if (fullscreenBtn != null) {
+            fullscreenBtn.setText(fullscreenPreview ? "退出全屏" : "全屏");
+            styleShellToggle(fullscreenBtn, themedContext, fullscreenPreview);
+        }
+    }
+
+    private void styleShellToggle(@Nullable Button button, Context themedContext, boolean active) {
+        if (button == null) return;
+        int bgColor = ContextCompat.getColor(themedContext, active ? R.color.button_accent : R.color.button_background);
+        int textColor = ContextCompat.getColor(themedContext, active ? R.color.ui_on_accent : R.color.button_text);
+        ViewCompat.setBackgroundTintList(button, ColorStateList.valueOf(bgColor));
+        button.setTextColor(textColor);
+        button.setTag(R.id.ui_theme_text_role, active ? "on_accent" : null);
+    }
+
     private boolean isActivityNight() {
         return (activity.getResources().getConfiguration().uiMode
                 & android.content.res.Configuration.UI_MODE_NIGHT_MASK)
@@ -288,9 +387,14 @@ public final class AppShellController {
         }
         boolean secondary = currentRoot != R.id.nav_recording && fragments.getBackStackEntryCount() > 0;
         back.setVisibility(secondary ? View.VISIBLE : View.GONE);
+        boolean hasEditablePreview = currentRoot == R.id.nav_recording
+                && activity.findViewById(R.id.ui_preview_layout) != null;
         preview.setVisibility(currentRoot == R.id.nav_recording ? View.VISIBLE : View.GONE);
-        shell.findViewById(R.id.ui_edit_layout).setVisibility(currentRoot == R.id.nav_recording
-                && activity.findViewById(R.id.ui_preview_layout) != null ? View.VISIBLE : View.GONE);
+        shell.findViewById(R.id.ui_edit_layout).setVisibility(hasEditablePreview ? View.VISIBLE : View.GONE);
+        View modeControls = shell.findViewById(R.id.ui_preview_mode_controls);
+        if (modeControls != null) {
+            modeControls.setVisibility(hasEditablePreview ? View.VISIBLE : View.GONE);
+        }
         Fragment current = currentRoot == R.id.nav_recording ? null : fragments.findFragmentById(R.id.fragment_container);
         Object custom = null;
         if (current != null) {

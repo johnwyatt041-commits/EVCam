@@ -219,7 +219,181 @@
                 </LinearLayout>
             </LinearLayout>
 
-            <!-- 3. confirm_door_exit 开关持久化预留 -->
+            <!-- 3. T03 主预览模式与画面快捷键 -->
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:layout_marginBottom="12dp"
+                android:background="@drawable/ui_card">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="主预览模式与快捷键"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium" />
+
+                <TextView
+                    android:id="@+id/tv_preview_mode_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="当前默认模式：分栏 B（三列分屏）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_default_mode_b"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="分栏 B · 三列分屏"
+                        android:textSize="14sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_default_mode_c"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:text="三路 C · 档位大屏"
+                        android:textSize="14sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="14dp"
+                    android:background="@color/ui_border" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="左上角「返回 / 设置」快捷键"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:fontFamily="sans-serif-medium" />
+
+                <TextView
+                    android:id="@+id/tv_corner_nav_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="当前策略：仅沉浸全屏显示"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_corner_nav_auto"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="仅全屏显示"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_corner_nav_always"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="始终显示"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_corner_nav_hidden"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:text="隐藏"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="14dp"
+                    android:background="@color/ui_border" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="16dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="显示「视图切换 (B/C)」快捷键"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:fontFamily="sans-serif-medium" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="在主预览左上角悬浮条显示模式 B / C、主副屏切换与全屏按钮（默认开启）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_view_shortcuts"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <!-- 4. confirm_door_exit 开关持久化预留 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"

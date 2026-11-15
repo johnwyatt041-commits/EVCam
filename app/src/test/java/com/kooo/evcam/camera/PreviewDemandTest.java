@@ -41,4 +41,44 @@ public class PreviewDemandTest {
         demand.releasePhoto();
         assertFalse(demand.isRequired());
     }
+
+    @Test public void perCameraVisibilityDisablesHiddenStreamWhileKeepingOthersActive() {
+        PreviewDemand demand = new PreviewDemand();
+        demand.setMainPreview(true);
+        assertTrue(demand.isRequired("front"));
+        assertTrue(demand.isRequired("back"));
+
+        demand.setCameraVisible("front", false);
+        assertFalse(demand.isRequired("front"));
+        assertTrue(demand.isRequired("back"));
+        assertTrue(demand.isRequired("left"));
+        assertTrue(demand.isRequired("right"));
+    }
+
+    @Test public void perCameraPhotoLeaseWakesHiddenCameraTemporarilyWithoutClobberingVisibility() {
+        PreviewDemand demand = new PreviewDemand();
+        demand.setMainPreview(true);
+        demand.setCameraVisible("front", false);
+        assertFalse(demand.isRequired("front"));
+
+        demand.acquirePhoto("front");
+        assertTrue(demand.isRequired("front"));
+        assertFalse(demand.isCameraVisible("front"));
+
+        demand.releasePhoto("front");
+        assertFalse(demand.isRequired("front"));
+        assertTrue(demand.isRequired("back"));
+    }
+
+    @Test public void backgroundingTurnsOffAllPerCameraPreviewUnlessPhotoLeaseActive() {
+        PreviewDemand demand = new PreviewDemand();
+        demand.setMainPreview(false);
+        demand.setCameraVisible("back", true);
+        assertFalse(demand.isRequired("back"));
+
+        demand.acquirePhoto("back");
+        assertTrue(demand.isRequired("back"));
+        demand.releasePhoto("back");
+        assertFalse(demand.isRequired("back"));
+    }
 }

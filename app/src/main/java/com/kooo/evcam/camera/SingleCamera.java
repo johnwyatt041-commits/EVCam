@@ -196,6 +196,14 @@ public class SingleCamera {
         }
     }
 
+    public boolean isMainPreviewEnabled() {
+        return mainPreviewEnabled;
+    }
+
+    public boolean hasValidPreviewSurface() {
+        return isValidSurface(previewSurface);
+    }
+
     public boolean hasActiveOutputs() {
         return (mainPreviewEnabled && textureView != null && textureView.isAvailable())
                 || isValidSurface(recordSurface)
@@ -562,8 +570,38 @@ public class SingleCamera {
      * 
      * @return true 如果成功切换，false 如果失败（将回退到 pauseRecordSurface）
      */
+    Surface selectPrimaryPreviewSurface() {
+        if (mainPreviewEnabled && isValidSurface(previewSurface)) {
+            return previewSurface;
+        }
+        if (isValidSurface(mainFloatingSurface)) return mainFloatingSurface;
+        if (isValidSurface(secondaryDisplaySurface)) return secondaryDisplaySurface;
+        if (isValidSurface(fullscreenPreviewSurface)) return fullscreenPreviewSurface;
+        if (isValidSurface(streamSurface)) return streamSurface;
+        return null;
+    }
+
+    java.util.List<Surface> collectActiveNonRecordSurfaces() {
+        java.util.List<Surface> targets = new java.util.ArrayList<>();
+        if (mainPreviewEnabled && isValidSurface(previewSurface)) {
+            targets.add(previewSurface);
+        }
+        addUniqueValidSurface(targets, mainFloatingSurface);
+        addUniqueValidSurface(targets, secondaryDisplaySurface);
+        addUniqueValidSurface(targets, fullscreenPreviewSurface);
+        addUniqueValidSurface(targets, streamSurface);
+        return targets;
+    }
+
+    private static void addUniqueValidSurface(java.util.List<Surface> targets, Surface surface) {
+        if (isValidSurface(surface) && !targets.contains(surface)) {
+            targets.add(surface);
+        }
+    }
+
     public boolean switchToPreviewOnlyMode() {
-        if (captureSession == null || cameraDevice == null || previewSurface == null) {
+        java.util.List<Surface> targets = collectActiveNonRecordSurfaces();
+        if (captureSession == null || cameraDevice == null || targets.isEmpty()) {
             AppLog.w(TAG, "Camera " + cameraId + " cannot switch to preview-only mode: session/device/surface not ready");
             // 回退到旧方法
             pauseRecordSurface();
@@ -571,15 +609,17 @@ public class SingleCamera {
         }
 
         try {
-            // 创建一个只包含预览 Surface 的请求
+            // 创建一个只包含当前有效非录制 Surface 的请求（主预览 / 悬浮 / 副屏 / 全屏 / 推流）
             CaptureRequest.Builder previewOnlyBuilder = cameraDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-            previewOnlyBuilder.addTarget(previewSurface);
+            for (Surface target : targets) {
+                previewOnlyBuilder.addTarget(target);
+            }
             
             // 应用当前的图像调节参数（如果启用）
             
             // 替换当前的重复请求（预览继续，但不再向录制 Surface 发送帧）
             captureSession.setRepeatingRequest(previewOnlyBuilder.build(), null, backgroundHandler);
-            AppLog.d(TAG, "Camera " + cameraId + " switched to preview-only mode (preview continues, recording paused)");
+            AppLog.d(TAG, "Camera " + cameraId + " switched to preview-only mode (targets=" + targets.size() + ", recording paused)");
             return true;
             
         } catch (CameraAccessException e) {
@@ -1367,16 +1407,7 @@ public class SingleCamera {
                 }
             }
 
-            Surface surface = (previewSurface != null && previewSurface.isValid()) ? previewSurface : null;
-            if (surface == null) {
-                if (mainFloatingSurface != null && mainFloatingSurface.isValid()) {
-                    surface = mainFloatingSurface;
-                } else if (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid()) {
-                    surface = secondaryDisplaySurface;
-                } else if (fullscreenPreviewSurface != null && fullscreenPreviewSurface.isValid()) {
-                    surface = fullscreenPreviewSurface;
-                }
-            }
+            Surface surface = selectPrimaryPreviewSurface();
             
             // 检查是否有可用的输出 Surface（后台初始化时可能全部为 null）
             boolean hasAnySurface = (surface != null && surface.isValid())

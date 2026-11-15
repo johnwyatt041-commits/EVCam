@@ -45,14 +45,42 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui.UiThemeController.Host {
+public class MainActivity extends AppCompatActivity implements
+        com.kooo.evcam.ui.UiThemeController.Host,
+        com.kooo.evcam.ui.UiThemeController.ThemeAware,
+        com.kooo.evcam.ui.PreviewModeController.Host {
     private com.kooo.evcam.ui.AppShellController uiShell;
     private com.kooo.evcam.ui.UiThemeController uiTheme;
     private com.kooo.evcam.ui.PreviewEditorController previewEditor;
+    private com.kooo.evcam.ui.PreviewModeController previewModeController;
 
     @Override
     public com.kooo.evcam.ui.UiThemeController getUiThemeController() {
         return uiTheme;
+    }
+
+    @Override
+    public void onThemeApplied(Context themedContext, boolean isNight) {
+        if (previewEditor != null) {
+            previewEditor.refreshTheme(themedContext);
+        }
+        if (previewModeController != null) {
+            previewModeController.refreshTheme(themedContext);
+        }
+    }
+
+    @Override
+    public void onDefaultPreviewModeChanged(@NonNull com.kooo.evcam.ui.PreviewMode newDefaultMode) {
+        if (previewModeController != null) {
+            previewModeController.setPreviewMode(newDefaultMode);
+        }
+    }
+
+    @Override
+    public void onPreviewShortcutPreferencesChanged() {
+        if (previewModeController != null) {
+            previewModeController.refreshShortcutsOverlay();
+        }
     }
 
     private static final String TAG = "MainActivity";
@@ -242,6 +270,9 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
         uiTheme.setShellController(uiShell);
         previewEditor = new com.kooo.evcam.ui.PreviewEditorController(this, editing -> {
             uiShell.setLayoutEditing(editing);
+            if (previewModeController != null) {
+                previewModeController.onEditingStateChanged(editing);
+            }
             if (!editing && uiTheme != null) uiTheme.syncSystemBarsAndTree();
         });
         uiShell.bind(
@@ -250,6 +281,7 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
                 this::onBackPressed,
                 () -> setMainPreviewEnabled(!appConfig.isMainPreviewEnabled()),
                 previewEditor::begin);
+        initPreviewModeController();
         uiShell.setPreviewEnabled(appConfig.isMainPreviewEnabled());
         uiTheme.syncSystemBarsAndTree();
         if (savedInstanceState != null) {
@@ -876,25 +908,108 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
         }
     }
 
+    private void initPreviewModeController() {
+        if (findViewById(R.id.ui_preview_layout) == null) return;
+        previewModeController = new com.kooo.evcam.ui.PreviewModeController(
+                this,
+                findViewById(android.R.id.content),
+                uiShell,
+                new com.kooo.evcam.ui.PreviewModeController.Callbacks() {
+                    @Override
+                    public void onBackShortcutClicked() {
+                        if (uiShell != null && uiShell.isFullscreenPreview()) {
+                            uiShell.setFullscreenPreview(false);
+                        } else {
+                            onBackPressed();
+                        }
+                    }
+
+                    @Override
+                    public void onSettingsShortcutClicked() {
+                        if (uiShell != null && uiShell.isFullscreenPreview()) {
+                            uiShell.setFullscreenPreview(false);
+                        }
+                        showSettingsInterface();
+                    }
+
+                    @Override
+                    public void onToggleFullscreenClicked() {
+                        if (uiShell == null) return;
+                        if (previewEditor != null && previewEditor.isEditing()) {
+                            Toast.makeText(MainActivity.this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
+                            return;
+                        }
+                        uiShell.setFullscreenPreview(!uiShell.isFullscreenPreview());
+                    }
+
+                    @Override
+                    public void onApplyStagingTransform(@NonNull String cameraKey, @NonNull TextureView view,
+                                                        android.util.Size previewSize, int width, int height) {
+                        if (previewSize != null && view instanceof AutoFitTextureView) {
+                            applyPreviewSizeTransform(cameraKey, (AutoFitTextureView) view, previewSize);
+                        }
+                    }
+                });
+        uiShell.bindPreviewModeControls(
+                mode -> {
+                    if (previewEditor != null && previewEditor.isEditing()) {
+                        previewEditor.finish(false);
+                    }
+                    previewModeController.setPreviewMode(mode);
+                },
+                () -> {
+                    if (previewEditor != null && previewEditor.isEditing()) {
+                        Toast.makeText(MainActivity.this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
+                        return;
+                    }
+                    uiShell.setFullscreenPreview(!uiShell.isFullscreenPreview());
+                },
+                fullscreen -> previewModeController.onFullscreenStateChanged());
+        previewModeController.start();
+    }
+
+    private int getExpectedReadyTextureCount() {
+        return previewModeController != null
+                ? previewModeController.countExpectedVisibleTextures(configuredCameraCount)
+                : requiredTextureCount;
+    }
+
+    private AutoFitTextureView getTextureViewForKey(String cameraKey) {
+        if ("front".equals(cameraKey)) return textureFront;
+        if ("back".equals(cameraKey)) return textureBack;
+        if ("left".equals(cameraKey)) return textureLeft;
+        if ("right".equals(cameraKey)) return textureRight;
+        return null;
+    }
+
     private TextureView.SurfaceTextureListener buildSurfaceListener(String cameraKey) {
         return new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(@NonNull android.graphics.SurfaceTexture surface, int width, int height) {
                 textureReadyCount++;
-                AppLog.d(TAG, "TextureView " + cameraKey + " ready: " + textureReadyCount + "/" + requiredTextureCount);
+                int expected = getExpectedReadyTextureCount();
+                AppLog.d(TAG, "TextureView " + cameraKey + " ready: " + textureReadyCount + "/" + expected);
 
-                if (textureReadyCount >= requiredTextureCount && checkPermissions()) {
-                    if (cameraManager == null) {
+                if (cameraManager == null) {
+                    if (textureReadyCount >= expected && checkPermissions()) {
                         initCamera();
-                    } else {
-                        cameraManager.updatePreviewTextureViews(textureFront, textureBack, textureLeft, textureRight);
                     }
+                } else {
+                    cameraManager.updatePreviewTextureView(cameraKey, getTextureViewForKey(cameraKey));
+                    cameraManager.firePreviewSizeCallback(cameraKey);
                 }
             }
 
             @Override
             public void onSurfaceTextureSizeChanged(@NonNull android.graphics.SurfaceTexture surface, int width, int height) {
                 AppLog.d(TAG, "TextureView " + cameraKey + " size changed: " + width + "x" + height);
+                if (cameraManager != null) {
+                    AutoFitTextureView view = getTextureViewForKey(cameraKey);
+                    android.util.Size previewSize = cameraManager.getCameraPreviewSize(cameraKey);
+                    if (view != null && previewSize != null) {
+                        applyPreviewSizeTransform(cameraKey, view, previewSize);
+                    }
+                }
             }
 
             @Override
@@ -1722,9 +1837,8 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_PERMISSIONS) {
             if (checkPermissions()) {
-                // 权限已授予，但需要等待TextureView准备好
-                // 如果TextureView已经准备好，立即初始化摄像头
-                if (textureReadyCount >= requiredTextureCount) {
+                // 权限已授予，但需要等待可见 TextureView 准备好
+                if (textureReadyCount >= getExpectedReadyTextureCount()) {
                     initCamera();
                 }
             } else {
@@ -1735,9 +1849,10 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
     }
 
     private void initCamera() {
-        // 确保所有需要的TextureView都准备好
-        if (textureReadyCount < requiredTextureCount) {
-            AppLog.w(TAG, "Not all TextureViews are ready yet: " + textureReadyCount + "/" + requiredTextureCount);
+        // 确保所有可见的 TextureView 都准备好（隐藏路不阻塞启动）
+        int expectedTextures = getExpectedReadyTextureCount();
+        if (textureReadyCount < expectedTextures) {
+            AppLog.w(TAG, "Not all visible TextureViews are ready yet: " + textureReadyCount + "/" + expectedTextures);
             return;
         }
         
@@ -1761,6 +1876,9 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
             cameraManager = existingManager;
             cameraManager.setRecordingStartupFailureCallback(this::onRecordingStartupFailure);
             cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
+            if (previewModeController != null) {
+                previewModeController.attachCameraManager(cameraManager);
+            }
 
             // --- 补全后台初始化时缺失的回调 ---
             // 后台（BlindSpotService）初始化的 MultiCameraManager 没有设置 MainActivity 的回调，
@@ -1901,6 +2019,9 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
         cameraManager.setRecordingStartupFailureCallback(this::onRecordingStartupFailure);
         cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled() && !isInBackground);
         cameraManager.setMaxOpenCameras(configuredCameraCount);
+        if (previewModeController != null) {
+            previewModeController.attachCameraManager(cameraManager);
+        }
         // 注册到全局 Holder
         holder.setCameraManager(cameraManager);
 
@@ -2033,8 +2154,9 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
             });
         });
 
-        // 等待TextureView准备好
-        textureFront.post(() -> {
+        // 等待主容器准备好（不使用可能被模式 C 隐藏的 textureFront.post）
+        View postAnchor = recordingLayout != null ? recordingLayout : textureFront;
+        postAnchor.post(() -> {
             try {
                 // 检测可用的摄像头
                 CameraManager cm = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
@@ -3899,6 +4021,10 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
         if (cameraManager != null) {
             cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled());
         }
+        if (previewModeController != null) {
+            previewModeController.start();
+            previewModeController.syncFromPreferences();
+        }
         
         // 标记 Activity 已经完全恢复过一次（用于区分新创建和已存在的 Activity）
         // 这个标记在 onCreate 后第一次 onResume 时设为 true
@@ -3979,6 +4105,9 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
 
         // 停止调试信息更新
         stopDebugUpdates();
+        if (previewModeController != null) {
+            previewModeController.stop();
+        }
 
         // 清除静态实例引用
         if (instance == this) {
@@ -4146,6 +4275,10 @@ public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui
     public void onBackPressed() {
         if (previewEditor != null && previewEditor.isEditing()) {
             previewEditor.finish(false);
+            return;
+        }
+        if (uiShell != null && uiShell.isFullscreenPreview()) {
+            uiShell.setFullscreenPreview(false);
             return;
         }
         if (getSupportFragmentManager().getBackStackEntryCount() > 0) {

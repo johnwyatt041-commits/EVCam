@@ -82,6 +82,9 @@ public class MultiCameraManager {
     private volatile boolean isRebuildingRecording = false;  // 是否正在重建录制（防止多摄像头并发触发）
     private StatusCallback statusCallback;
     private PreviewSizeCallback previewSizeCallback;
+    private PhotoSurfaceProvider photoSurfaceProvider;
+    private final Map<String, TextureView> savedPhotoTextureViews = new LinkedHashMap<>();
+    private final List<String> stagedPhotoCameraKeys = new ArrayList<>();
     private volatile int sessionConfiguredCount = 0;
     private volatile int expectedSessionCount = 0;
     private Runnable pendingRecordingStart = null;
@@ -358,22 +361,93 @@ public class MultiCameraManager {
         applyPreviewDemand();
     }
 
-    private void applyPreviewDemand() {
-        for (SingleCamera camera : cameras.values()) {
-            camera.setMainPreviewEnabled(previewDemand.isRequired());
+    public void setCameraPreviewVisible(String cameraKey, boolean visible) {
+        previewDemand.setCameraVisible(cameraKey, visible);
+        applyPreviewDemand(cameraKey);
+    }
+
+    public void setCameraPreviewVisibilities(Map<String, Boolean> visibilityMap) {
+        previewDemand.setAllCameraVisibility(visibilityMap);
+        applyPreviewDemand();
+    }
+
+    public boolean isCameraPreviewVisible(String cameraKey) {
+        return previewDemand.isCameraVisible(cameraKey);
+    }
+
+    public void setPhotoSurfaceProvider(PhotoSurfaceProvider provider) {
+        this.photoSurfaceProvider = provider;
+    }
+
+    public Size getCameraPreviewSize(String cameraKey) {
+        SingleCamera camera = cameras.get(cameraKey);
+        return camera != null ? camera.getPreviewSize() : null;
+    }
+
+    public void firePreviewSizeCallback(String cameraKey) {
+        if (previewSizeCallback == null || cameraKey == null) return;
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera == null) return;
+        Size size = camera.getPreviewSize();
+        if (size != null) {
+            previewSizeCallback.onPreviewSizeChosen(cameraKey, camera.getCameraId(), size);
         }
     }
 
-    private void updatePreviewTextureView(String cameraKey, TextureView view) {
+    private void applyPreviewDemand() {
+        for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
+            entry.getValue().setMainPreviewEnabled(previewDemand.isRequired(entry.getKey()));
+        }
+    }
+
+    private void applyPreviewDemand(String cameraKey) {
+        if (cameraKey == null) return;
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera != null) {
+            camera.setMainPreviewEnabled(previewDemand.isRequired(cameraKey));
+        }
+    }
+
+    public void updatePreviewTextureView(String cameraKey, TextureView view) {
         SingleCamera camera = cameras.get(cameraKey);
         if (camera == null) {
             return;
         }
+        boolean required = previewDemand.isRequired(cameraKey);
+        boolean viewChanged = camera.getTextureView() != view;
         camera.setTextureView(view);
-        if (previewDemand.isRequired() && view != null && view.isAvailable()) {
-            camera.openCamera();
+        if (camera.isMainPreviewEnabled() != required) {
+            camera.setMainPreviewEnabled(required);
+            return;
         }
-        camera.recreateSession();
+        if (required && view != null && view.isAvailable()) {
+            if (!camera.isConnected()) {
+                camera.openCamera();
+            } else if (viewChanged || !camera.hasValidPreviewSurface()) {
+                camera.recreateSession();
+            }
+        } else if (!camera.closeIfUnused() && viewChanged) {
+            camera.recreateSession();
+        }
+    }
+
+    public void attachPhotoTextureView(String cameraKey, TextureView stagingView) {
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera == null || stagingView == null) return;
+        if (!savedPhotoTextureViews.containsKey(cameraKey)) {
+            savedPhotoTextureViews.put(cameraKey, camera.getTextureView());
+        }
+        if (!stagedPhotoCameraKeys.contains(cameraKey)) {
+            stagedPhotoCameraKeys.add(cameraKey);
+        }
+        camera.setTextureView(stagingView);
+        if (previewDemand.isRequired(cameraKey) && stagingView.isAvailable()) {
+            if (!camera.isConnected()) {
+                camera.openCamera();
+            } else {
+                camera.recreateSession();
+            }
+        }
     }
 
     /**
@@ -441,7 +515,7 @@ public class MultiCameraManager {
         Set<String> primaryIds = new HashSet<>();
         for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
             SingleCamera camera = entry.getValue();
-            camera.setMainPreviewEnabled(previewDemand.isRequired());
+            camera.setMainPreviewEnabled(previewDemand.isRequired(entry.getKey()));
             String id = camera.getCameraId();
             
             if (primaryIds.add(id)) {
@@ -782,7 +856,7 @@ public class MultiCameraManager {
                 continue;
             }
             activeCameraKeys.add(entry.getKey());
-            if (previewDemand.isRequired() || camera.hasActiveOutputs()) {
+            if (previewDemand.isRequired(entry.getKey()) || camera.hasActiveOutputs()) {
                 camera.openCamera();
             }
             opened++;
@@ -2369,6 +2443,11 @@ public class MultiCameraManager {
         takePicture(timestamp);
     }
 
+    public interface PhotoSurfaceProvider {
+        void onPreparePhotoTextures(List<String> cameraKeys);
+        void onReleasePhotoTextures(List<String> cameraKeys);
+    }
+
     /**
      * 拍照（所有摄像头，使用指定的时间戳）
      * @param timestamp 统一的时间戳，用于所有摄像头的文件命名
@@ -2376,15 +2455,25 @@ public class MultiCameraManager {
     public void takePicture(String timestamp) {
         List<String> keys = getActiveCameraKeys();
         if (keys.isEmpty()) return;
-        previewDemand.acquirePhoto();
+        List<String> missingTextureKeys = new ArrayList<>();
+        for (String key : keys) {
+            previewDemand.acquirePhoto(key);
+            SingleCamera camera = cameras.get(key);
+            if (camera != null && (camera.getTextureView() == null || !camera.getTextureView().isAvailable())) {
+                missingTextureKeys.add(key);
+            }
+        }
         applyPreviewDemand();
+        if (!missingTextureKeys.isEmpty() && photoSurfaceProvider != null) {
+            photoSurfaceProvider.onPreparePhotoTextures(new ArrayList<>(missingTextureKeys));
+        }
         long requestedAtMs = System.currentTimeMillis();
         waitForPhotoFrames(timestamp, keys, requestedAtMs);
     }
 
     private void waitForPhotoFrames(String timestamp, List<String> keys, long requestedAtMs) {
         if (isReleased()) {
-            previewDemand.releasePhoto();
+            releasePhotoCaptureDemand(keys);
             return;
         }
         boolean allReady = true;
@@ -2400,8 +2489,7 @@ public class MultiCameraManager {
                 new java.util.concurrent.atomic.AtomicInteger(keys.size());
         Runnable photoCompleted = () -> mainHandler.post(() -> {
             if (remaining.decrementAndGet() == 0) {
-                previewDemand.releasePhoto();
-                if (!isReleased()) applyPreviewDemand();
+                releasePhotoCaptureDemand(keys);
             }
         });
         for (int i = 0; i < keys.size(); i++) {
@@ -2416,6 +2504,33 @@ public class MultiCameraManager {
                     photoCompleted.run();
                 }
             }, i * 300L);
+        }
+    }
+
+    private void releasePhotoCaptureDemand(List<String> keys) {
+        for (String key : keys) {
+            previewDemand.releasePhoto(key);
+        }
+        if (previewDemand.hasActivePhotoLease()) {
+            return;
+        }
+        List<String> toRelease = stagedPhotoCameraKeys.isEmpty()
+                ? java.util.Collections.emptyList()
+                : new ArrayList<>(stagedPhotoCameraKeys);
+        for (String stagedKey : toRelease) {
+            SingleCamera camera = cameras.get(stagedKey);
+            TextureView original = savedPhotoTextureViews.remove(stagedKey);
+            if (camera != null && !isReleased()) {
+                camera.setTextureView(original);
+            }
+        }
+        stagedPhotoCameraKeys.clear();
+        savedPhotoTextureViews.clear();
+        if (!isReleased()) {
+            applyPreviewDemand();
+        }
+        if (photoSurfaceProvider != null && !toRelease.isEmpty()) {
+            photoSurfaceProvider.onReleasePhotoTextures(toRelease);
         }
     }
 

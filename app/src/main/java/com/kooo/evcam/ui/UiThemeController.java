@@ -274,6 +274,10 @@ public final class UiThemeController {
             shellController.refreshTheme(themedContext, targetNight);
         }
 
+        if (activity instanceof ThemeAware) {
+            ((ThemeAware) activity).onThemeApplied(themedContext, targetNight);
+        }
+
         notifyThemeAwareFragments(activity.getSupportFragmentManager().getFragments(), themedContext, targetNight);
     }
 

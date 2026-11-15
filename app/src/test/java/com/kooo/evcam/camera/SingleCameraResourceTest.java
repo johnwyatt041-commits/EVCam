@@ -93,4 +93,27 @@ public class SingleCameraResourceTest {
         assertTrue(camera.hasActiveOutputs());
         assertFalse(camera.closeIfUnused());
     }
+
+    @Test public void streamSurfaceServesAsPrimaryFallbackWhenMainPreviewIsHidden() {
+        camera.setMainPreviewEnabled(false);
+        camera.setStreamSurface(surface, null);
+        assertEquals(surface, camera.selectPrimaryPreviewSurface());
+        assertEquals(1, camera.collectActiveNonRecordSurfaces().size());
+        assertEquals(surface, camera.collectActiveNonRecordSurfaces().get(0));
+    }
+
+    @Test public void hiddenCameraReopenedWhenPreviewReEnabled() {
+        TextureView preview = mock(TextureView.class);
+        when(preview.isAvailable()).thenReturn(true);
+        camera.setTextureView(preview);
+        camera.setMainPreviewEnabled(false);
+        assertFalse(camera.isMainPreviewEnabled());
+        assertTrue(camera.closeIfUnused());
+
+        reset(camera);
+        doNothing().when(camera).openCamera();
+        camera.setMainPreviewEnabled(true);
+        assertTrue(camera.isMainPreviewEnabled());
+        verify(camera).openCamera();
+    }
 }

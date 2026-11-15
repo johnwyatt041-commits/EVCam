@@ -32,12 +32,20 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private AppConfig appConfig;
     private TextView themeStatusText;
     private TextView startPageStatusText;
+    private TextView previewModeStatusText;
+    private TextView cornerNavStatusText;
     private Button btnFollowSystem;
     private Button btnDark;
     private Button btnLight;
     private Button btnStartRecording;
     private Button btnStartPlayback;
     private Button btnStartSettings;
+    private Button btnDefaultModeB;
+    private Button btnDefaultModeC;
+    private Button btnCornerNavAuto;
+    private Button btnCornerNavAlways;
+    private Button btnCornerNavHidden;
+    private SwitchMaterial viewShortcutsSwitch;
     private SwitchMaterial confirmDoorExitSwitch;
 
     @Nullable
@@ -57,12 +65,20 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
 
         themeStatusText = view.findViewById(R.id.tv_theme_status);
         startPageStatusText = view.findViewById(R.id.tv_start_page_status);
+        previewModeStatusText = view.findViewById(R.id.tv_preview_mode_status);
+        cornerNavStatusText = view.findViewById(R.id.tv_corner_nav_status);
         btnFollowSystem = view.findViewById(R.id.btn_theme_follow_system);
         btnDark = view.findViewById(R.id.btn_theme_dark);
         btnLight = view.findViewById(R.id.btn_theme_light);
         btnStartRecording = view.findViewById(R.id.btn_start_recording);
         btnStartPlayback = view.findViewById(R.id.btn_start_playback);
         btnStartSettings = view.findViewById(R.id.btn_start_settings);
+        btnDefaultModeB = view.findViewById(R.id.btn_default_mode_b);
+        btnDefaultModeC = view.findViewById(R.id.btn_default_mode_c);
+        btnCornerNavAuto = view.findViewById(R.id.btn_corner_nav_auto);
+        btnCornerNavAlways = view.findViewById(R.id.btn_corner_nav_always);
+        btnCornerNavHidden = view.findViewById(R.id.btn_corner_nav_hidden);
+        viewShortcutsSwitch = view.findViewById(R.id.switch_view_shortcuts);
         confirmDoorExitSwitch = view.findViewById(R.id.switch_confirm_door_exit);
 
         if (getContext() != null) {
@@ -76,6 +92,32 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         btnStartRecording.setOnClickListener(v -> selectStartPage(AppConfig.START_PAGE_RECORDING));
         btnStartPlayback.setOnClickListener(v -> selectStartPage(AppConfig.START_PAGE_PLAYBACK));
         btnStartSettings.setOnClickListener(v -> selectStartPage(AppConfig.START_PAGE_SETTINGS));
+
+        if (btnDefaultModeB != null) {
+            btnDefaultModeB.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_B));
+        }
+        if (btnDefaultModeC != null) {
+            btnDefaultModeC.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_C));
+        }
+        if (btnCornerNavAuto != null) {
+            btnCornerNavAuto.setOnClickListener(v -> selectCornerNavMode(AppConfig.CORNER_NAV_AUTO));
+        }
+        if (btnCornerNavAlways != null) {
+            btnCornerNavAlways.setOnClickListener(v -> selectCornerNavMode(AppConfig.CORNER_NAV_ALWAYS));
+        }
+        if (btnCornerNavHidden != null) {
+            btnCornerNavHidden.setOnClickListener(v -> selectCornerNavMode(AppConfig.CORNER_NAV_HIDDEN));
+        }
+
+        if (appConfig != null && viewShortcutsSwitch != null) {
+            viewShortcutsSwitch.setChecked(appConfig.isPreviewViewShortcutsEnabled());
+            viewShortcutsSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (appConfig != null) {
+                    appConfig.setPreviewViewShortcutsEnabled(isChecked);
+                    notifyHostPreviewSettingsChanged();
+                }
+            });
+        }
 
         if (appConfig != null && confirmDoorExitSwitch != null) {
             confirmDoorExitSwitch.setChecked(appConfig.isConfirmDoorExitEnabled());
@@ -96,6 +138,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
                     : UiThemeController.isTargetNight(getContext(), null);
             refreshThemeUi(getContext(), isNight);
             refreshStartPageUi(getContext());
+            refreshPreviewOptionsUi(getContext());
         }
         return view;
     }
@@ -126,11 +169,37 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
                 Toast.LENGTH_SHORT).show();
     }
 
+    private void selectDefaultPreviewMode(@NonNull String previewMode) {
+        if (appConfig == null || getContext() == null) return;
+        appConfig.setPreviewMode(previewMode);
+        refreshPreviewOptionsUi(getContext());
+        if (getActivity() instanceof PreviewModeController.Host) {
+            ((PreviewModeController.Host) getActivity()).onDefaultPreviewModeChanged(
+                    PreviewMode.fromKey(appConfig.getPreviewMode()));
+        }
+        Toast.makeText(getContext(), "默认主预览已设为「" + formatPreviewModeLabel(previewMode) + "」",
+                Toast.LENGTH_SHORT).show();
+    }
+
+    private void selectCornerNavMode(@NonNull String cornerNavMode) {
+        if (appConfig == null || getContext() == null) return;
+        appConfig.setPreviewCornerNavMode(cornerNavMode);
+        refreshPreviewOptionsUi(getContext());
+        notifyHostPreviewSettingsChanged();
+    }
+
+    private void notifyHostPreviewSettingsChanged() {
+        if (getActivity() instanceof PreviewModeController.Host) {
+            ((PreviewModeController.Host) getActivity()).onPreviewShortcutPreferencesChanged();
+        }
+    }
+
     @Override
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
         refreshThemeUi(themedContext, isNight);
         refreshStartPageUi(themedContext);
+        refreshPreviewOptionsUi(themedContext);
     }
 
     private void refreshThemeUi(@NonNull Context context, boolean isNight) {
@@ -159,6 +228,40 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         applyOptionButtonState(btnStartRecording, context, AppConfig.START_PAGE_RECORDING.equals(startPage));
         applyOptionButtonState(btnStartPlayback, context, AppConfig.START_PAGE_PLAYBACK.equals(startPage));
         applyOptionButtonState(btnStartSettings, context, AppConfig.START_PAGE_SETTINGS.equals(startPage));
+    }
+
+    private void refreshPreviewOptionsUi(@NonNull Context context) {
+        String previewMode = appConfig != null
+                ? appConfig.getPreviewMode()
+                : AppConfig.PREVIEW_MODE_B;
+        if (previewModeStatusText != null) {
+            previewModeStatusText.setText("当前默认模式：" + formatPreviewModeLabel(previewMode));
+        }
+        applyOptionButtonState(btnDefaultModeB, context, AppConfig.PREVIEW_MODE_B.equals(previewMode));
+        applyOptionButtonState(btnDefaultModeC, context, AppConfig.PREVIEW_MODE_C.equals(previewMode));
+
+        String cornerMode = appConfig != null
+                ? appConfig.getPreviewCornerNavMode()
+                : AppConfig.CORNER_NAV_AUTO;
+        if (cornerNavStatusText != null) {
+            cornerNavStatusText.setText("当前策略：" + formatCornerNavLabel(cornerMode));
+        }
+        applyOptionButtonState(btnCornerNavAuto, context, AppConfig.CORNER_NAV_AUTO.equals(cornerMode));
+        applyOptionButtonState(btnCornerNavAlways, context, AppConfig.CORNER_NAV_ALWAYS.equals(cornerMode));
+        applyOptionButtonState(btnCornerNavHidden, context, AppConfig.CORNER_NAV_HIDDEN.equals(cornerMode));
+    }
+
+    @NonNull
+    public static String formatPreviewModeLabel(@Nullable String previewMode) {
+        return AppConfig.PREVIEW_MODE_C.equals(previewMode)
+                ? "三路 C（档位联动大屏）" : "分栏 B（三列分屏）";
+    }
+
+    @NonNull
+    public static String formatCornerNavLabel(@Nullable String cornerNavMode) {
+        if (AppConfig.CORNER_NAV_ALWAYS.equals(cornerNavMode)) return "始终显示";
+        if (AppConfig.CORNER_NAV_HIDDEN.equals(cornerNavMode)) return "隐藏";
+        return "仅沉浸全屏显示";
     }
 
     private void applyOptionButtonState(@Nullable Button button, @NonNull Context context, boolean selected) {

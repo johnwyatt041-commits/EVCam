@@ -119,4 +119,36 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals("记录仪", AppearanceSettingsFragment.formatStartPageLabel(null));
         assertNotEquals(PlaybackHubFragment.TAB_VIDEO, PlaybackHubFragment.TAB_PHOTO);
     }
+
+    @Test
+    public void t03PreviewModeCornerNavAndShortcutsNormalizeAndPersist() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertEquals(AppConfig.PREVIEW_MODE_B, config.getPreviewMode());
+        assertEquals(AppConfig.PREVIEW_MODE_B, AppConfig.normalizePreviewMode("mode_a"));
+        assertEquals(AppConfig.PREVIEW_MODE_C, AppConfig.normalizePreviewMode(AppConfig.PREVIEW_MODE_C));
+
+        config.setPreviewMode(AppConfig.PREVIEW_MODE_C);
+        assertEquals(AppConfig.PREVIEW_MODE_C, config.getPreviewMode());
+        config.setPreviewMode("unknown");
+        assertEquals(AppConfig.PREVIEW_MODE_B, config.getPreviewMode());
+
+        assertEquals(AppConfig.CORNER_NAV_AUTO, config.getPreviewCornerNavMode());
+        config.setPreviewCornerNavMode(AppConfig.CORNER_NAV_ALWAYS);
+        assertEquals(AppConfig.CORNER_NAV_ALWAYS, config.getPreviewCornerNavMode());
+        config.setPreviewCornerNavMode(AppConfig.CORNER_NAV_HIDDEN);
+        assertEquals(AppConfig.CORNER_NAV_HIDDEN, config.getPreviewCornerNavMode());
+        assertEquals(AppConfig.CORNER_NAV_AUTO, AppConfig.normalizePreviewCornerNavMode("bad"));
+
+        assertTrue(config.isPreviewViewShortcutsEnabled());
+        config.setPreviewViewShortcutsEnabled(false);
+        assertFalse(config.isPreviewViewShortcutsEnabled());
+
+        assertEquals("分栏 B（三列分屏）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_B));
+        assertEquals("三路 C（档位联动大屏）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_C));
+        assertEquals("仅沉浸全屏显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_AUTO));
+        assertEquals("始终显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_ALWAYS));
+        assertEquals("隐藏", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_HIDDEN));
+    }
 }

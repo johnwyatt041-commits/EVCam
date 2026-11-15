@@ -3380,4 +3380,62 @@ public class AppConfig {
         AppLog.d(TAG, "下车退出确认开关已设置: " + enabled);
     }
 
+    // ==================== T03 多模式主预览与快捷键配置 ====================
+
+    public static final String PREVIEW_MODE_B = "mode_b";
+    public static final String PREVIEW_MODE_C = "mode_c";
+    public static final String PREVIEW_MODE_A = "mode_a"; // 预留给 T07（360 拼接模式）
+
+    public static final String CORNER_NAV_AUTO = "auto";     // 仅沉浸全屏显示
+    public static final String CORNER_NAV_ALWAYS = "always"; // 始终显示
+    public static final String CORNER_NAV_HIDDEN = "hidden"; // 隐藏
+
+    private static final String KEY_PREVIEW_MODE = "t03_preview_mode";
+    private static final String KEY_CORNER_NAV_MODE = "t03_corner_nav_mode";
+    private static final String KEY_VIEW_SHORTCUTS_ENABLED = "t03_view_shortcuts_enabled";
+
+    /** 规范化主预览模式；T03 阶段支持 B（三栏分屏）与 C（三路大屏），A 留待 T07 激活。 */
+    public static String normalizePreviewMode(String mode) {
+        if (PREVIEW_MODE_C.equals(mode)) {
+            return PREVIEW_MODE_C;
+        }
+        return PREVIEW_MODE_B;
+    }
+
+    public String getPreviewMode() {
+        return normalizePreviewMode(prefs.getString(KEY_PREVIEW_MODE, PREVIEW_MODE_B));
+    }
+
+    public void setPreviewMode(String mode) {
+        String normalized = normalizePreviewMode(mode);
+        prefs.edit().putString(KEY_PREVIEW_MODE, normalized).apply();
+        AppLog.d(TAG, "主预览模式已设置: " + normalized);
+    }
+
+    /** 规范化左上角「返回 / 设置」悬浮快捷键显示策略，未知值回退到「仅全屏显示」。 */
+    public static String normalizePreviewCornerNavMode(String mode) {
+        if (CORNER_NAV_ALWAYS.equals(mode)) return CORNER_NAV_ALWAYS;
+        if (CORNER_NAV_HIDDEN.equals(mode)) return CORNER_NAV_HIDDEN;
+        return CORNER_NAV_AUTO;
+    }
+
+    public String getPreviewCornerNavMode() {
+        return normalizePreviewCornerNavMode(prefs.getString(KEY_CORNER_NAV_MODE, CORNER_NAV_AUTO));
+    }
+
+    public void setPreviewCornerNavMode(String mode) {
+        String normalized = normalizePreviewCornerNavMode(mode);
+        prefs.edit().putString(KEY_CORNER_NAV_MODE, normalized).apply();
+        AppLog.d(TAG, "左上角返回/设置快捷键策略已设置: " + normalized);
+    }
+
+    public boolean isPreviewViewShortcutsEnabled() {
+        return prefs.getBoolean(KEY_VIEW_SHORTCUTS_ENABLED, true);
+    }
+
+    public void setPreviewViewShortcutsEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_VIEW_SHORTCUTS_ENABLED, enabled).apply();
+        AppLog.d(TAG, "画面内视图切换快捷键显隐已设置: " + enabled);
+    }
+
 }
