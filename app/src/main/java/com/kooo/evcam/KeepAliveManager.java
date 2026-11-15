@@ -20,6 +20,14 @@ public class KeepAliveManager {
      * 每15分钟执行一次（Android WorkManager 最小间隔）
      */
     public static void startKeepAliveWork(Context context) {
+        if (context == null) {
+            return;
+        }
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            AppLog.d(TAG, "user_exited=true，禁止启动定时保活任务");
+            stopKeepAliveWork(context);
+            return;
+        }
         AppLog.d(TAG, "启动定时保活任务（每15分钟）");
 
         // 创建周期性任务请求
@@ -45,6 +53,18 @@ public class KeepAliveManager {
     public static void stopKeepAliveWork(Context context) {
         AppLog.d(TAG, "停止定时保活任务");
         WorkManager.getInstance(context).cancelUniqueWork(KEEP_ALIVE_WORK_NAME);
+    }
+
+    /** 根据允许状态同步定时保活任务。 */
+    public static void syncKeepAliveWork(Context context, boolean enabled) {
+        if (context == null) {
+            return;
+        }
+        if (enabled) {
+            startKeepAliveWork(context);
+        } else {
+            stopKeepAliveWork(context);
+        }
     }
 
     /**

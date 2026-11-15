@@ -33,6 +33,11 @@ public class KeepAliveProvider extends ContentProvider {
         }
         
         try {
+            if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+                AppLog.d(TAG, "KeepAliveProvider onCreate - user_exited=true，跳过后台拉起");
+                return false;
+            }
+
             AppLog.d(TAG, "KeepAliveProvider onCreate - 应用启动最早阶段");
             
             // 启动前台服务

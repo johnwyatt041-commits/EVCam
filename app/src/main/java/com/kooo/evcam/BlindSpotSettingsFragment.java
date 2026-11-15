@@ -53,7 +53,6 @@ public class BlindSpotSettingsFragment extends Fragment {
     private Button adjustSecondaryBlindSpotWindowButton;
     private Button adjustMjpegStreamButton;
 
-    private SwitchMaterial floatingWindowAnimationSwitch;
     private RadioGroup statusBarStyleGroup;
     private View statusBarColorPreview;
     private Button pickStatusBarColorButton;
@@ -70,7 +69,6 @@ public class BlindSpotSettingsFragment extends Fragment {
     private Button homeButton;
 
     private AppConfig appConfig;
-    private boolean disclaimerDialogShown = false;
 
     @Nullable
     @Override
@@ -82,12 +80,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         setupListeners();
 
         return view;
-    }
-
-    @Override
-    public void onResume() {
-        super.onResume();
-        maybeShowDisclaimerDialog();
     }
 
     private void initViews(View view) {
@@ -114,7 +106,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         avmAvoidanceDetailLayout = view.findViewById(R.id.layout_avm_avoidance_detail);
         avmAvoidanceActivityEditText = view.findViewById(R.id.et_avm_avoidance_activity);
 
-        floatingWindowAnimationSwitch = view.findViewById(R.id.switch_floating_window_animation);
         statusBarStyleGroup = view.findViewById(R.id.rg_status_bar_style);
         statusBarColorPreview = view.findViewById(R.id.view_status_bar_color_preview);
         pickStatusBarColorButton = view.findViewById(R.id.btn_pick_status_bar_color);
@@ -200,8 +191,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         }
 
         secondaryBlindSpotSwitch.setChecked(appConfig.isSecondaryDisplayEnabled());
-
-        floatingWindowAnimationSwitch.setChecked(appConfig.isFloatingWindowAnimationEnabled());
 
         int statusBarStyle = appConfig.getBlindSpotStatusBarStyle();
         switch (statusBarStyle) {
@@ -366,10 +355,6 @@ public class BlindSpotSettingsFragment extends Fragment {
             }
             appConfig.setSecondaryDisplayEnabled(isChecked);
             BlindSpotService.update(requireContext());
-        });
-
-        floatingWindowAnimationSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
-            appConfig.setFloatingWindowAnimationEnabled(isChecked);
         });
 
         statusBarStyleGroup.setOnCheckedChangeListener((group, checkedId) -> {
@@ -541,14 +526,6 @@ public class BlindSpotSettingsFragment extends Fragment {
         appConfig.setTurnSignalCustomLeftTriggerLog(leftKeyword);
         appConfig.setTurnSignalCustomRightTriggerLog(rightKeyword);
         BlindSpotService.update(requireContext());
-    }
-
-    private void maybeShowDisclaimerDialog() {
-        if (disclaimerDialogShown) return;
-        if (appConfig == null) return;
-        if (appConfig.isBlindSpotDisclaimerAccepted()) return;
-        disclaimerDialogShown = true;
-        new BlindSpotDisclaimerDialogFragment().show(getChildFragmentManager(), "blind_spot_disclaimer");
     }
 
     /**

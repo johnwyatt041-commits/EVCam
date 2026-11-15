@@ -142,7 +142,6 @@ public class AppConfig {
                  // 悬浮模拟按钮Y
 
     // 补盲悬浮窗动效
-    private static final String KEY_FLOATING_WINDOW_ANIMATION_ENABLED = "floating_window_animation_enabled"; // 悬浮窗开启/关闭动效
     private static final String KEY_BLIND_SPOT_STATUS_BAR_STYLE = "blind_spot_status_bar_style";             // 状态栏动效样式 (0=关, 1-5=五种动效)
     private static final String KEY_BLIND_SPOT_STATUS_BAR_COLOR = "blind_spot_status_bar_color";             // 状态栏动效颜色 (ARGB int)
     private static final String KEY_BLIND_SPOT_STATUS_BAR_BG_OPACITY = "blind_spot_status_bar_bg_opacity";   // 状态栏底色不透明度 0-100
@@ -156,7 +155,6 @@ public class AppConfig {
     // 补盲画面矫正 (Matrix)
     private static final String KEY_BLIND_SPOT_CORRECTION_ENABLED = "blind_spot_correction_enabled";
     private static final String KEY_BLIND_SPOT_CORRECTION_PREFIX = "blind_spot_correction_";
-    private static final String KEY_BLIND_SPOT_DISCLAIMER_ACCEPTED = "blind_spot_disclaimer_accepted";
     
     // 预览画面矫正配置
 
@@ -1672,14 +1670,6 @@ public class AppConfig {
         return prefs.getBoolean(KEY_BLIND_SPOT_CORRECTION_ENABLED, false);
     }
 
-    public void setBlindSpotDisclaimerAccepted(boolean accepted) {
-        prefs.edit().putBoolean(KEY_BLIND_SPOT_DISCLAIMER_ACCEPTED, accepted).apply();
-    }
-
-    public boolean isBlindSpotDisclaimerAccepted() {
-        return prefs.getBoolean(KEY_BLIND_SPOT_DISCLAIMER_ACCEPTED, false);
-    }
-
     private String getBlindSpotCorrectionKey(String cameraPos, String suffix) {
         return KEY_BLIND_SPOT_CORRECTION_PREFIX + cameraPos + "_" + suffix;
     }
@@ -2058,16 +2048,6 @@ public class AppConfig {
     }
 
     // ==================== 桌面悬浮模拟按钮配置相关方法 ====================
-
-    // ==================== 悬浮窗动效配置 ====================
-
-    public void setFloatingWindowAnimationEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_FLOATING_WINDOW_ANIMATION_ENABLED, enabled).apply();
-    }
-
-    public boolean isFloatingWindowAnimationEnabled() {
-        return prefs.getBoolean(KEY_FLOATING_WINDOW_ANIMATION_ENABLED, false);
-    }
 
     public void setBlindSpotStatusBarStyle(int style) {
         prefs.edit().putInt(KEY_BLIND_SPOT_STATUS_BAR_STYLE, style).apply();

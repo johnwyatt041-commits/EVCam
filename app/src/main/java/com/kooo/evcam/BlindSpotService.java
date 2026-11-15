@@ -127,6 +127,11 @@ public class BlindSpotService extends Service {
                 || inst.dedicatedBlindSpotWindow != null;
     }
 
+    /** 补盲服务实例当前是否处于运行状态。 */
+    public static boolean isServiceRunning() {
+        return sInstance != null;
+    }
+
     /**
      * 重新启动超视模式窗口的摄像头预览（用于应用从后台返回前台时）
      */
@@ -864,6 +869,11 @@ public class BlindSpotService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，停止 BlindSpotService");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (intent != null) {
 
             String action = intent.getStringExtra("action");

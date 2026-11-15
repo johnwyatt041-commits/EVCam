@@ -24,6 +24,11 @@ public class KeepAliveWorker extends Worker {
         try {
             // 检查远程查看服务状态
             Context context = getApplicationContext();
+            if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+                AppLog.d(TAG, "user_exited=true，停止并退出定时保活任务");
+                KeepAliveManager.stopKeepAliveWork(context);
+                return Result.success();
+            }
             
             // 记录当前运行状态
             AppLog.d(TAG, "应用进程保持活跃");

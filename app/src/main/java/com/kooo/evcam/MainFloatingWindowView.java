@@ -39,7 +39,6 @@ public class MainFloatingWindowView extends FrameLayout {
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable retryBindRunnable;
     private int retryBindCount = 0;
-    private android.animation.ValueAnimator windowAnimator;
     private boolean pendingShowAnimation = false;
     private Runnable showAnimFallback;
 
@@ -391,13 +390,7 @@ public class MainFloatingWindowView extends FrameLayout {
     public void show() {
         try {
             if (this.getParent() == null) {
-                boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
-
-                // 等待首帧画面到达后再显示，避免黑屏闪烁
-                if (animEnabled) {
-                    setScaleX(0.85f);
-                    setScaleY(0.85f);
-                }
+                // 等待首帧画面到达后再直接显示，避免黑屏闪烁
                 params.alpha = 0f;
                 pendingShowAnimation = true;
 
@@ -426,38 +419,7 @@ public class MainFloatingWindowView extends FrameLayout {
     }
 
     private void playShowAnimation() {
-        boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
-
-        if (!animEnabled) {
-            // 无动效：直接显示
-            setScaleX(1f);
-            setScaleY(1f);
-            params.alpha = 1f;
-            try {
-                if (getParent() != null) {
-                    windowManager.updateViewLayout(MainFloatingWindowView.this, params);
-                }
-            } catch (Exception e) {}
-            return;
-        }
-
-        // 有动效：缩放 + 淡入
-        if (windowAnimator != null) windowAnimator.cancel();
-        windowAnimator = android.animation.ValueAnimator.ofFloat(0f, 1f);
-        windowAnimator.setDuration(100);
-        windowAnimator.setInterpolator(new android.view.animation.DecelerateInterpolator(1.5f));
-        windowAnimator.addUpdateListener(animation -> {
-            float val = (float) animation.getAnimatedValue();
-            setScaleX(0.85f + 0.15f * val);
-            setScaleY(0.85f + 0.15f * val);
-            params.alpha = val;
-            try {
-                if (getParent() != null) {
-                    windowManager.updateViewLayout(MainFloatingWindowView.this, params);
-                }
-            } catch (Exception e) {}
-        });
-        windowAnimator.start();
+        FloatingWindowDisplayHelper.revealNow(this, windowManager, params);
     }
 
     /**
@@ -485,51 +447,7 @@ public class MainFloatingWindowView extends FrameLayout {
             showAnimFallback = null;
         }
 
-        if (getParent() == null) return;
-
-        boolean animEnabled = appConfig.isFloatingWindowAnimationEnabled();
-
-        if (!animEnabled) {
-            // 无动效：直接移除
-            params.alpha = 1f;
-            try {
-                windowManager.removeView(this);
-            } catch (Exception e) {}
-            return;
-        }
-
-        // 关闭动效：缩放 + 淡出
-        if (windowAnimator != null) {
-            windowAnimator.cancel();
-            windowAnimator = null;
-        }
-        windowAnimator = android.animation.ValueAnimator.ofFloat(1f, 0f);
-        windowAnimator.setDuration(100);
-        windowAnimator.setInterpolator(new android.view.animation.AccelerateInterpolator(1.5f));
-        windowAnimator.addUpdateListener(animation -> {
-            float val = (float) animation.getAnimatedValue();
-            setScaleX(0.85f + 0.15f * val);
-            setScaleY(0.85f + 0.15f * val);
-            params.alpha = val;
-            try {
-                if (getParent() != null) {
-                    windowManager.updateViewLayout(MainFloatingWindowView.this, params);
-                }
-            } catch (Exception e1) {}
-        });
-        windowAnimator.addListener(new android.animation.AnimatorListenerAdapter() {
-            @Override
-            public void onAnimationEnd(android.animation.Animator animation) {
-                params.alpha = 1f;
-                try {
-                    if (getParent() != null) {
-                        windowManager.removeView(MainFloatingWindowView.this);
-                    }
-                } catch (Exception e) {}
-                windowAnimator = null;
-            }
-        });
-        windowAnimator.start();
+        FloatingWindowDisplayHelper.dismissNow(this, windowManager, params);
     }
 
     /**

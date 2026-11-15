@@ -231,6 +231,11 @@ public class RecordingFloatingService extends Service {
 
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，停止 RecordingFloatingService");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         if (intent != null) {
             String action = intent.getAction();
             if (ACTION_HIDE.equals(action)) {

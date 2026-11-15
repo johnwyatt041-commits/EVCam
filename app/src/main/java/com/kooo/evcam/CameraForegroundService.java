@@ -43,6 +43,7 @@ public class CameraForegroundService extends Service {
     private Runnable cameraRepairRunnable;
 
     private static volatile boolean isForegroundReady = false;
+    private static volatile boolean explicitStopRequested = false;
     private static final java.util.List<Runnable> pendingReadyCallbacks = new java.util.ArrayList<>();
 
     /**
@@ -64,6 +65,11 @@ public class CameraForegroundService extends Service {
         super.onCreate();
         AppLog.d(TAG, "Service created");
         createNotificationChannel();
+
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，跳过 CameraForegroundService 后台初始化");
+            return;
+        }
         
         // 如果无障碍服务未运行，则在此注册 TIME_TICK 广播
         registerTimeTickIfNeeded();
@@ -123,6 +129,10 @@ public class CameraForegroundService extends Service {
      */
     private void startMainActivityForAutoRecording() {
         try {
+            if (!com.kooo.evcam.lifecycle.AppLifecycleState.shouldAutoLaunchUiFromBackground(this)) {
+                AppLog.d(TAG, "当前处于 ui_exited 或 user_exited，跳过自动拉起 MainActivity");
+                return;
+            }
             // 检查 MainActivity 是否已经在运行
             // 通过检查静态引用判断（避免重复启动）
             if (MainActivity.getInstance() != null) {
@@ -183,17 +193,6 @@ public class CameraForegroundService extends Service {
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         AppLog.d(TAG, "Service started");
-        
-        // 每次启动时检查并注册 TIME_TICK
-        registerTimeTickIfNeeded();
-        
-        // 确保 WakeLock 已获取
-        acquireWakeLock();
-        
-        // 确保远程服务和悬浮窗已启动（处理 START_STICKY 自动重启的情况）
-        // onCreate 可能不会被调用（服务自动恢复时），所以这里也要检查
-        ensureRemoteServicesStarted();
-        startCameraRepairLoop();
 
         // 从Intent获取通知内容，如果没有则使用默认内容
         String title = intent != null ? intent.getStringExtra("title") : null;
@@ -206,11 +205,34 @@ public class CameraForegroundService extends Service {
             content = "正在处理远程拍照/录制请求";
         }
 
-        // 创建通知
+        // 先满足 Android 8+ startForegroundService 约束，再判断是否需要立即自停
         Notification notification = createNotification(title, content);
-
-        // 启动前台服务
         startForeground(NOTIFICATION_ID, notification);
+
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，拒绝驻留并立即停止 CameraForegroundService");
+            explicitStopRequested = true;
+            isForegroundReady = false;
+            synchronized (pendingReadyCallbacks) {
+                pendingReadyCallbacks.clear();
+            }
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
+
+        explicitStopRequested = false;
+
+        // 每次启动时检查并注册 TIME_TICK
+        registerTimeTickIfNeeded();
+
+        // 确保 WakeLock 已获取
+        acquireWakeLock();
+
+        // 确保远程服务和悬浮窗已启动（处理 START_STICKY 自动重启的情况）
+        // onCreate 可能不会被调用（服务自动恢复时），所以这里也要检查
+        ensureRemoteServicesStarted();
+        startCameraRepairLoop();
 
         // 标记就绪，执行所有等待的回调
         isForegroundReady = true;
@@ -230,6 +252,9 @@ public class CameraForegroundService extends Service {
      */
     private void ensureRemoteServicesStarted() {
         try {
+            if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+                return;
+            }
             AppConfig appConfig = new AppConfig(this);
             if (!appConfig.isAutoStartOnBoot()) {
                 return;  // 未开启开机自启动，跳过
@@ -264,12 +289,15 @@ public class CameraForegroundService extends Service {
 
     @Override
     public void onDestroy() {
-        AppLog.d(TAG, "Service destroyed - 尝试重启...");
         isForegroundReady = false;
         stopCameraRepairLoop();
 
-        // 服务被杀时，发送延迟重启广播
-        scheduleServiceRestart();
+        if (com.kooo.evcam.lifecycle.AppLifecycleState.shouldScheduleServiceRestart(this, explicitStopRequested)) {
+            AppLog.d(TAG, "Service destroyed - 调度服务重启...");
+            scheduleServiceRestart();
+        } else {
+            AppLog.d(TAG, "Service destroyed - 显式停止/彻底退出状态，不触发重启");
+        }
 
         super.onDestroy();
     }
@@ -309,11 +337,13 @@ public class CameraForegroundService extends Service {
      */
     @Override
     public void onTaskRemoved(Intent rootIntent) {
-        AppLog.d(TAG, "onTaskRemoved - 应用被从最近任务清除，尝试重启服务...");
-        
-        // 立即重启服务
-        scheduleServiceRestart();
-        
+        if (com.kooo.evcam.lifecycle.AppLifecycleState.shouldScheduleServiceRestart(this, explicitStopRequested)) {
+            AppLog.d(TAG, "onTaskRemoved - 应用被从最近任务清除，尝试重启服务...");
+            scheduleServiceRestart();
+        } else {
+            AppLog.d(TAG, "onTaskRemoved - 显式停止/彻底退出状态，跳过重启");
+        }
+
         super.onTaskRemoved(rootIntent);
     }
     
@@ -322,19 +352,27 @@ public class CameraForegroundService extends Service {
      * 使用 Handler 延迟重启，避免立即重启被系统拦截
      */
     private void scheduleServiceRestart() {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.shouldScheduleServiceRestart(this, explicitStopRequested)) {
+            return;
+        }
         try {
+            Context appContext = getApplicationContext();
             // 方案1：使用 Handler 延迟重启
             new Handler(Looper.getMainLooper()).postDelayed(() -> {
+                if (!com.kooo.evcam.lifecycle.AppLifecycleState.shouldScheduleServiceRestart(appContext, explicitStopRequested)) {
+                    AppLog.d(TAG, "延迟重启前检测到显式退出/停止状态，取消重启");
+                    return;
+                }
                 try {
                     AppLog.d(TAG, "执行延迟重启...");
-                    start(getApplicationContext(), "EVCam", "服务自动重启");
+                    start(appContext, "EVCam", "服务自动重启");
                 } catch (Exception e) {
                     AppLog.e(TAG, "延迟重启失败: " + e.getMessage(), e);
                 }
             }, RESTART_DELAY_MS);
             
             // 方案2：发送保活广播（备份）
-            KeepAliveReceiver.sendKeepAliveCheck(getApplicationContext());
+            KeepAliveReceiver.sendKeepAliveCheck(appContext);
             
         } catch (Exception e) {
             AppLog.e(TAG, "调度重启失败: " + e.getMessage(), e);
@@ -406,6 +444,11 @@ public class CameraForegroundService extends Service {
      * @param content 通知内容
      */
     public static void start(Context context, String title, String content) {
+        if (context == null || !com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            AppLog.d(TAG, "user_exited=true，拒绝启动 CameraForegroundService: " + title);
+            return;
+        }
+        explicitStopRequested = false;
         Intent intent = new Intent(context, CameraForegroundService.class);
         intent.putExtra("title", title);
         intent.putExtra("content", content);
@@ -461,7 +504,14 @@ public class CameraForegroundService extends Service {
      * @param context 上下文
      */
     public static void stop(Context context) {
+        explicitStopRequested = true;
         isForegroundReady = false;
+        synchronized (pendingReadyCallbacks) {
+            pendingReadyCallbacks.clear();
+        }
+        if (context == null) {
+            return;
+        }
         Intent intent = new Intent(context, CameraForegroundService.class);
         context.stopService(intent);
         AppLog.d(TAG, "Stopping foreground service");

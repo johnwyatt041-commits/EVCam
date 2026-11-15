@@ -92,6 +92,11 @@ public class FloatingWindowService extends Service {
     
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，停止 FloatingWindowService");
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         AppLog.d(TAG, "FloatingWindowService onStartCommand");
         return START_STICKY;
     }

@@ -35,6 +35,11 @@ public class BootReceiver extends BroadcastReceiver {
         // 监听开机完成广播
         if (Intent.ACTION_BOOT_COMPLETED.equals(action) || 
             "android.intent.action.QUICKBOOT_POWERON".equals(action)) {
+            if (!com.kooo.evcam.lifecycle.AppLifecycleState.canHandleBootCompleted(
+                    com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(context))) {
+                AppLog.d(TAG, "user_exited=true，拦截开机自启动");
+                return;
+            }
             
             AppLog.d(TAG, "系统开机完成！");
             
@@ -79,6 +84,10 @@ public class BootReceiver extends BroadcastReceiver {
      * 等待系统稳定后再执行复杂的初始化
      */
     private void performDelayedInit(Context context) {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            AppLog.d(TAG, "user_exited=true，跳过延迟开机初始化");
+            return;
+        }
         AppLog.d(TAG, "执行延迟初始化...");
         
         try {
@@ -98,7 +107,9 @@ public class BootReceiver extends BroadcastReceiver {
             AppLog.d(TAG, "WorkManager 保活任务已启动");
             
             // 如果用户启用了开机自启动，尝试启动完整应用
-            if (appConfig.isAutoStartOnBoot()) {
+            if (com.kooo.evcam.lifecycle.AppLifecycleState.canLaunchUiOnBoot(
+                    com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(context),
+                    appConfig.isAutoStartOnBoot())) {
                 AppLog.d(TAG, "尝试启动完整应用...");
                 tryStartMainActivity(context);
             }

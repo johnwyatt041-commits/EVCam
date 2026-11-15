@@ -62,6 +62,10 @@ public class KeepAliveReceiver extends BroadcastReceiver {
         if (intent == null || intent.getAction() == null) {
             return;
         }
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            AppLog.d(TAG, "user_exited=true，忽略保活广播: " + intent.getAction());
+            return;
+        }
         
         String action = intent.getAction();
         
@@ -319,6 +323,10 @@ public class KeepAliveReceiver extends BroadcastReceiver {
      * @param context 上下文
      */
     public static synchronized void registerTimeTick(Context context) {
+        if (context == null || !com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            AppLog.d(TAG, "user_exited=true，跳过注册 TIME_TICK");
+            return;
+        }
         if (isTimeTickRegistered) {
             AppLog.d(TAG, "TIME_TICK 接收器已注册，跳过");
             return;
@@ -377,6 +385,9 @@ public class KeepAliveReceiver extends BroadcastReceiver {
      * @param context 上下文
      */
     public static void sendKeepAliveCheck(Context context) {
+        if (context == null || !com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(context)) {
+            return;
+        }
         try {
             Intent intent = new Intent(ACTION_KEEP_ALIVE);
             intent.setPackage(context.getPackageName());

@@ -193,16 +193,54 @@ public class RemoteServiceManager {
      * 收到命令后通过 WakeUpHelper 唤醒 MainActivity 执行
      */
     public void startRemoteServicesFromService(Context context) {
+        if (context == null) {
+            return;
+        }
         AppLog.d(TAG, "从 Service 启动远程服务...");
         
         // 使用 ApplicationContext 避免 Service 生命周期问题
         Context appContext = context.getApplicationContext();
+        if (!canStartRemoteServices(appContext)) {
+            AppLog.d(TAG, "user_exited=true，跳过从 Service 启动远程服务");
+            return;
+        }
 
         // 启动飞书服务
         FeishuConfig feishuConfig = new FeishuConfig(appContext);
         if (feishuConfig.isConfigured() && feishuConfig.isAutoStart() && !isFeishuRunning()) {
             startFeishuFromService(appContext, feishuConfig);
         }
+    }
+
+    /** 检查当前生命周期状态是否允许启动远程服务。 */
+    public boolean canStartRemoteServices(Context context) {
+        return context != null
+                && com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(
+                        context.getApplicationContext());
+    }
+
+    /** 为后续 P 档驻留按需拉起飞书服务预留幂等入口。 */
+    public boolean ensureFeishuLazyStarted(Context context, String reason) {
+        if (context == null) {
+            return false;
+        }
+        Context appContext = context.getApplicationContext();
+        if (!canStartRemoteServices(appContext)) {
+            AppLog.d(TAG, "user_exited=true，拒绝按需启动飞书服务, reason=" + reason);
+            return false;
+        }
+        FeishuConfig feishuConfig = new FeishuConfig(appContext);
+        if (!feishuConfig.isConfigured()) {
+            return false;
+        }
+        synchronized (feishuLock) {
+            if (isFeishuRunning() || isFeishuStarting) {
+                return true;
+            }
+        }
+        AppLog.d(TAG, "按需拉起飞书服务, reason=" + reason);
+        startFeishuFromService(appContext, feishuConfig);
+        return true;
     }
 
     /**
@@ -272,7 +310,7 @@ public class RemoteServiceManager {
                 @Override
                 public String onExitCommand(boolean confirmed) {
                     if (confirmed) {
-                        stopAllServices();
+                        com.kooo.evcam.lifecycle.AppExitCoordinator.exitFromRemoteService(context, null);
                         return "✅ EVCam 已退出";
                     }
                     return "⚠️ 发送「确认退出」执行退出操作";

@@ -218,6 +218,14 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化应用配置
         appConfig = new AppConfig(this);
+        boolean launchedFromBoot = getIntent() != null && getIntent().getBooleanExtra("auto_start_from_boot", false);
+        if (launchedFromBoot && com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(this)) {
+            AppLog.d(TAG, "user_exited=true，拦截后台/开机自启拉起 MainActivity");
+            finish();
+            return;
+        }
+        boolean recoveringFromUserExit = com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(this);
+        com.kooo.evcam.lifecycle.AppLifecycleState.markUserEnteredUi(this);
         appConfig.applyE5RecordingProfile();
         
         // 重置U盘回退提示标志（每次冷启动重置）
@@ -327,9 +335,13 @@ public class MainActivity extends AppCompatActivity {
         RemoteServiceManager.getInstance().setStatusInfoProvider(statusInfoProvider);
         AppLog.d(TAG, "StatusInfoProvider 已注册");
 
-        // 启动定时保活任务（车机必需，始终开启）
-        KeepAliveManager.startKeepAliveWork(this);
-        AppLog.d(TAG, "定时保活任务已启动");
+        // 根据统一退出状态同步定时保活与 TIME_TICK 监听
+        com.kooo.evcam.lifecycle.BackgroundCapabilityController.syncBackgroundKeepAlive(this);
+        if (recoveringFromUserExit
+                && (appConfig.isAutoStartOnBoot() || (feishuConfig.isConfigured() && feishuConfig.isAutoStart()))) {
+            CameraForegroundService.start(this, "EVCam", "服务正在运行");
+        }
+        AppLog.d(TAG, "后台保活状态已同步");
         
         // 防止休眠（仅当开启"开机自启动"时）
         // WakeLock 主要在 CameraForegroundService 中维护
@@ -392,7 +404,7 @@ public class MainActivity extends AppCompatActivity {
                             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                                 if (isRecording) {
                                     AppLog.d(TAG, "录制已开始，将 Activity 移到后台");
-                                    moveTaskToBack(true);
+                                    com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                                 }
                             }, 1500);
                         } else {
@@ -477,7 +489,7 @@ public class MainActivity extends AppCompatActivity {
                             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                                 if (isRecording) {
                                     AppLog.d(TAG, "录制已开始，将 Activity 移到后台");
-                                    moveTaskToBack(true);
+                                    com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                                 }
                             }, 1500);
                         } else {
@@ -502,7 +514,7 @@ public class MainActivity extends AppCompatActivity {
             
             // 延迟移到后台，确保初始化完成
             new android.os.Handler().postDelayed(() -> {
-                moveTaskToBack(true);  // 将应用移到后台
+                com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                 AppLog.d(TAG, "应用已移到后台，开机自启动完成");
             }, 500);  // 延迟 500ms
         }
@@ -673,7 +685,7 @@ public class MainActivity extends AppCompatActivity {
     private void executeStopRecordingAndBackground() {
         if (!isRecording) {
             AppLog.d(TAG, "Not recording, just move to background");
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
             return;
         }
         
@@ -682,7 +694,7 @@ public class MainActivity extends AppCompatActivity {
         
         // 延迟退到后台
         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
             AppLog.d(TAG, "Moved to background");
         }, 1000);
     }
@@ -876,7 +888,7 @@ public class MainActivity extends AppCompatActivity {
         btnExit.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                 .setTitle("退出 EVCam？").setMessage("退出会停止录像和后台服务。只想隐藏界面，可选择后台运行。")
                 .setPositiveButton("退出应用", (dialog, which) -> exitApp())
-                .setNeutralButton("后台运行", (dialog, which) -> moveTaskToBack(true))
+                .setNeutralButton("后台运行", (dialog, which) -> com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this))
                 .setNegativeButton("取消", null).show());
 
         btnTakePhoto.setOnClickListener(v -> takePicture());
@@ -1264,7 +1276,7 @@ public class MainActivity extends AppCompatActivity {
             btnExit.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
                 .setTitle("退出 EVCam？").setMessage("退出会停止录像和后台服务。只想隐藏界面，可选择后台运行。")
                 .setPositiveButton("退出应用", (dialog, which) -> exitApp())
-                .setNeutralButton("后台运行", (dialog, which) -> moveTaskToBack(true))
+                .setNeutralButton("后台运行", (dialog, which) -> com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this))
                 .setNegativeButton("取消", null).show());
         }
         if (btnTakePhoto != null) {
@@ -3099,7 +3111,7 @@ public class MainActivity extends AppCompatActivity {
                 if (WakeUpHelper.ACTION_MOVE_TO_BACKGROUND.equals(action)) {
                     AppLog.d(TAG, "收到后台切换广播");
                     // 直接退到后台，无需启动 Activity
-                    moveTaskToBack(true);
+                    com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                     AppLog.d(TAG, "应用已切换到后台（通过广播）");
                 }
             }
@@ -3233,7 +3245,7 @@ public class MainActivity extends AppCompatActivity {
             }
             
             // 退到后台
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
             
             runOnUiThread(() -> {
                 Toast.makeText(MainActivity.this, "息屏15秒，已退到后台", Toast.LENGTH_SHORT).show();
@@ -3495,39 +3507,38 @@ public class MainActivity extends AppCompatActivity {
      * 这是用户主动退出，需要停止所有服务
      */
     private void exitApp() {
-        AppLog.d(TAG, "用户请求退出应用，停止所有服务...");
-        
-        // 停止录制（如果正在录制）
-        if (isRecording) {
-            stopRecording();
-        }
+        com.kooo.evcam.lifecycle.AppExitCoordinator.exitFromActivity(this, buildExitHooks());
+    }
 
-        // 停止前台服务（确保清理）
-        CameraForegroundService.stop(this);
+    private void exitAppFromRemote() {
+        com.kooo.evcam.lifecycle.AppExitCoordinator.exitFromRemoteService(this, buildExitHooks());
+    }
 
-        // 通过 RemoteServiceManager 统一管理
-        RemoteServiceManager.getInstance().stopAllServices();
+    private com.kooo.evcam.lifecycle.AppExitCoordinator.ExitHooks buildExitHooks() {
+        return new com.kooo.evcam.lifecycle.AppExitCoordinator.ExitHooks() {
+            @Override
+            public void stopRecordingIfNeeded() {
+                if (isRecording) {
+                    stopRecording();
+                }
+            }
 
-        // 释放悬浮窗服务
-        FloatingWindowService.stop(this);
-        
-        // 释放持续唤醒锁
-        WakeUpHelper.releasePersistentWakeLock();
+            @Override
+            public void releaseCameras() {
+                if (cameraManager != null) {
+                    cameraManager.release();
+                }
+            }
 
-        // 释放摄像头资源
-        if (cameraManager != null) {
-            cameraManager.release();
-        }
-        com.kooo.evcam.camera.CameraManagerHolder.getInstance().release();
-        
-        // 保存日志（System.exit 会跳过 onDestroy，所以这里手动保存）
-        AppLog.saveToPersistentLog(this);
+            @Override
+            public void finishUiTasks() {
+            }
 
-        // 结束所有Activity并退出应用
-        finishAffinity();
-
-        // 完全退出进程
-        System.exit(0);
+            @Override
+            public void terminateProcess() {
+                System.exit(0);
+            }
+        };
     }
 
     private void startBlinkAnimation() {
@@ -3597,7 +3608,7 @@ public class MainActivity extends AppCompatActivity {
 
             // 将应用退到后台
             AppLog.d(TAG, "Moving task to back...");
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
 
             AppLog.d(TAG, "Returned to background successfully");
         }, 2000);
@@ -3923,7 +3934,7 @@ public class MainActivity extends AppCompatActivity {
         
         // 在主线程中执行退到后台
         runOnUiThread(() -> {
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
             AppLog.d(TAG, "应用已切换到后台");
         });
         
@@ -3940,10 +3951,10 @@ public class MainActivity extends AppCompatActivity {
             return "⚠️ 确认要退出 EVCam 吗？\n发送「确认退出」执行退出操作。";
         }
         
-        // 在主线程中执行退出
+        // 在主线程中执行退出（延迟断开远程通道，确保回执先发出）
         runOnUiThread(() -> {
-            AppLog.d(TAG, "执行退出操作...");
-            exitApp();
+            AppLog.d(TAG, "执行远程退出操作...");
+            exitAppFromRemote();
         });
         
         return "👋 EVCam 正在退出...";
@@ -4057,6 +4068,7 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        com.kooo.evcam.lifecycle.AppLifecycleState.markUiReturnedForeground(this);
         if (uiTheme != null) uiTheme.applyIfIdle();
         boolean wasInBackground = isInBackground;
         isInBackground = false;
@@ -4213,8 +4225,15 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        // 停止前台服务（确保清理）
-        CameraForegroundService.stop(this);
+        // 仅在主动退出或无后台保活需求时停止前台服务，避免切后台/配置变更误杀后反复自重启
+        if (com.kooo.evcam.lifecycle.AppLifecycleState.shouldStopForegroundOnUiDestroy(
+                com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(this),
+                isChangingConfigurations(),
+                com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this))) {
+            CameraForegroundService.stop(this);
+        } else {
+            AppLog.d(TAG, "onDestroy: 保留前台服务继续运行（配置变更或存在活跃后台能力）");
+        }
 
         // 【重要】不再在 onDestroy 中停止远程服务
         // 原因：某些车机系统（如星舰7）会在后台强杀 Activity，但进程仍存活
@@ -4320,7 +4339,7 @@ public class MainActivity extends AppCompatActivity {
         } else {
             // 在录制界面，按返回键将应用移到后台，而不是关闭Activity
             // 这样下次打开应用时能快速恢复，无需重新创建Activity
-            moveTaskToBack(true);
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
             AppLog.d(TAG, "Moved to background via back button");
         }
     }

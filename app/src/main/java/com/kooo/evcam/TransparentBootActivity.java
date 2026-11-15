@@ -19,6 +19,12 @@ public class TransparentBootActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，跳过透明开机启动 Activity");
+            finish();
+            overridePendingTransition(0, 0);
+            return;
+        }
         AppLog.d(TAG, "透明启动 Activity 已创建");
         
         // 不设置任何布局，保持完全透明

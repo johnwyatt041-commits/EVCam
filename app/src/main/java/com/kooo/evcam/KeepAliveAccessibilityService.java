@@ -48,6 +48,10 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         startTime = System.currentTimeMillis();
         
         AppLog.d(TAG, "无障碍服务已启动（增强保活模式）");
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，无障碍服务跳过拉起前台服务与保活广播");
+            return;
+        }
         
         // 注意：辅助服务本身就是系统级服务，不需要前台通知也有最高优先级
         // 前台通知由 CameraForegroundService 提供，避免重复通知
@@ -191,6 +195,10 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
      * 辅助服务拉起前台服务，形成双重保活
      */
     private void ensureForegroundServiceRunning() {
+        if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            AppLog.d(TAG, "user_exited=true，无障碍服务不拉起前台服务");
+            return;
+        }
         try {
             // 启动摄像头前台服务
             CameraForegroundService.start(this, "EVCam 后台运行中", "点击返回应用");

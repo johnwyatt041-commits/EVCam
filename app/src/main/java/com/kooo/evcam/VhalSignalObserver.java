@@ -375,6 +375,7 @@ public class VhalSignalObserver {
      * 处理一批属性值更新（由 native 层解码）
      */
     private void processPropertyBatch(byte[] data) {
+        com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onRawBatch(data);
         PropertyListener consumer = propertyListener;
         if (running && consumer != null) consumer.onBatch(data);
         if (!VhalNative.isLibraryLoaded()) {
@@ -391,6 +392,7 @@ public class VhalSignalObserver {
         }
         
         if (events == null || events.length < 1) return;
+        com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onNativeEvents(events);
 
         int numEvents = events[0];
         for (int i = 0; i < numEvents; i++) {
@@ -448,6 +450,9 @@ public class VhalSignalObserver {
      */
 
     private void notifyConnectionState(boolean isConnected) {
+        if (!isConnected) {
+            com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().reset();
+        }
         PropertyListener consumer = propertyListener;
         if (consumer != null) consumer.onConnectionChanged(isConnected);
         mainHandler.post(() -> {

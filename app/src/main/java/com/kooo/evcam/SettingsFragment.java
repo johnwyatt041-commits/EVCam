@@ -360,9 +360,9 @@ public class SettingsFragment extends Fragment {
                 parent.setVisibility(View.GONE);
             }
         }
-        // 确保定时保活任务已启动
+        // 根据全局生命周期状态同步定时保活任务
         if (getContext() != null) {
-            KeepAliveManager.startKeepAliveWork(getContext());
+            com.kooo.evcam.lifecycle.BackgroundCapabilityController.syncBackgroundKeepAlive(getContext());
         }
 
         // 防止休眠已改为始终开启（车机必需），无需设置开关

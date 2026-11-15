@@ -105,11 +105,15 @@ public class CarSignalManagerObserver {
      * 停止监听
      */
     public void stop() {
+        boolean wasActive = running || connected;
         running = false;
         connected = false;
         handler.removeCallbacks(pollRunnable);
         carSignalManager = null;
         getIndcrStsMethod = null;
+        if (wasActive) {
+            com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onTurnSignalState(-1, -1);
+        }
     }
     
     /**
@@ -304,6 +308,11 @@ public class CarSignalManagerObserver {
         if (lastTurnSignalState != currentState) {
             String statusDesc = getTurnSignalDesc(currentState);
             AppLog.d(TAG, "🔄 转向灯状态变化: " + lastTurnSignalState + " → " + currentState + " (" + statusDesc + ")");
+            int leftSignal = (currentState == 1 || currentState == 3) ? 1
+                    : (currentState == 0 || currentState == 2 ? 0 : -1);
+            int rightSignal = (currentState == 2 || currentState == 3) ? 1
+                    : (currentState == 0 || currentState == 1 ? 0 : -1);
+            com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onTurnSignalState(leftSignal, rightSignal);
             
             // 通知监听器
             if (listener != null) {
