@@ -37,6 +37,10 @@ public class SettingsCatalogAndAppearanceTest {
             Object val = backingStore.get(inv.getArgument(0));
             return val instanceof Boolean ? (Boolean) val : inv.getArgument(1);
         });
+        when(prefs.getInt(anyString(), anyInt())).thenAnswer(inv -> {
+            Object val = backingStore.get(inv.getArgument(0));
+            return val instanceof Integer ? (Integer) val : inv.getArgument(1);
+        });
         when(editor.putString(anyString(), nullable(String.class))).thenAnswer(inv -> {
             String key = inv.getArgument(0);
             String value = inv.getArgument(1);
@@ -45,6 +49,10 @@ public class SettingsCatalogAndAppearanceTest {
             return editor;
         });
         when(editor.putBoolean(anyString(), anyBoolean())).thenAnswer(inv -> {
+            backingStore.put(inv.getArgument(0), inv.getArgument(1));
+            return editor;
+        });
+        when(editor.putInt(anyString(), anyInt())).thenAnswer(inv -> {
             backingStore.put(inv.getArgument(0), inv.getArgument(1));
             return editor;
         });
@@ -57,8 +65,11 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals(7, entries.size());
 
         List<String> actualTitles = new ArrayList<>();
+        List<String> actualDisplayTitles = new ArrayList<>();
         for (SettingsCatalog.Entry entry : entries) {
             actualTitles.add(entry.title);
+            actualDisplayTitles.add(entry.displayTitle);
+            assertNotEquals(0, entry.iconResId);
             assertFalse(entry.title.contains("屏幕尺寸"));
             assertFalse(entry.title.contains("外设"));
             assertFalse(entry.title.startsWith("4."));
@@ -77,6 +88,16 @@ public class SettingsCatalogAndAppearanceTest {
                 "14. 软件更新",
                 "15. Debug 日志"
         ), actualTitles);
+
+        assertEquals(Arrays.asList(
+                "外观与交互",
+                "记录仪",
+                "补盲",
+                "飞书远程",
+                "系统与权限",
+                "软件更新",
+                "Debug 日志"
+        ), actualDisplayTitles);
     }
 
     @Test
@@ -109,6 +130,23 @@ public class SettingsCatalogAndAppearanceTest {
 
         config.setConfirmDoorExitEnabled(false);
         assertFalse(config.isConfirmDoorExitEnabled());
+    }
+
+    @Test
+    public void doorExitDelaySecondsNormalizesAndPersists() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertEquals(AppConfig.DEFAULT_DOOR_EXIT_DELAY_SECONDS, config.getDoorExitDelaySeconds());
+        assertEquals(5, AppConfig.normalizeDoorExitDelaySeconds(99));
+        assertEquals(5, AppConfig.normalizeDoorExitDelaySeconds(-1));
+
+        for (int valid : new int[]{3, 5, 10, 15, 30}) {
+            config.setDoorExitDelaySeconds(valid);
+            assertEquals(valid, config.getDoorExitDelaySeconds());
+        }
+        config.setDoorExitDelaySeconds(42);
+        assertEquals(5, config.getDoorExitDelaySeconds());
     }
 
     @Test

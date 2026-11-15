@@ -118,6 +118,8 @@ public class PermissionSettingsFragment extends Fragment {
             androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
         }
 
+        SettingsFragment.configureEmbeddedToolbar(this, view, "系统与权限");
+
         return view;
     }
 

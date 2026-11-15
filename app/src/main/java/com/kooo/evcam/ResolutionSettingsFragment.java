@@ -114,11 +114,7 @@ public class ResolutionSettingsFragment extends Fragment {
 
         // 设置返回按钮
         Button btnBack = view.findViewById(R.id.btn_back);
-        btnBack.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                getActivity().getSupportFragmentManager().popBackStack();
-            }
-        });
+        btnBack.setOnClickListener(v -> SettingsFragment.popSubPage(this));
 
         // 沉浸式状态栏兼容
         View toolbar = view.findViewById(R.id.toolbar);
@@ -131,6 +127,8 @@ public class ResolutionSettingsFragment extends Fragment {
             });
             androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
         }
+
+        SettingsFragment.configureSubPageToolbar(this, view);
 
         return view;
     }

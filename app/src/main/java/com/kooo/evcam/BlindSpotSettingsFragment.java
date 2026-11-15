@@ -80,6 +80,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         initViews(view);
         loadSettings();
         setupListeners();
+        SettingsFragment.configureEmbeddedToolbar(this, view, "补盲");
 
         return view;
     }
@@ -424,11 +425,7 @@ public class BlindSpotSettingsFragment extends Fragment {
                 WakeUpHelper.requestOverlayPermission(requireContext());
                 return;
             }
-            if (getActivity() == null) return;
-            androidx.fragment.app.FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-            transaction.replace(R.id.fragment_container, new BlindSpotCorrectionFragment());
-            transaction.addToBackStack(null);
-            transaction.commit();
+            SettingsFragment.openSubPage(this, new BlindSpotCorrectionFragment());
         });
 
         adjustSecondaryBlindSpotWindowButton.setOnClickListener(v -> {
@@ -437,20 +434,11 @@ public class BlindSpotSettingsFragment extends Fragment {
                 WakeUpHelper.requestOverlayPermission(requireContext());
                 return;
             }
-            if (getActivity() == null) return;
-            androidx.fragment.app.FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-            transaction.replace(R.id.fragment_container, new SecondaryBlindSpotAdjustFragment());
-            transaction.addToBackStack(null);
-            transaction.commit();
+            SettingsFragment.openSubPage(this, new SecondaryBlindSpotAdjustFragment());
         });
 
-        adjustMjpegStreamButton.setOnClickListener(v -> {
-            if (getActivity() == null) return;
-            androidx.fragment.app.FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-            transaction.replace(R.id.fragment_container, new MjpegStreamAdjustFragment());
-            transaction.addToBackStack(null);
-            transaction.commit();
-        });
+        adjustMjpegStreamButton.setOnClickListener(v ->
+                SettingsFragment.openSubPage(this, new MjpegStreamAdjustFragment()));
 
         logcatDebugButton.setOnClickListener(v -> {
             String keyword = logFilterEditText.getText().toString().trim();

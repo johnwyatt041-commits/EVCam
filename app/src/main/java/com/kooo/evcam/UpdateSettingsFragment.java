@@ -77,6 +77,8 @@ public class UpdateSettingsFragment extends Fragment {
             });
         }
 
+        SettingsFragment.configureEmbeddedToolbar(this, view, "软件更新");
+
         return view;
     }
 

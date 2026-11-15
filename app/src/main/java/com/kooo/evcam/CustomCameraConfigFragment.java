@@ -94,11 +94,7 @@ public class CustomCameraConfigFragment extends Fragment {
         
         // 设置返回按钮
         Button btnBack = view.findViewById(R.id.btn_back);
-        btnBack.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                getActivity().getSupportFragmentManager().popBackStack();
-            }
-        });
+        btnBack.setOnClickListener(v -> SettingsFragment.popSubPage(this));
         
         // 设置重置所有配置按钮
         Button btnResetAllConfig = view.findViewById(R.id.btn_reset_all_config);
@@ -139,6 +135,8 @@ public class CustomCameraConfigFragment extends Fragment {
             androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
         }
         
+        SettingsFragment.configureSubPageToolbar(this, view);
+
         return view;
     }
     

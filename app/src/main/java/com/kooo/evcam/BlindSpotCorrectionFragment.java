@@ -72,6 +72,7 @@ public class BlindSpotCorrectionFragment extends Fragment {
         setupListeners();
         updateCameraButtonStyles();
         startPreview(currentCameraPos);
+        SettingsFragment.configureSubPageToolbar(this, view);
         return view;
     }
 
@@ -124,10 +125,7 @@ public class BlindSpotCorrectionFragment extends Fragment {
     }
 
     private void setupListeners() {
-        backButton.setOnClickListener(v -> {
-            if (getActivity() == null) return;
-            getActivity().getSupportFragmentManager().popBackStack();
-        });
+        backButton.setOnClickListener(v -> SettingsFragment.popSubPage(this));
 
         homeButton.setOnClickListener(v -> {
             if (getActivity() instanceof MainActivity) {

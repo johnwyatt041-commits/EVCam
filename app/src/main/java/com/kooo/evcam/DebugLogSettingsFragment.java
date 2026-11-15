@@ -92,6 +92,8 @@ public class DebugLogSettingsFragment extends Fragment {
             }
         });
 
+        SettingsFragment.configureEmbeddedToolbar(this, view, "Debug 日志");
+
         return view;
     }
 

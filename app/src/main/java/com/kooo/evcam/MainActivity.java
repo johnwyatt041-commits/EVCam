@@ -281,6 +281,7 @@ public class MainActivity extends AppCompatActivity implements
                 this::onBackPressed,
                 () -> setMainPreviewEnabled(!appConfig.isMainPreviewEnabled()),
                 previewEditor::begin);
+        uiShell.bindRecordToggle(this::toggleRecording);
         initPreviewModeController();
         uiShell.setPreviewEnabled(appConfig.isMainPreviewEnabled());
         uiTheme.syncSystemBarsAndTree();
@@ -1794,24 +1795,35 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     /**
-     * 显示飞书远程界面
+     * 显示飞书远程界面（归并入双栏设置 -> 飞书远程）
      */
     private void showFeishuInterface() {
-        uiShell.showRoot(R.id.nav_feishu, new FeishuFragment());
+        openSettingsCategory(com.kooo.evcam.ui.SettingsCatalog.ID_FEISHU);
     }
 
     /**
      * 显示软件设置界面
      */
     private void showSettingsInterface() {
-        uiShell.showRoot(R.id.nav_settings, new SettingsFragment());
+        openSettingsCategory(com.kooo.evcam.ui.SettingsCatalog.ID_APPEARANCE);
     }
 
     /**
-     * 显示补盲选项设置界面
+     * 显示补盲选项设置界面（归并入双栏设置 -> 补盲）
      */
     private void showBlindSpotInterface() {
-        uiShell.showRoot(R.id.nav_secondary_display, new BlindSpotSettingsFragment());
+        openSettingsCategory(com.kooo.evcam.ui.SettingsCatalog.ID_BLIND_SPOT);
+    }
+
+    private void openSettingsCategory(@NonNull String categoryId) {
+        androidx.fragment.app.Fragment current = getSupportFragmentManager().findFragmentById(R.id.fragment_container);
+        if (uiShell != null
+                && uiShell.getCurrentRoot() == R.id.nav_settings
+                && current instanceof SettingsFragment) {
+            ((SettingsFragment) current).selectCategory(categoryId);
+            return;
+        }
+        uiShell.showRoot(R.id.nav_settings, SettingsFragment.newInstance(categoryId));
     }
 
     /**
@@ -4335,6 +4347,10 @@ public class MainActivity extends AppCompatActivity implements
         }
         if (uiShell != null && uiShell.isFullscreenPreview()) {
             uiShell.setFullscreenPreview(false);
+            return;
+        }
+        androidx.fragment.app.Fragment current = getSupportFragmentManager().findFragmentById(R.id.fragment_container);
+        if (current instanceof SettingsFragment && ((SettingsFragment) current).handleBackPressed()) {
             return;
         }
         if (getSupportFragmentManager().getBackStackEntryCount() > 0) {

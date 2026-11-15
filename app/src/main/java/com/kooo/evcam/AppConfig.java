@@ -3355,12 +3355,22 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     private static final String KEY_DEFAULT_START_PAGE = "default_start_page";
     private static final String KEY_CONFIRM_DOOR_EXIT = "confirm_door_exit";
+    private static final String KEY_DOOR_EXIT_DELAY_SECONDS = "door_exit_delay_seconds";
+    public static final int DEFAULT_DOOR_EXIT_DELAY_SECONDS = 5;
 
     /** 规范化启动页标识，未知值回退到默认「记录仪」。 */
     public static String normalizeDefaultStartPage(String page) {
         if (START_PAGE_PLAYBACK.equals(page)) return START_PAGE_PLAYBACK;
         if (START_PAGE_SETTINGS.equals(page)) return START_PAGE_SETTINGS;
         return START_PAGE_RECORDING;
+    }
+
+    /** 规范化开门退出确认倒计时秒数（仅允许 3/5/10/15/30 秒，其他值回退到默认 5 秒）。 */
+    public static int normalizeDoorExitDelaySeconds(int seconds) {
+        if (seconds == 3 || seconds == 5 || seconds == 10 || seconds == 15 || seconds == 30) {
+            return seconds;
+        }
+        return DEFAULT_DOOR_EXIT_DELAY_SECONDS;
     }
 
     public String getDefaultStartPage() {
@@ -3381,6 +3391,18 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public void setConfirmDoorExitEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_CONFIRM_DOOR_EXIT, enabled).apply();
         AppLog.d(TAG, "下车退出确认开关已设置: " + enabled);
+    }
+
+    /** 开门退出确认弹窗倒计时秒数（3/5/10/15/30 秒，T06 复用）。 */
+    public int getDoorExitDelaySeconds() {
+        return normalizeDoorExitDelaySeconds(
+                prefs.getInt(KEY_DOOR_EXIT_DELAY_SECONDS, DEFAULT_DOOR_EXIT_DELAY_SECONDS));
+    }
+
+    public void setDoorExitDelaySeconds(int seconds) {
+        int normalized = normalizeDoorExitDelaySeconds(seconds);
+        prefs.edit().putInt(KEY_DOOR_EXIT_DELAY_SECONDS, normalized).apply();
+        AppLog.d(TAG, "下车退出确认倒计时已设置: " + normalized + "s");
     }
 
     // ==================== T03 多模式主预览与快捷键配置 ====================

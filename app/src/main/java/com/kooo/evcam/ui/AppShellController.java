@@ -1,6 +1,7 @@
 package com.kooo.evcam.ui;
 
 import android.content.Context;
+import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
 import android.view.LayoutInflater;
@@ -65,6 +66,8 @@ public final class AppShellController {
     private PreviewMode activePreviewMode = PreviewMode.MODE_B;
     @Nullable
     private Consumer<Boolean> fullscreenListener;
+    @Nullable
+    private Runnable recordToggleListener;
     @ColorRes
     private int currentRecordingColor = R.color.text_primary;
 
@@ -87,6 +90,11 @@ public final class AppShellController {
         title = shell.findViewById(R.id.ui_page_title);
         back = shell.findViewById(R.id.ui_back);
         preview = shell.findViewById(R.id.ui_preview_toggle);
+
+        TextView versionView = shell.findViewById(R.id.ui_rail_version);
+        if (versionView != null) {
+            versionView.setText(resolveDisplayVersion(activity));
+        }
 
         applySystemBarInsets();
 
@@ -117,11 +125,26 @@ public final class AppShellController {
             exitItem.setOnClickListener(v -> onExit.run());
         }
 
+        TextView recordToggle = shell.findViewById(R.id.ui_nav_record_toggle);
+        if (recordToggle != null) {
+            scaleNavDrawable(recordToggle);
+            recordToggle.setOnClickListener(v -> {
+                if (recordToggleListener != null) {
+                    recordToggleListener.run();
+                }
+            });
+        }
+
         shell.findViewById(R.id.ui_edit_layout).setOnClickListener(v -> editLayout.run());
         back.setOnClickListener(v -> onBack.run());
         preview.setOnClickListener(v -> togglePreview.run());
         refreshTheme(activity, isActivityNight());
         updateHeader();
+    }
+
+    /** 绑定最左栏顶部「开始录制 / 停止录制」操作。 */
+    public void bindRecordToggle(@Nullable Runnable onToggleRecording) {
+        this.recordToggleListener = onToggleRecording;
     }
 
     public void bindPreviewModeControls(Consumer<PreviewMode> onModeSelect,
@@ -200,7 +223,8 @@ public final class AppShellController {
     private void applyContentTopInset() {
         View content = shell.findViewById(R.id.ui_content);
         if (content == null) return;
-        int topPadding = fullscreenPreview ? lastSysTopInset : 0;
+        boolean topBarHidden = (currentRoot != R.id.nav_recording) || fullscreenPreview;
+        int topPadding = topBarHidden ? lastSysTopInset : 0;
         if (content.getPaddingTop() != topPadding) {
             content.setPadding(content.getPaddingLeft(), topPadding,
                     content.getPaddingRight(), content.getPaddingBottom());
@@ -217,15 +241,27 @@ public final class AppShellController {
                 && activity.findViewById(R.id.ui_preview_layout) != null;
         if (fullscreenPreview == target) return;
         fullscreenPreview = target;
-        int chromeVisibility = target ? View.GONE : View.VISIBLE;
-        shell.findViewById(R.id.ui_rail).setVisibility(chromeVisibility);
-        shell.findViewById(R.id.ui_rail_divider).setVisibility(chromeVisibility);
-        shell.findViewById(R.id.ui_top_bar).setVisibility(chromeVisibility);
-        shell.findViewById(R.id.ui_topbar_divider).setVisibility(chromeVisibility);
+        int railVisibility = target ? View.GONE : View.VISIBLE;
+        shell.findViewById(R.id.ui_rail).setVisibility(railVisibility);
+        shell.findViewById(R.id.ui_rail_divider).setVisibility(railVisibility);
+        updateTopBarVisibility();
         applyContentTopInset();
         applyPreviewModeColors(activity);
         if (fullscreenListener != null) {
             fullscreenListener.accept(fullscreenPreview);
+        }
+    }
+
+    private void updateTopBarVisibility() {
+        boolean showTopBar = (currentRoot == R.id.nav_recording) && !fullscreenPreview;
+        int topBarVisibility = showTopBar ? View.VISIBLE : View.GONE;
+        View topBar = shell.findViewById(R.id.ui_top_bar);
+        if (topBar != null && topBar.getVisibility() != topBarVisibility) {
+            topBar.setVisibility(topBarVisibility);
+        }
+        View divider = shell.findViewById(R.id.ui_topbar_divider);
+        if (divider != null && divider.getVisibility() != topBarVisibility) {
+            divider.setVisibility(topBarVisibility);
         }
     }
 
@@ -252,6 +288,11 @@ public final class AppShellController {
     }
 
     public void restore(int destination) {
+        if (destination == R.id.nav_secondary_display || destination == R.id.nav_feishu) {
+            currentRoot = R.id.nav_settings;
+            updateHeader();
+            return;
+        }
         currentRoot = destination;
         for (int i = 0; i < destinations.length; i++) {
             if (destinations[i] == destination) {
@@ -297,6 +338,7 @@ public final class AppShellController {
                 contentStatus.setTextColor(resolvedColor);
             }
         }
+        updateRecordToggleUi(activity);
     }
 
     /** 原地刷新左栏、顶栏及系统配色，支持无重建切换深浅色。 */
@@ -304,6 +346,10 @@ public final class AppShellController {
         shell.findViewById(R.id.ui_shell_root).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.page_background));
         shell.findViewById(R.id.ui_rail).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.nav_background));
         shell.findViewById(R.id.ui_rail_divider).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.ui_border));
+        View recordDivider = shell.findViewById(R.id.ui_rail_record_divider);
+        if (recordDivider != null) {
+            recordDivider.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.ui_border));
+        }
         shell.findViewById(R.id.ui_rail_footer_divider).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.ui_border));
         shell.findViewById(R.id.ui_top_bar).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.menu_background));
         shell.findViewById(R.id.ui_topbar_divider).setBackgroundColor(ContextCompat.getColor(themedContext, R.color.ui_border));
@@ -312,6 +358,10 @@ public final class AppShellController {
         TextView brand = shell.findViewById(R.id.ui_rail_brand);
         if (brand != null) {
             brand.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
+        }
+        TextView versionView = shell.findViewById(R.id.ui_rail_version);
+        if (versionView != null) {
+            versionView.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
         }
         title.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
 
@@ -324,7 +374,8 @@ public final class AppShellController {
         for (int buttonId : buttons) {
             repaintNavItem(shell.findViewById(buttonId), themedContext, navTextColors);
         }
-        repaintNavItem(shell.findViewById(R.id.ui_nav_exit), themedContext, navTextColors);
+        repaintDangerNavItem(shell.findViewById(R.id.ui_nav_exit), themedContext);
+        updateRecordToggleUi(themedContext);
 
         if (back instanceof Button) {
             Button backBtn = (Button) back;
@@ -334,6 +385,59 @@ public final class AppShellController {
         applyPreviewButtonColors(themedContext);
         applyEditButtonColors(themedContext);
         applyPreviewModeColors(themedContext);
+    }
+
+    private void repaintDangerNavItem(@Nullable TextView item, Context themedContext) {
+        if (item == null) return;
+        Drawable itemBg = ContextCompat.getDrawable(themedContext, R.drawable.ui_nav_item);
+        if (itemBg != null) {
+            item.setBackground(itemBg);
+        }
+        int dangerColor = ContextCompat.getColor(themedContext, R.color.ui_danger);
+        item.setTextColor(dangerColor);
+        item.setCompoundDrawableTintList(ColorStateList.valueOf(dangerColor));
+    }
+
+    private void updateRecordToggleUi(@NonNull Context themedContext) {
+        TextView recordToggle = shell.findViewById(R.id.ui_nav_record_toggle);
+        if (recordToggle == null) return;
+        Drawable itemBg = ContextCompat.getDrawable(themedContext, R.drawable.ui_nav_item);
+        if (itemBg != null) {
+            recordToggle.setBackground(itemBg);
+        }
+        String label;
+        @ColorRes int colorRes;
+        if (currentRecordingColor == R.color.ui_danger) {
+            label = "停止录制";
+            colorRes = R.color.ui_danger;
+        } else if (currentRecordingColor == R.color.ui_warning) {
+            label = "准备中…";
+            colorRes = R.color.ui_warning;
+        } else {
+            label = "开始录制";
+            colorRes = R.color.text_secondary;
+        }
+        int resolved = ContextCompat.getColor(themedContext, colorRes);
+        recordToggle.setText(label);
+        recordToggle.setTextColor(resolved);
+        recordToggle.setCompoundDrawableTintList(ColorStateList.valueOf(resolved));
+    }
+
+    @NonNull
+    private static String resolveDisplayVersion(@NonNull Context context) {
+        try {
+            String raw = context.getPackageManager()
+                    .getPackageInfo(context.getPackageName(), 0).versionName;
+            if (raw != null && !raw.trim().isEmpty()) {
+                int dash = raw.indexOf('-');
+                String base = dash > 0 ? raw.substring(0, dash) : raw.trim();
+                return base.startsWith("V") || base.startsWith("v")
+                        ? "V" + base.substring(1)
+                        : "V" + base;
+            }
+        } catch (PackageManager.NameNotFoundException ignored) {
+        }
+        return "V1.6.6";
     }
 
     private void repaintNavItem(@Nullable TextView item, Context themedContext, @Nullable ColorStateList navTextColors) {
@@ -405,6 +509,8 @@ public final class AppShellController {
         for (int i = 0; i < buttons.length; i++) {
             shell.findViewById(buttons[i]).setSelected(destinations[i] == currentRoot);
         }
+        updateTopBarVisibility();
+        applyContentTopInset();
         boolean secondary = currentRoot != R.id.nav_recording && fragments.getBackStackEntryCount() > 0;
         back.setVisibility(secondary ? View.VISIBLE : View.GONE);
         boolean hasEditablePreview = currentRoot == R.id.nav_recording

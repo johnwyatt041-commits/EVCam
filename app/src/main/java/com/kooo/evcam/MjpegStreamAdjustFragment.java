@@ -72,6 +72,7 @@ public class MjpegStreamAdjustFragment extends Fragment {
             ((TextView) view.findViewById(R.id.tv_stream_direction_title)).setText("画面方向");
             view.findViewById(R.id.tv_stream_correction_description).setVisibility(View.GONE);
         }
+        SettingsFragment.configureSubPageToolbar(this, view);
         return view;
     }
 
@@ -270,9 +271,7 @@ public class MjpegStreamAdjustFragment extends Fragment {
     }
 
     private void setupListeners() {
-        backButton.setOnClickListener(v -> {
-            if (getActivity() != null) getActivity().getSupportFragmentManager().popBackStack();
-        });
+        backButton.setOnClickListener(v -> SettingsFragment.popSubPage(this));
         homeButton.setOnClickListener(v -> {
             if (getActivity() instanceof MainActivity) {
                 ((MainActivity) getActivity()).goToRecordingInterface();

@@ -58,6 +58,7 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
         loadSettings();
         setupListeners();
         enterAdjustMode();
+        SettingsFragment.configureSubPageToolbar(this, view);
         return view;
     }
 
@@ -150,10 +151,7 @@ public class SecondaryBlindSpotAdjustFragment extends Fragment {
     }
 
     private void setupListeners() {
-        backButton.setOnClickListener(v -> {
-            if (getActivity() == null) return;
-            getActivity().getSupportFragmentManager().popBackStack();
-        });
+        backButton.setOnClickListener(v -> SettingsFragment.popSubPage(this));
 
         homeButton.setOnClickListener(v -> {
             if (getActivity() instanceof MainActivity) {

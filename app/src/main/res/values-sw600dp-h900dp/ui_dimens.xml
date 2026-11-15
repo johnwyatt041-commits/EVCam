@@ -1,11 +1,14 @@
 <resources>
-    <dimen name="ui_rail_width">184dp</dimen>
-    <dimen name="ui_rail_brand_height">60dp</dimen>
-    <dimen name="ui_nav_height">100dp</dimen>
-    <dimen name="ui_nav_footer_height">82dp</dimen>
+    <dimen name="ui_rail_width">96dp</dimen>
+    <dimen name="ui_rail_padding">8dp</dimen>
+    <dimen name="ui_rail_brand_height">44dp</dimen>
+    <dimen name="ui_nav_height">74dp</dimen>
+    <dimen name="ui_nav_footer_height">66dp</dimen>
     <dimen name="ui_nav_gap">10dp</dimen>
-    <dimen name="ui_nav_padding">12dp</dimen>
-    <dimen name="ui_nav_text_size">24sp</dimen>
-    <dimen name="ui_nav_icon_size">42dp</dimen>
-    <dimen name="ui_nav_icon_gap">10dp</dimen>
+    <dimen name="ui_nav_padding">6dp</dimen>
+    <dimen name="ui_nav_padding_v">10dp</dimen>
+    <dimen name="ui_nav_text_size">13sp</dimen>
+    <dimen name="ui_nav_icon_size">26dp</dimen>
+    <dimen name="ui_nav_icon_gap">5dp</dimen>
+    <dimen name="ui_settings_sidebar_width">232dp</dimen>
 </resources>

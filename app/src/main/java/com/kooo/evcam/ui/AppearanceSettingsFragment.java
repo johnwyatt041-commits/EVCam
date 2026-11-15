@@ -1,8 +1,9 @@
 package com.kooo.evcam.ui;
 
 import android.content.Context;
-import android.content.res.ColorStateList;
+import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -20,6 +21,7 @@ import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
+import com.kooo.evcam.SettingsFragment;
 import com.kooo.evcam.ui.UiThemeController.ThemeMode;
 
 /**
@@ -53,6 +55,11 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private SwitchMaterial viewShortcutsSwitch;
     private SwitchMaterial accessibilityOverlaySwitch;
     private SwitchMaterial confirmDoorExitSwitch;
+    private Button btnDoorExit3s;
+    private Button btnDoorExit5s;
+    private Button btnDoorExit10s;
+    private Button btnDoorExit15s;
+    private Button btnDoorExit30s;
 
     @Nullable
     @Override
@@ -62,11 +69,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
 
         View btnBack = view.findViewById(R.id.btn_back);
         if (btnBack != null) {
-            btnBack.setOnClickListener(v -> {
-                if (getActivity() != null) {
-                    getActivity().getSupportFragmentManager().popBackStack();
-                }
-            });
+            btnBack.setOnClickListener(v -> SettingsFragment.popSubPage(this));
         }
 
         themeStatusText = view.findViewById(R.id.tv_theme_status);
@@ -91,6 +94,11 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         viewShortcutsSwitch = view.findViewById(R.id.switch_view_shortcuts);
         accessibilityOverlaySwitch = view.findViewById(R.id.switch_accessibility_overlay);
         confirmDoorExitSwitch = view.findViewById(R.id.switch_confirm_door_exit);
+        btnDoorExit3s = view.findViewById(R.id.btn_door_exit_3s);
+        btnDoorExit5s = view.findViewById(R.id.btn_door_exit_5s);
+        btnDoorExit10s = view.findViewById(R.id.btn_door_exit_10s);
+        btnDoorExit15s = view.findViewById(R.id.btn_door_exit_15s);
+        btnDoorExit30s = view.findViewById(R.id.btn_door_exit_30s);
 
         if (getContext() != null) {
             appConfig = new AppConfig(getContext());
@@ -158,6 +166,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
             confirmDoorExitSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
                 if (appConfig != null && getContext() != null) {
                     appConfig.setConfirmDoorExitEnabled(isChecked);
+                    refreshDoorExitUi(getContext());
                     Toast.makeText(getContext(),
                             isChecked ? "已开启开门退出二次确认（配置已保存，待 T06 接入信号）"
                                     : "已关闭开门退出二次确认",
@@ -166,6 +175,12 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
             });
         }
 
+        if (btnDoorExit3s != null) btnDoorExit3s.setOnClickListener(v -> selectDoorExitDelay(3));
+        if (btnDoorExit5s != null) btnDoorExit5s.setOnClickListener(v -> selectDoorExitDelay(5));
+        if (btnDoorExit10s != null) btnDoorExit10s.setOnClickListener(v -> selectDoorExitDelay(10));
+        if (btnDoorExit15s != null) btnDoorExit15s.setOnClickListener(v -> selectDoorExitDelay(15));
+        if (btnDoorExit30s != null) btnDoorExit30s.setOnClickListener(v -> selectDoorExitDelay(30));
+
         if (getContext() != null) {
             UiThemeController controller = resolveThemeController();
             boolean isNight = controller != null ? controller.isCurrentThemeNight()
@@ -173,7 +188,9 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
             refreshThemeUi(getContext(), isNight);
             refreshStartPageUi(getContext());
             refreshPreviewOptionsUi(getContext());
+            refreshDoorExitUi(getContext());
         }
+        SettingsFragment.configureEmbeddedToolbar(this, view, "外观与交互");
         return view;
     }
 
@@ -237,12 +254,19 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         }
     }
 
+    private void selectDoorExitDelay(int seconds) {
+        if (appConfig == null || getContext() == null) return;
+        appConfig.setDoorExitDelaySeconds(seconds);
+        refreshDoorExitUi(getContext());
+    }
+
     @Override
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
         refreshThemeUi(themedContext, isNight);
         refreshStartPageUi(themedContext);
         refreshPreviewOptionsUi(themedContext);
+        refreshDoorExitUi(themedContext);
     }
 
     private void refreshThemeUi(@NonNull Context context, boolean isNight) {
@@ -324,14 +348,50 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         return "仅沉浸全屏显示";
     }
 
+    private void refreshDoorExitUi(@NonNull Context context) {
+        int delaySeconds = appConfig != null
+                ? appConfig.getDoorExitDelaySeconds()
+                : AppConfig.DEFAULT_DOOR_EXIT_DELAY_SECONDS;
+        boolean enabled = appConfig != null && appConfig.isConfirmDoorExitEnabled();
+        applyOptionButtonState(btnDoorExit3s, context, delaySeconds == 3);
+        applyOptionButtonState(btnDoorExit5s, context, delaySeconds == 5);
+        applyOptionButtonState(btnDoorExit10s, context, delaySeconds == 10);
+        applyOptionButtonState(btnDoorExit15s, context, delaySeconds == 15);
+        applyOptionButtonState(btnDoorExit30s, context, delaySeconds == 30);
+        float alpha = enabled ? 1.0f : 0.65f;
+        if (btnDoorExit3s != null) btnDoorExit3s.setAlpha(alpha);
+        if (btnDoorExit5s != null) btnDoorExit5s.setAlpha(alpha);
+        if (btnDoorExit10s != null) btnDoorExit10s.setAlpha(alpha);
+        if (btnDoorExit15s != null) btnDoorExit15s.setAlpha(alpha);
+        if (btnDoorExit30s != null) btnDoorExit30s.setAlpha(alpha);
+    }
+
     private void applyOptionButtonState(@Nullable Button button, @NonNull Context context, boolean selected) {
         if (button == null) return;
-        int bgColor = ContextCompat.getColor(context, selected ? R.color.button_accent : R.color.button_background);
-        int textColor = ContextCompat.getColor(context, selected ? R.color.ui_on_accent : R.color.button_text);
-        ViewCompat.setBackgroundTintList(button, ColorStateList.valueOf(bgColor));
+        int fillColor = ContextCompat.getColor(context, selected ? R.color.ui_accent_soft : R.color.input_background);
+        int strokeColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_stroke : R.color.ui_border);
+        int textColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_text : R.color.text_primary);
+        int strokeWidthPx = Math.max(1, Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 1f, context.getResources().getDisplayMetrics())));
+        float radiusPx = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 8f, context.getResources().getDisplayMetrics());
+
+        GradientDrawable pill = new GradientDrawable();
+        pill.setShape(GradientDrawable.RECTANGLE);
+        pill.setColor(fillColor);
+        pill.setStroke(strokeWidthPx, strokeColor);
+        pill.setCornerRadius(radiusPx);
+
+        int pl = button.getPaddingLeft();
+        int pt = button.getPaddingTop();
+        int pr = button.getPaddingRight();
+        int pb = button.getPaddingBottom();
+        ViewCompat.setBackgroundTintList(button, null);
+        button.setBackground(pill);
+        button.setPadding(pl, pt, pr, pb);
         button.setTextColor(textColor);
-        button.setTag(R.id.ui_theme_bg_role, selected ? "accent" : null);
-        button.setTag(R.id.ui_theme_text_role, selected ? "on_accent" : null);
+        button.setTag(R.id.ui_theme_bg_role, null);
+        button.setTag(R.id.ui_theme_text_role, null);
         button.setSelected(selected);
     }
 

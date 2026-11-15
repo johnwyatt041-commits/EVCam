@@ -268,6 +268,8 @@ public class RecorderSettingsFragment extends Fragment {
             androidx.core.view.ViewCompat.requestApplyInsets(toolbar);
         }
 
+        SettingsFragment.configureEmbeddedToolbar(this, view, "记录仪");
+
         return view;
     }
     
@@ -1763,28 +1765,14 @@ public class RecorderSettingsFragment extends Fragment {
      * 打开自定义摄像头配置界面
      */
     private void openCustomCameraConfig() {
-        if (getActivity() == null) {
-            return;
-        }
-        
-        FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-        transaction.replace(R.id.fragment_container, new CustomCameraConfigFragment());
-        transaction.addToBackStack(null);
-        transaction.commit();
+        SettingsFragment.openSubPage(this, new CustomCameraConfigFragment());
     }
-    
+
     /**
      * 打开分辨率设置界面
      */
     private void openResolutionSettings() {
-        if (getActivity() == null) {
-            return;
-        }
-        
-        FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-        transaction.replace(R.id.fragment_container, new ResolutionSettingsFragment());
-        transaction.addToBackStack(null);
-        transaction.commit();
+        SettingsFragment.openSubPage(this, new ResolutionSettingsFragment());
     }
     
 }

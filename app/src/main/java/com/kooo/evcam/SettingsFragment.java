@@ -1,14 +1,16 @@
 package com.kooo.evcam;
 
 import android.content.Context;
-import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
+import android.graphics.Typeface;
+import android.graphics.drawable.Drawable;
 import android.os.Bundle;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
@@ -16,193 +18,321 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
+import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
 
 import com.kooo.evcam.ui.AppearanceSettingsFragment;
 import com.kooo.evcam.ui.SettingsCatalog;
 import com.kooo.evcam.ui.SettingsCatalog.Entry;
 import com.kooo.evcam.ui.UiThemeController;
-import com.kooo.evcam.ui.UiThemeController.ThemeMode;
 
 import java.util.HashMap;
 import java.util.Map;
 
 /**
- * SC 风格精简设置目录页：
- * 仅展示已实装可进入项（1. 外观与交互、3. 记录仪、5. 补盲、11. 飞书远程、13. 系统与权限、14. 软件更新、15. Debug 日志）。
+ * SC 风格双栏设置页（Master-Detail）：
+ * 左侧分类栏固定展示 7 个已实装分类，右侧容器原地呈现当前选中分类的详情页与二级子页。
  */
 public class SettingsFragment extends Fragment implements UiThemeController.ThemeAware {
-    private static final String TAG = "SettingsFragment";
+    private static final String ARG_INITIAL_CATEGORY = "initial_category";
+    private static final String STATE_ACTIVE_CATEGORY = "active_category";
 
+    private String activeCategoryId = SettingsCatalog.ID_APPEARANCE;
     private LinearLayout catalogContainer;
+    private View sidebarView;
+    private View paneDivider;
+    private View detailContainer;
+    private TextView sidebarTitle;
+
+    private final Map<String, View> rowViews = new HashMap<>();
+    private final Map<String, ImageView> iconViews = new HashMap<>();
     private final Map<String, TextView> titleViews = new HashMap<>();
-    private final Map<String, TextView> subtitleViews = new HashMap<>();
-    private final Map<String, TextView> arrowViews = new HashMap<>();
-    private final Map<String, View> cardViews = new HashMap<>();
+    private final Map<String, TextView> chevronViews = new HashMap<>();
+
+    public static SettingsFragment newInstance(@Nullable String initialCategoryId) {
+        SettingsFragment fragment = new SettingsFragment();
+        Bundle args = new Bundle();
+        args.putString(ARG_INITIAL_CATEGORY, resolveValidCategoryId(initialCategoryId));
+        fragment.setArguments(args);
+        return fragment;
+    }
+
+    @Override
+    public void onCreate(@Nullable Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        if (savedInstanceState != null) {
+            activeCategoryId = resolveValidCategoryId(savedInstanceState.getString(STATE_ACTIVE_CATEGORY));
+        } else if (getArguments() != null) {
+            activeCategoryId = resolveValidCategoryId(getArguments().getString(ARG_INITIAL_CATEGORY));
+        }
+    }
 
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
                              @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_settings, container, false);
+        sidebarView = view.findViewById(R.id.settings_sidebar);
+        paneDivider = view.findViewById(R.id.settings_pane_divider);
+        detailContainer = view.findViewById(R.id.settings_detail_container);
+        sidebarTitle = view.findViewById(R.id.tv_settings_sidebar_title);
         catalogContainer = view.findViewById(R.id.layout_settings_catalog);
-        buildCatalogRows(inflater.getContext());
+
+        buildCatalogSidebar(inflater.getContext());
+        applySidebarTheme(inflater.getContext());
+
+        if (savedInstanceState == null
+                || getChildFragmentManager().findFragmentById(R.id.settings_detail_container) == null) {
+            showCategoryDetail(activeCategoryId);
+        }
         return view;
     }
 
     @Override
-    public void onResume() {
-        super.onResume();
-        if (getContext() != null) {
-            refreshDynamicContent(getContext());
-        }
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putString(STATE_ACTIVE_CATEGORY, activeCategoryId);
     }
 
     @Override
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
-        refreshDynamicContent(themedContext);
+        applySidebarTheme(themedContext);
     }
 
-    private void buildCatalogRows(@NonNull Context context) {
-        if (catalogContainer == null) return;
-        catalogContainer.removeAllViews();
-        titleViews.clear();
-        subtitleViews.clear();
-        arrowViews.clear();
-        cardViews.clear();
-
-        int cardGap = dp(context, 12);
-        int paddingH = dp(context, 18);
-        int paddingV = dp(context, 16);
-
-        for (Entry entry : SettingsCatalog.getImplementedEntries()) {
-            LinearLayout card = new LinearLayout(context);
-            card.setOrientation(LinearLayout.HORIZONTAL);
-            card.setGravity(Gravity.CENTER_VERTICAL);
-            card.setBackgroundResource(R.drawable.ui_card);
-            card.setPadding(paddingH, paddingV, paddingH, paddingV);
-            card.setClickable(true);
-            card.setFocusable(true);
-            LinearLayout.LayoutParams cardParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            cardParams.bottomMargin = cardGap;
-            card.setLayoutParams(cardParams);
-
-            LinearLayout textColumn = new LinearLayout(context);
-            textColumn.setOrientation(LinearLayout.VERTICAL);
-            LinearLayout.LayoutParams colParams = new LinearLayout.LayoutParams(
-                    0,
-                    ViewGroup.LayoutParams.WRAP_CONTENT,
-                    1f
-            );
-            colParams.setMarginEnd(dp(context, 12));
-            textColumn.setLayoutParams(colParams);
-
-            TextView titleView = new TextView(context);
-            titleView.setText(entry.title);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 17);
-            titleView.setTypeface(titleView.getTypeface(), android.graphics.Typeface.BOLD);
-            titleView.setTextColor(ContextCompat.getColor(context, R.color.text_primary));
-            textColumn.addView(titleView);
-
-            TextView subtitleView = new TextView(context);
-            subtitleView.setText(resolveEntrySubtitle(context, entry));
-            subtitleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
-            subtitleView.setTextColor(ContextCompat.getColor(context, R.color.text_secondary));
-            LinearLayout.LayoutParams subParams = new LinearLayout.LayoutParams(
-                    ViewGroup.LayoutParams.MATCH_PARENT,
-                    ViewGroup.LayoutParams.WRAP_CONTENT
-            );
-            subParams.topMargin = dp(context, 4);
-            subtitleView.setLayoutParams(subParams);
-            textColumn.addView(subtitleView);
-
-            TextView arrowView = new TextView(context);
-            arrowView.setText("进入 →");
-            arrowView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 14);
-            arrowView.setTextColor(ContextCompat.getColor(context, R.color.button_text));
-            arrowView.setBackgroundResource(R.drawable.ui_card);
-            arrowView.setBackgroundTintList(ColorStateList.valueOf(
-                    ContextCompat.getColor(context, R.color.button_background)));
-            arrowView.setPadding(dp(context, 14), dp(context, 8), dp(context, 14), dp(context, 8));
-
-            card.addView(textColumn);
-            card.addView(arrowView);
-            card.setOnClickListener(v -> openEntry(entry));
-
-            catalogContainer.addView(card);
-            cardViews.put(entry.id, card);
-            titleViews.put(entry.id, titleView);
-            subtitleViews.put(entry.id, subtitleView);
-            arrowViews.put(entry.id, arrowView);
+    /** 切换当前高亮分类并加载对应的详情 Fragment。 */
+    public void selectCategory(@NonNull String categoryId) {
+        String resolved = resolveValidCategoryId(categoryId);
+        activeCategoryId = resolved;
+        if (getContext() != null) {
+            applySidebarTheme(getContext());
+        }
+        if (isAdded()) {
+            showCategoryDetail(resolved);
         }
     }
 
-    private void refreshDynamicContent(@NonNull Context context) {
-        int textPrimary = ContextCompat.getColor(context, R.color.text_primary);
-        int textSecondary = ContextCompat.getColor(context, R.color.text_secondary);
-        int buttonBg = ContextCompat.getColor(context, R.color.button_background);
-        int buttonText = ContextCompat.getColor(context, R.color.button_text);
+    /** 处理硬件返回键：若右侧详情区存在二级子页返回栈，优先回退一级。 */
+    public boolean handleBackPressed() {
+        if (isAdded() && getChildFragmentManager().getBackStackEntryCount() > 0) {
+            getChildFragmentManager().popBackStack();
+            return true;
+        }
+        return false;
+    }
+
+    /** 将二级子页推入设置详情容器（若非双栏宿主则回退到主容器）。 */
+    public static void openSubPage(@NonNull Fragment caller, @NonNull Fragment target) {
+        Fragment parent = caller.getParentFragment();
+        if (parent instanceof SettingsFragment && parent.isAdded()) {
+            FragmentTransaction tx = parent.getChildFragmentManager().beginTransaction();
+            tx.replace(R.id.settings_detail_container, target);
+            tx.addToBackStack(null);
+            tx.commitAllowingStateLoss();
+            return;
+        }
+        if (caller.getActivity() != null) {
+            FragmentTransaction tx = caller.getActivity().getSupportFragmentManager().beginTransaction();
+            tx.replace(R.id.fragment_container, target);
+            tx.addToBackStack(null);
+            tx.commitAllowingStateLoss();
+        }
+    }
+
+    /** 从二级子页返回上一级设置页。 */
+    public static void popSubPage(@NonNull Fragment caller) {
+        Fragment parent = caller.getParentFragment();
+        if (parent instanceof SettingsFragment && parent.isAdded()) {
+            parent.getChildFragmentManager().popBackStack();
+            return;
+        }
+        if (caller.getActivity() != null) {
+            caller.getActivity().getSupportFragmentManager().popBackStack();
+        }
+    }
+
+    /**
+     * 当一级分类页内嵌于双栏设置右侧详情容器时，统一隐藏返回/菜单/主页按钮并采用 SC 大标题风格。
+     */
+    public static void configureEmbeddedToolbar(@NonNull Fragment fragment, @Nullable View root,
+                                                @NonNull String cleanTitle) {
+        if (root == null || !(fragment.getParentFragment() instanceof SettingsFragment)) {
+            return;
+        }
+        View toolbar = root.findViewById(R.id.toolbar);
+        if (toolbar == null) return;
+        Context ctx = root.getContext();
+        toolbar.setBackgroundColor(ContextCompat.getColor(ctx, R.color.page_background));
+        toolbar.setPadding(dpStatic(ctx, 20), dpStatic(ctx, 18), dpStatic(ctx, 20), dpStatic(ctx, 10));
+
+        hideButton(root.findViewById(R.id.btn_back));
+        hideButton(root.findViewById(R.id.btn_menu));
+        hideButton(root.findViewById(R.id.btn_home));
+
+        if (toolbar instanceof ViewGroup) {
+            TextView heading = findFirstHeadingText((ViewGroup) toolbar);
+            if (heading != null) {
+                heading.setText(cleanTitle);
+                heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
+                heading.setTypeface(null, Typeface.BOLD);
+                heading.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+            }
+        }
+    }
+
+    /** 在双栏详情容器中显示的二级子页，保留返回按钮并隐藏多余的菜单/主页按钮。 */
+    public static void configureSubPageToolbar(@NonNull Fragment fragment, @Nullable View root) {
+        if (root == null || !(fragment.getParentFragment() instanceof SettingsFragment)) {
+            return;
+        }
+        hideButton(root.findViewById(R.id.btn_menu));
+        hideButton(root.findViewById(R.id.btn_home));
+        View toolbar = root.findViewById(R.id.toolbar);
+        if (toolbar != null) {
+            Context ctx = root.getContext();
+            toolbar.setBackgroundColor(ContextCompat.getColor(ctx, R.color.page_background));
+            toolbar.setPadding(dpStatic(ctx, 16), dpStatic(ctx, 14), dpStatic(ctx, 20), dpStatic(ctx, 10));
+        }
+    }
+
+    private static void hideButton(@Nullable View view) {
+        if (view != null) {
+            view.setVisibility(View.GONE);
+        }
+    }
+
+    @Nullable
+    private static TextView findFirstHeadingText(@NonNull ViewGroup group) {
+        for (int i = 0; i < group.getChildCount(); i++) {
+            View child = group.getChildAt(i);
+            if (child instanceof TextView && !(child instanceof android.widget.Button)) {
+                return (TextView) child;
+            }
+            if (child instanceof ViewGroup) {
+                TextView nested = findFirstHeadingText((ViewGroup) child);
+                if (nested != null) return nested;
+            }
+        }
+        return null;
+    }
+
+    private void buildCatalogSidebar(@NonNull Context context) {
+        if (catalogContainer == null) return;
+        catalogContainer.removeAllViews();
+        rowViews.clear();
+        iconViews.clear();
+        titleViews.clear();
+        chevronViews.clear();
+
+        int rowHeight = dpStatic(context, 46);
+        int rowGap = dpStatic(context, 6);
+        int paddingH = dpStatic(context, 12);
+        int iconSize = dpStatic(context, 18);
+        int iconGap = dpStatic(context, 10);
 
         for (Entry entry : SettingsCatalog.getImplementedEntries()) {
-            View card = cardViews.get(entry.id);
-            if (card != null) {
-                card.setBackground(ContextCompat.getDrawable(context, R.drawable.ui_card));
+            LinearLayout row = new LinearLayout(context);
+            row.setOrientation(LinearLayout.HORIZONTAL);
+            row.setGravity(Gravity.CENTER_VERTICAL);
+            row.setBackgroundResource(R.drawable.ui_nav_item);
+            row.setPadding(paddingH, 0, paddingH, 0);
+            row.setClickable(true);
+            row.setFocusable(true);
+            LinearLayout.LayoutParams rowParams = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, rowHeight);
+            rowParams.bottomMargin = rowGap;
+            row.setLayoutParams(rowParams);
+
+            ImageView icon = new ImageView(context);
+            icon.setImageResource(entry.iconResId);
+            LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(iconSize, iconSize);
+            iconParams.setMarginEnd(iconGap);
+            icon.setLayoutParams(iconParams);
+
+            TextView titleView = new TextView(context);
+            titleView.setText(entry.displayTitle);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            titleView.setMaxLines(1);
+            titleView.setLayoutParams(new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+
+            TextView chevron = new TextView(context);
+            chevron.setText("›");
+            chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+
+            row.addView(icon);
+            row.addView(titleView);
+            row.addView(chevron);
+            row.setOnClickListener(v -> selectCategory(entry.id));
+
+            catalogContainer.addView(row);
+            rowViews.put(entry.id, row);
+            iconViews.put(entry.id, icon);
+            titleViews.put(entry.id, titleView);
+            chevronViews.put(entry.id, chevron);
+        }
+    }
+
+    private void applySidebarTheme(@NonNull Context context) {
+        if (sidebarView != null) {
+            sidebarView.setBackgroundColor(ContextCompat.getColor(context, R.color.nav_background));
+        }
+        if (paneDivider != null) {
+            paneDivider.setBackgroundColor(ContextCompat.getColor(context, R.color.ui_border));
+        }
+        if (detailContainer != null) {
+            detailContainer.setBackgroundColor(ContextCompat.getColor(context, R.color.page_background));
+        }
+        if (sidebarTitle != null) {
+            sidebarTitle.setTextColor(ContextCompat.getColor(context, R.color.text_primary));
+        }
+
+        int selectedAccent = ContextCompat.getColor(context, R.color.nav_icon_tint_selected);
+        int selectedText = ContextCompat.getColor(context, R.color.ui_option_pill_selected_text);
+        int normalText = ContextCompat.getColor(context, R.color.text_primary);
+        int normalIcon = ContextCompat.getColor(context, R.color.text_secondary);
+
+        for (Entry entry : SettingsCatalog.getImplementedEntries()) {
+            boolean selected = entry.id.equals(activeCategoryId);
+            View row = rowViews.get(entry.id);
+            if (row != null) {
+                Drawable bg = ContextCompat.getDrawable(context, R.drawable.ui_nav_item);
+                if (bg != null) {
+                    row.setBackground(bg);
+                }
+                row.setSelected(selected);
+            }
+            ImageView icon = iconViews.get(entry.id);
+            if (icon != null) {
+                icon.setImageTintList(ColorStateList.valueOf(selected ? selectedAccent : normalIcon));
             }
             TextView titleView = titleViews.get(entry.id);
             if (titleView != null) {
-                titleView.setTextColor(textPrimary);
+                titleView.setTextColor(selected ? selectedText : normalText);
+                titleView.setTypeface(null, selected ? Typeface.BOLD : Typeface.NORMAL);
             }
-            TextView subtitleView = subtitleViews.get(entry.id);
-            if (subtitleView != null) {
-                subtitleView.setTextColor(textSecondary);
-                subtitleView.setText(resolveEntrySubtitle(context, entry));
-            }
-            TextView arrowView = arrowViews.get(entry.id);
-            if (arrowView != null) {
-                arrowView.setTextColor(buttonText);
-                arrowView.setBackgroundTintList(ColorStateList.valueOf(buttonBg));
+            TextView chevron = chevronViews.get(entry.id);
+            if (chevron != null) {
+                chevron.setTextColor(selected ? selectedText : normalIcon);
             }
         }
+    }
+
+    private void showCategoryDetail(@NonNull String categoryId) {
+        FragmentManager fm = getChildFragmentManager();
+        fm.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        Fragment target = createTargetFragment(categoryId);
+        if (target == null) return;
+        FragmentTransaction transaction = fm.beginTransaction();
+        transaction.replace(R.id.settings_detail_container, target);
+        transaction.commitAllowingStateLoss();
     }
 
     @NonNull
-    private String resolveEntrySubtitle(@NonNull Context context, @NonNull Entry entry) {
-        if (SettingsCatalog.ID_APPEARANCE.equals(entry.id)) {
-            ThemeMode mode = UiThemeController.savedThemeMode(context);
-            AppConfig config = new AppConfig(context);
-            String startLabel = AppearanceSettingsFragment.formatStartPageLabel(config.getDefaultStartPage());
-            return "当前主题：" + mode.label + " · 默认启动页：" + startLabel
-                    + (config.isConfirmDoorExitEnabled() ? " · 已开开门确认" : "");
-        }
-        if (SettingsCatalog.ID_UPDATE.equals(entry.id)) {
-            try {
-                String version = context.getPackageManager()
-                        .getPackageInfo(context.getPackageName(), 0).versionName;
-                return "当前版本：v" + version + "（点击查看与检查更新）";
-            } catch (PackageManager.NameNotFoundException e) {
-                AppLog.w(TAG, "Cannot read versionName", e);
-            }
-        }
-        return entry.description;
-    }
-
-    private void openEntry(@NonNull Entry entry) {
-        if (getActivity() == null) return;
-        Fragment target = createTargetFragment(entry.id);
-        if (target == null) return;
-
-        Bundle args = target.getArguments() != null ? new Bundle(target.getArguments()) : new Bundle();
-        args.putString("ui_screen_title", entry.title);
-        target.setArguments(args);
-
-        FragmentTransaction transaction = getActivity().getSupportFragmentManager().beginTransaction();
-        transaction.replace(R.id.fragment_container, target);
-        transaction.addToBackStack(null);
-        transaction.commit();
+    private static String resolveValidCategoryId(@Nullable String categoryId) {
+        return SettingsCatalog.findById(categoryId) != null
+                ? categoryId
+                : SettingsCatalog.ID_APPEARANCE;
     }
 
     @Nullable
@@ -227,7 +357,7 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
         }
     }
 
-    private int dp(@NonNull Context context, int dp) {
+    private static int dpStatic(@NonNull Context context, int dp) {
         return Math.round(TypedValue.applyDimension(
                 TypedValue.COMPLEX_UNIT_DIP,
                 dp,

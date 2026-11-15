@@ -16,12 +16,13 @@ import android.widget.TextView;
 import androidx.annotation.ColorInt;
 import androidx.annotation.ColorRes;
 import androidx.annotation.Nullable;
+import androidx.appcompat.content.res.AppCompatResources;
+import androidx.appcompat.widget.SwitchCompat;
 import androidx.core.content.ContextCompat;
 import androidx.core.view.ViewCompat;
 import androidx.core.widget.TextViewCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.kooo.evcam.R;
 
 /**
@@ -32,12 +33,14 @@ final class UiThemeRepainter {
     private static final int[] BG_COLOR_TOKENS = {
             R.color.page_background,
             R.color.menu_background,
+            R.color.nav_background,
             R.color.card_background,
             R.color.button_background,
             R.color.button_accent,
             R.color.input_background,
             R.color.ui_border,
             R.color.ui_accent_soft,
+            R.color.nav_item_selected_background,
             R.color.preview_background,
             R.color.preview_frame_background,
             R.color.preview_controls_background
@@ -49,6 +52,7 @@ final class UiThemeRepainter {
             R.color.text_hint,
             R.color.button_text,
             R.color.button_accent,
+            R.color.ui_option_pill_selected_text,
             R.color.ui_success,
             R.color.ui_warning,
             R.color.ui_danger,
@@ -73,9 +77,8 @@ final class UiThemeRepainter {
         ColorStateList switchThumb = null;
         ColorStateList switchTrack = null;
         try {
-            SwitchMaterial templateSwitch = new SwitchMaterial(targetCtx);
-            switchThumb = templateSwitch.getThumbTintList();
-            switchTrack = templateSwitch.getTrackTintList();
+            switchThumb = AppCompatResources.getColorStateList(targetCtx, R.color.ui_switch_thumb);
+            switchTrack = AppCompatResources.getColorStateList(targetCtx, R.color.ui_switch_track);
         } catch (Throwable ignored) {
             // 某些非 UI 测试上下文下忽略模板构建
         }
@@ -86,6 +89,10 @@ final class UiThemeRepainter {
 
     private static void repaintView(View view, Palette palette) {
         int id = view.getId();
+        // 左导航栏完整由 AppShellController.refreshTheme 控制，避免破坏选择器与危险红着色
+        if (id == R.id.ui_rail) {
+            return;
+        }
         // 壳层骨架区域由 AppShellController.refreshTheme 精确控制，避免破坏选择器状态
         if (id != R.id.ui_nav_recording
                 && id != R.id.ui_nav_playback
@@ -93,7 +100,6 @@ final class UiThemeRepainter {
                 && id != R.id.ui_nav_feishu
                 && id != R.id.ui_nav_settings
                 && id != R.id.ui_nav_exit
-                && id != R.id.ui_rail
                 && id != R.id.ui_shell_root
                 && id != R.id.ui_top_bar
                 && id != R.id.ui_rail_divider
@@ -108,8 +114,8 @@ final class UiThemeRepainter {
             ((EditablePreviewLayout) view).refreshThemeColors(palette.targetCtx);
         }
 
-        if (view instanceof SwitchMaterial && palette.switchThumb != null) {
-            SwitchMaterial sw = (SwitchMaterial) view;
+        if (view instanceof SwitchCompat && palette.switchThumb != null) {
+            SwitchCompat sw = (SwitchCompat) view;
             sw.setThumbTintList(palette.switchThumb);
             if (palette.switchTrack != null) {
                 sw.setTrackTintList(palette.switchTrack);

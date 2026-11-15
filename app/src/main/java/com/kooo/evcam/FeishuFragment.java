@@ -46,6 +46,7 @@ public class FeishuFragment extends Fragment {
         initViews(view);
         loadConfig();
         setupListeners();
+        SettingsFragment.configureEmbeddedToolbar(this, view, "飞书远程");
     }
 
     private void initViews(View view) {
