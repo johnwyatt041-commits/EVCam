@@ -1,24 +1,27 @@
 # 项目进度
 
-最后更新/核对：2026-11-15 03:16:09 +08:00（Asia/Hong_Kong）
-维护：Codex / recording-comparison-20261115。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-15 21:34:30 +08:00（Asia/Hong_Kong）
+维护：Codex / Antigravity（`build01` 记录点已打包，将进入 `T02`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
 | 项目/设备 | E:\GPT\EVCam；银河E5，2560×1600 |
-| 分支 | `codex/e5-recording-startup-fix`；文档HEAD以`git log`为准 |
-| 最新APK | `1.6.6-test-11150014`，A/B同包名同签名，停录像后顺序覆盖安装 |
-| APK源码 | `5f5ce4626a8f7060cc96cc3758150c497eca6257`；manifest已关联，后续文档提交不改变APK |
-| 本地交付 | `outputs/EVCam-E5-{A-Independent,B-Composite}-1.6.6-test-11150014-release.apk`；SHA、R8映射与说明同目录 |
-| GitHub | 新优化包尚未上传；[旧11141103测试发布](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11141103-e5-startup-fix)保留 |
-| 验证 | 每版79项JVM、Debug/Release R8、5项模拟器录像/扫码、1项R8启动冒烟通过；精确历史基线Lint无新增错误，完整扫描仍有19项既有错误 |
-| 实车 | 用户确认等待/超时为车机权限不足；存储修正已撤销。已分析A/Smartcam四段实车短片；B及严格同条件/长期测试待测 |
+| 分支 | `codex/e5-recording-startup-fix`；源码已提交 `ea395a0`（Tag `v1.6.6-test-11152059-build01`） |
+| 最新APK | **`build01`：`1.6.6-test-11152059`**（A/B 同签名同包名，未实车） |
+| APK源码 | `T01` 源码 `ea395a0`；`outputs/EVCam-E5-build01-1.6.6-test-11152059-manifest.json` 已关联 |
+| 本地交付 | `outputs/EVCam-E5-{A-Independent,B-Composite}-1.6.6-test-11152059-build01-release.apk` 及 SHA/mappings/notes |
+| GitHub | 已推送分支与 [`v1.6.6-test-11152059-build01`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11152059-build01) 记录点；旧 `11141103` 保留 |
+| 验证 | A/B 共174项(每版87项)JVM、Debug/Release R8 通过；完整Lint保持19项既有错误(0新增)；**`build01` 尚未实车** |
+| 实车 | `build01`（含 `T01`）尚未上车实测；A/Smartcam四段短片仅静态/离线分析 |
 
 ## 当前结论
 
-- 四段录像中A后台行驶约24.95帧、开预览19.76帧；Smartcam文件约24.5帧但各分格有近重复，估计约20.5–22.6次更新/秒。样本支持后台用A，前台Smartcam略优；画质未能判胜负，B未测。[报告](RECORDING_COMPARISON_20261115.md)
+- **`build01` 记录点已封存（尚未实车）**：将 `T01` 成果打包为 A/B 两版 Release APK 校验签名与原库一致后同步推送 GitHub，作为 `T02` 前基线；其余详情见 [T01/build01任务](tasks/t01-lifecycle-and-signal-foundation.md)。
+
+- 四段录像中A后台行驶约24.95帧、开预览19.76帧；Smartcam文件约24.5帧但分格近重复，估计20.5–22.6次更新/秒。仅代表各自配置：A三路/Smartcam四路负载不等，同负载优劣与画质未定，B未测。Smartcam有Surface销毁解绑主预览机制，后台瓶颈未锁定。[报告](RECORDING_COMPARISON_20261115.md)
+- 已完成 Smartcam V3.0.56 深度静态剖析（未改 app/outputs）：`Lkh.d` 退界面仅清 UI 任务，主进程仍可留驻或由 `BootReceiver`/15m `KeepAliveWorker` 唤醒跑 `SmartcamApplication.d()`（`y93`/VHAL 24 信号/15s WSS），**并非平时只剩 `:core` 单进程**；360/补盲/定位/LAN 分享多为按需开销，重头仍在 6 槽 `2560×1600` RGBA FBO（`~93.75 MiB`）与 `~10.9 Mbps` H.264 编码。后台分格更新偏慢对应 `Lr51<=25`、`Lwz.a` 变帧率 AE、`Lo13` 40ms 相位漂移+复用旧 OES 纹理、`Lf9` 20ms 刚性丢帧及跨 EGL `glFlush()`；直接二开已混淆 APK 风险高，建议保留 EVCam 仅移植 `FRAGMENTED` MP4、`.part` 恢复与配额机制。[3.0.56差异](SMARTCAM_V3.0.56_DIFF.md)
 - 用户已确认本次失败为车机权限不足；仅撤销`2082be7`存储改造，恢复11150014及原已确认优化。0220候选保留但标撤回，不作为当前交付；[撤回记录](tasks/recording-storage-eperm.md)。
 - 已实施确认的1–5项优化：物理删停用能力/SDK+R8，Glide限额及退场释放，方案3-稳妥时间水印复用/纹理原地更新；保留扫码、飞书、补盲及双HUD。
 - R8首轮冷启动暴露Room反射构造器被裁，已精确保留并通过A/B冷启动。保留无障碍保活心跳及HUD共享旧配置键；见[P013/P014](PITFALLS.md)。
@@ -27,21 +30,21 @@
 
 ## 下一步
 
-1. 已有A/Smartcam短片分析，仍需同条件录像/清晰度/PSS对照及B实测；A前台流畅度值得独立定位。继续11150014，不推进已撤回0220；[原优化任务](tasks/ab-test-preoptimization.md)。
-2. 确认原车HUD真实路径与长期选型；选B再深合双GL，后续补`.pending`恢复与状态机收敛。
-3. 19项既有Lint错误仍待独立整改；本轮未通过全局禁用检查掩盖新增问题。
+1. 已完成 `build01` 打包、推送 GitHub 与 Pre-release（尚未实车测试）；接下来核查 `T02`（全局外壳 UI、SC 风格左栏与深浅色主题）源码并向用户确认方案；[蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md)。
+2. 待实车确认：`T01` 彻底退出后重启拦截与无障碍防复活、VHAL/CarSignalManager 四类信号映射、远程退出回执，以及 A/B 同场景帧率与 PSS 对照；[原优化任务](tasks/ab-test-preoptimization.md)。
+3. 确认原车 HUD 真实路径，后续在 `T04` 保留双 HUD 并叠加补盲镜像解耦；19 项既有 Lint 错误仍待独立整改。
 
 ## 最近更新（最多5条）
 
+- 2026-11-15 21:36:00 +08:00 | build01存档 | 基于 `T01`（`1.6.6-test-11152059`）打包 `build01` 双风味 Release APK、校验 SHA256/R8 映射并推送 GitHub 标签与 Pre-release（尚未实车测试），转入 `T02` 源码核查 | [T01任务](tasks/t01-lifecycle-and-signal-foundation.md)
+- 2026-11-15 21:08:30 +08:00 | T01完成(离线) | 收敛单进程双退出状态与 Option A 重启拦截、清理补盲弹窗/动效、落盘 4 类车辆信号 Hub；174 项单测、Debug/Release R8 与 0 新增 Lint 通过，待实车 | [T01任务](tasks/t01-lifecycle-and-signal-foundation.md)
+- 2026-11-15 20:10:42 +08:00 | 规划定稿 | 用户定稿「帧率方案 A」及「飞书若启用仅在 P 档加载、关闭/其他档位彻底断连」规则；更新 `T01`–`T10` 蓝图与任务文档，未改 `app/`/`outputs/` | [蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md) · [任务](tasks/evcam-smartcam-refactor-plan.md)
+- 2026-11-15 04:28:00 +08:00 | 竞品剖析 | 核实 V3.0.56 退界面仍双进程保活、后台有效帧率/分格跳顿根因（`Lr51`/`Lwz.a`/`Lo13`/`Lf9`/6 槽 FBO）及优化与架构建议（未动态实测，未改 app/outputs） | [任务](tasks/smartcam-v3.0.56-diff.md)
 - 2026-11-15 03:16:09 +08:00 | 实车短片 | 四段完整解码/时间戳/分格核对；A后台行驶较好，Smartcam前台略优，清晰度受非同步场景限制；纯分析不改APK | [任务](tasks/recording-comparison-20261115.md)
-- 2026-11-15 02:41:26 +08:00 | 撤回 | 用户确认车机权限不足、不是App问题；仅撤销2082be7，app恢复a2f6962/11150014，前轮优化保留，0220标撤回 | [任务](tasks/recording-storage-eperm.md)
-- 2026-11-15 00:25:19 +08:00 | 优化交付 | 新A/B `11150014`通过每版79+5+1、R8与必要Lint；签名/原库/SHA已核验，清46个临时文件并关闭任务模拟器，实车待测 | [任务](tasks/ab-test-preoptimization.md)
-- 2026-11-14 23:24:27 +08:00 | 确认 | 保留扫码、选方案3-稳妥、HUD暂不动，确认范围已落盘 | [任务](tasks/ab-test-preoptimization.md)
-- 2026-11-14 21:43:54 +08:00 | 参考 | Smartcam/EVCam A/B静态内存结构对照，无实车PSS数据 | [任务](tasks/smartcam-feature-inventory.md)
 
 ## 按需索引
 
-- [需求](REQUIREMENTS.md) · [协作](COLLABORATION.md) · [坑](PITFALLS.md) · [新AI资料](AI_HANDOFF.md) · [Smartcam全功能](SMARTCAM_FEATURE_CATALOG.md)
+- [融合重构蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md) · [需求](REQUIREMENTS.md) · [协作](COLLABORATION.md) · [坑](PITFALLS.md) · [新AI资料](AI_HANDOFF.md) · [Smartcam全功能](SMARTCAM_FEATURE_CATALOG.md) · [3.0.56差异](SMARTCAM_V3.0.56_DIFF.md)
 - [E5启动分析](E5_STARTUP_FIX_20261114.md) · [A/B试录](RECORDING_AB_TEST.md) · [开发](DEVELOPMENT.md)
 - 本轮证据：`work/ab-test-preoptimization/`；历史启动证据仍在`work/e5-startup/`，不默认全读。
 - [整理前历史快照](archive/2026-11/STATUS_20261114_183403.md)；历史按需读取。
