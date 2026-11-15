@@ -1,7 +1,7 @@
 # 项目进度
 
-最后更新/核对：2026-11-15 21:34:30 +08:00（Asia/Hong_Kong）
-维护：Codex / Antigravity（`build01` 记录点已打包，将进入 `T02`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-15 22:06:00 +08:00（Asia/Hong_Kong）
+维护：Codex / Antigravity（`build01` 已封存；`T02` 方案已定稿待新会话编码）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
@@ -30,17 +30,17 @@
 
 ## 下一步
 
-1. 已完成 `build01` 打包、推送 GitHub 与 Pre-release（尚未实车测试）；接下来核查 `T02`（全局外壳 UI、SC 风格左栏与深浅色主题）源码并向用户确认方案；[蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md)。
+1. 在新会话直接按已定稿方案实施 **`T02`**（默认跟随系统零重建主题、SC 风格左栏 4+2 布局与回看合并、仅展示已实装设置分类+`1.外观与交互`）；[T02任务](tasks/t02-shell-navigation-and-theme.md) · [蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md)。
 2. 待实车确认：`T01` 彻底退出后重启拦截与无障碍防复活、VHAL/CarSignalManager 四类信号映射、远程退出回执，以及 A/B 同场景帧率与 PSS 对照；[原优化任务](tasks/ab-test-preoptimization.md)。
 3. 确认原车 HUD 真实路径，后续在 `T04` 保留双 HUD 并叠加补盲镜像解耦；19 项既有 Lint 错误仍待独立整改。
 
 ## 最近更新（最多5条）
 
+- 2026-11-15 22:06:00 +08:00 | T02定稿 | 完成 SC V3.0.56 与 EC 外壳/主题/设置核查，用户拍板「默认跟随系统 / SC 式回看合并入口 / 仅列已实装设置分类」，待新会话实施编码 | [T02任务](tasks/t02-shell-navigation-and-theme.md)
 - 2026-11-15 21:36:00 +08:00 | build01存档 | 基于 `T01`（`1.6.6-test-11152059`）打包 `build01` 双风味 Release APK、校验 SHA256/R8 映射并推送 GitHub 标签与 Pre-release（尚未实车测试），转入 `T02` 源码核查 | [T01任务](tasks/t01-lifecycle-and-signal-foundation.md)
 - 2026-11-15 21:08:30 +08:00 | T01完成(离线) | 收敛单进程双退出状态与 Option A 重启拦截、清理补盲弹窗/动效、落盘 4 类车辆信号 Hub；174 项单测、Debug/Release R8 与 0 新增 Lint 通过，待实车 | [T01任务](tasks/t01-lifecycle-and-signal-foundation.md)
 - 2026-11-15 20:10:42 +08:00 | 规划定稿 | 用户定稿「帧率方案 A」及「飞书若启用仅在 P 档加载、关闭/其他档位彻底断连」规则；更新 `T01`–`T10` 蓝图与任务文档，未改 `app/`/`outputs/` | [蓝图](EVCAM_SMARTCAM_REFACTOR_PLAN.md) · [任务](tasks/evcam-smartcam-refactor-plan.md)
 - 2026-11-15 04:28:00 +08:00 | 竞品剖析 | 核实 V3.0.56 退界面仍双进程保活、后台有效帧率/分格跳顿根因（`Lr51`/`Lwz.a`/`Lo13`/`Lf9`/6 槽 FBO）及优化与架构建议（未动态实测，未改 app/outputs） | [任务](tasks/smartcam-v3.0.56-diff.md)
-- 2026-11-15 03:16:09 +08:00 | 实车短片 | 四段完整解码/时间戳/分格核对；A后台行驶较好，Smartcam前台略优，清晰度受非同步场景限制；纯分析不改APK | [任务](tasks/recording-comparison-20261115.md)
 
 ## 按需索引
 
