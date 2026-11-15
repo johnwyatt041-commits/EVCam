@@ -18,6 +18,7 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.kooo.evcam.AppConfig;
+import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.ui.UiThemeController.ThemeMode;
 
@@ -33,6 +34,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private TextView themeStatusText;
     private TextView startPageStatusText;
     private TextView previewModeStatusText;
+    private TextView previewPresentationStatusText;
     private TextView cornerNavStatusText;
     private Button btnFollowSystem;
     private Button btnDark;
@@ -42,10 +44,14 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private Button btnStartSettings;
     private Button btnDefaultModeB;
     private Button btnDefaultModeC;
+    private Button btnPresentationSidebar;
+    private Button btnPresentationFullscreen;
+    private Button btnPresentationWindow;
     private Button btnCornerNavAuto;
     private Button btnCornerNavAlways;
     private Button btnCornerNavHidden;
     private SwitchMaterial viewShortcutsSwitch;
+    private SwitchMaterial accessibilityOverlaySwitch;
     private SwitchMaterial confirmDoorExitSwitch;
 
     @Nullable
@@ -66,6 +72,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         themeStatusText = view.findViewById(R.id.tv_theme_status);
         startPageStatusText = view.findViewById(R.id.tv_start_page_status);
         previewModeStatusText = view.findViewById(R.id.tv_preview_mode_status);
+        previewPresentationStatusText = view.findViewById(R.id.tv_preview_presentation_status);
         cornerNavStatusText = view.findViewById(R.id.tv_corner_nav_status);
         btnFollowSystem = view.findViewById(R.id.btn_theme_follow_system);
         btnDark = view.findViewById(R.id.btn_theme_dark);
@@ -75,10 +82,14 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         btnStartSettings = view.findViewById(R.id.btn_start_settings);
         btnDefaultModeB = view.findViewById(R.id.btn_default_mode_b);
         btnDefaultModeC = view.findViewById(R.id.btn_default_mode_c);
+        btnPresentationSidebar = view.findViewById(R.id.btn_presentation_sidebar);
+        btnPresentationFullscreen = view.findViewById(R.id.btn_presentation_fullscreen);
+        btnPresentationWindow = view.findViewById(R.id.btn_presentation_window);
         btnCornerNavAuto = view.findViewById(R.id.btn_corner_nav_auto);
         btnCornerNavAlways = view.findViewById(R.id.btn_corner_nav_always);
         btnCornerNavHidden = view.findViewById(R.id.btn_corner_nav_hidden);
         viewShortcutsSwitch = view.findViewById(R.id.switch_view_shortcuts);
+        accessibilityOverlaySwitch = view.findViewById(R.id.switch_accessibility_overlay);
         confirmDoorExitSwitch = view.findViewById(R.id.switch_confirm_door_exit);
 
         if (getContext() != null) {
@@ -99,6 +110,15 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         if (btnDefaultModeC != null) {
             btnDefaultModeC.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_C));
         }
+        if (btnPresentationSidebar != null) {
+            btnPresentationSidebar.setOnClickListener(v -> selectPreviewPresentation(PreviewPresentation.SIDEBAR));
+        }
+        if (btnPresentationFullscreen != null) {
+            btnPresentationFullscreen.setOnClickListener(v -> selectPreviewPresentation(PreviewPresentation.FULLSCREEN));
+        }
+        if (btnPresentationWindow != null) {
+            btnPresentationWindow.setOnClickListener(v -> selectPreviewPresentation(PreviewPresentation.WINDOW));
+        }
         if (btnCornerNavAuto != null) {
             btnCornerNavAuto.setOnClickListener(v -> selectCornerNavMode(AppConfig.CORNER_NAV_AUTO));
         }
@@ -115,6 +135,20 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
                 if (appConfig != null) {
                     appConfig.setPreviewViewShortcutsEnabled(isChecked);
                     notifyHostPreviewSettingsChanged();
+                }
+            });
+        }
+
+        if (appConfig != null && accessibilityOverlaySwitch != null) {
+            accessibilityOverlaySwitch.setChecked(appConfig.isAccessibilityOverlayEnabled());
+            accessibilityOverlaySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (appConfig != null && getContext() != null) {
+                    appConfig.setAccessibilityOverlayEnabled(isChecked);
+                    BlindSpotService.update(getContext());
+                    Toast.makeText(getContext(),
+                            isChecked ? "已开启无障碍 2032 高层级悬浮窗（解绑自动降级 2038）"
+                                    : "已关闭无障碍 2032 优先（统一使用 TYPE_APPLICATION_OVERLAY）",
+                            Toast.LENGTH_SHORT).show();
                 }
             });
         }
@@ -188,6 +222,15 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         notifyHostPreviewSettingsChanged();
     }
 
+    private void selectPreviewPresentation(@NonNull PreviewPresentation presentation) {
+        if (appConfig == null || getContext() == null) return;
+        appConfig.setPreviewPresentation(presentation);
+        refreshPreviewOptionsUi(getContext());
+        Toast.makeText(getContext(),
+                "默认预览布局形态已设为「" + formatPreviewPresentationLabel(presentation) + "」",
+                Toast.LENGTH_SHORT).show();
+    }
+
     private void notifyHostPreviewSettingsChanged() {
         if (getActivity() instanceof PreviewModeController.Host) {
             ((PreviewModeController.Host) getActivity()).onPreviewShortcutPreferencesChanged();
@@ -249,6 +292,23 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         applyOptionButtonState(btnCornerNavAuto, context, AppConfig.CORNER_NAV_AUTO.equals(cornerMode));
         applyOptionButtonState(btnCornerNavAlways, context, AppConfig.CORNER_NAV_ALWAYS.equals(cornerMode));
         applyOptionButtonState(btnCornerNavHidden, context, AppConfig.CORNER_NAV_HIDDEN.equals(cornerMode));
+
+        PreviewPresentation presentation = appConfig != null
+                ? appConfig.getPreviewPresentation()
+                : PreviewPresentation.SIDEBAR;
+        if (previewPresentationStatusText != null) {
+            previewPresentationStatusText.setText("当前形态：" + formatPreviewPresentationLabel(presentation));
+        }
+        applyOptionButtonState(btnPresentationSidebar, context, presentation == PreviewPresentation.SIDEBAR);
+        applyOptionButtonState(btnPresentationFullscreen, context, presentation == PreviewPresentation.FULLSCREEN);
+        applyOptionButtonState(btnPresentationWindow, context, presentation == PreviewPresentation.WINDOW);
+    }
+
+    @NonNull
+    public static String formatPreviewPresentationLabel(@Nullable PreviewPresentation presentation) {
+        if (presentation == PreviewPresentation.FULLSCREEN) return "全屏预览";
+        if (presentation == PreviewPresentation.WINDOW) return "独立悬浮窗";
+        return "保留侧边栏（默认）";
     }
 
     @NonNull

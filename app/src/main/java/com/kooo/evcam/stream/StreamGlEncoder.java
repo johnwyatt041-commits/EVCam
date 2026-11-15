@@ -42,11 +42,14 @@ public class StreamGlEncoder {
     private static final String VERTEX_SHADER =
             "uniform mat4 uMVPMatrix;\n" +
             "uniform mat4 uTexMatrix;\n" +
+            "uniform vec2 uOutMirror;\n" +
             "attribute vec4 aPosition;\n" +
             "attribute vec4 aTextureCoord;\n" +
             "varying vec2 vTextureCoord;\n" +
             "void main() {\n" +
-            "    gl_Position = uMVPMatrix * aPosition;\n" +
+            "    vec4 pos = uMVPMatrix * aPosition;\n" +
+            "    pos.xy *= uOutMirror;\n" +
+            "    gl_Position = pos;\n" +
             "    vTextureCoord = (uTexMatrix * aTextureCoord).xy;\n" +
             "}\n";
 
@@ -78,6 +81,7 @@ public class StreamGlEncoder {
             "uniform vec2  uDstRatio;    // 目标宽高比 (w/h)\n" +
             "uniform float uCoverScale;  // 覆盖缩放额外倍数\n" +
             "uniform vec2  uPan;         // pan 偏移 [0,1], (0.5,0.5) 居中\n" +
+            "uniform vec2  uPhysMirror;  // 物理镜像（sensor buffer 空间）\n" +
             "const float PI = 3.14159265;\n" +
             "void main() {\n" +
             "    // 1. 旋转\n" +
@@ -123,7 +127,8 @@ public class StreamGlEncoder {
             "        gl_FragColor = vec4(0.0, 0.0, 0.0, 1.0);\n" +
             "        return;\n" +
             "    }\n" +
-            "    vec2 texCoord = (uTexMatrix * vec4(scaled, 0.0, 1.0)).xy;\n" +
+            "    vec2 mirScaled = (scaled - vec2(0.5)) * uPhysMirror + vec2(0.5);\n" +
+            "    vec2 texCoord = (uTexMatrix * vec4(mirScaled, 0.0, 1.0)).xy;\n" +
             "    gl_FragColor = texture2D(sTexture, texCoord);\n" +
             "}\n";
 
@@ -168,6 +173,10 @@ public class StreamGlEncoder {
     private int mvpMatrixHandle, texMatrixHandle, textureHandle;
     private int k1Handle, k2Handle, zoomHandle, centerHandle, rotationHandle;
     private int srcRatioHandle, dstRatioHandle, coverScaleHandle, panHandle;
+    private int physMirrorHandle, outMirrorHandle;
+
+    private volatile float physMirrorX = 1f, physMirrorY = 1f;
+    private volatile float outMirrorX = 1f, outMirrorY = 1f;
 
     private final float[] mvpMatrix = new float[16];
     private final float[] texMatrix = new float[16];
@@ -258,6 +267,14 @@ public class StreamGlEncoder {
         this.coverScale = Math.max(1.0f, scale);
     }
 
+    /** 设置物理与输出双镜像（零额外 FBO）。 */
+    public void setMirror(boolean physH, boolean physV, boolean outH, boolean outV) {
+        this.physMirrorX = physH ? -1f : 1f;
+        this.physMirrorY = physV ? -1f : 1f;
+        this.outMirrorX = outH ? -1f : 1f;
+        this.outMirrorY = outV ? -1f : 1f;
+    }
+
     /**
      * 改变输出分辨率。会重建 FBO + PBO。必须在 renderHandler 线程调用。
      */
@@ -319,6 +336,8 @@ public class StreamGlEncoder {
             GLES20.glUniform2f(dstRatioHandle, (float) outWidth, (float) outHeight);
             GLES20.glUniform1f(coverScaleHandle, coverScale);
             GLES20.glUniform2f(panHandle, panX, panY);
+            GLES20.glUniform2f(physMirrorHandle, physMirrorX, physMirrorY);
+            GLES20.glUniform2f(outMirrorHandle, outMirrorX, outMirrorY);
 
             GLES20.glEnableVertexAttribArray(positionHandle);
             GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
@@ -433,6 +452,9 @@ public class StreamGlEncoder {
         dstRatioHandle = GLES20.glGetUniformLocation(program, "uDstRatio");
         coverScaleHandle = GLES20.glGetUniformLocation(program, "uCoverScale");
         panHandle = GLES20.glGetUniformLocation(program, "uPan");
+        physMirrorHandle = GLES20.glGetUniformLocation(program, "uPhysMirror");
+        outMirrorHandle = GLES20.glGetUniformLocation(program, "uOutMirror");
+        GLES20.glDisable(GLES20.GL_CULL_FACE);
 
         int[] tex = new int[1];
         GLES20.glGenTextures(1, tex, 0);

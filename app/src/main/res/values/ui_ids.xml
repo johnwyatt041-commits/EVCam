@@ -29,4 +29,7 @@
     <item
         name="btn_photos"
         type="id" />
+    <item
+        name="tag_main_preview_matrix_managed"
+        type="id" />
 </resources>

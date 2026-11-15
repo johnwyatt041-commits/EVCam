@@ -37,6 +37,7 @@ import com.kooo.evcam.WakeUpHelper;
 import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.recording.RecordingController;
+import com.kooo.evcam.ui.OverlayWindowParamsFactory;
 
 /**
  * 录制悬浮按钮服务
@@ -65,6 +66,7 @@ public class RecordingFloatingService extends Service {
 
     // 布局参数
     private WindowManager.LayoutParams layoutParams;
+    private OverlayWindowParamsFactory.AttachedOverlay attachedOverlay;
     private int screenWidth;
     private int screenHeight;
 
@@ -225,7 +227,11 @@ public class RecordingFloatingService extends Service {
         }
 
         // 刷新窗口
-        windowManager.updateViewLayout(floatingContainer, layoutParams);
+        if (attachedOverlay != null) {
+            attachedOverlay.updateLayout();
+        } else {
+            windowManager.updateViewLayout(floatingContainer, layoutParams);
+        }
         AppLog.d(TAG, "悬浮按钮大小已更新");
     }
 
@@ -302,8 +308,9 @@ public class RecordingFloatingService extends Service {
     }
 
     private void hideFloatingWindow() {
-        if (floatingContainer != null && windowManager != null) {
-            windowManager.removeView(floatingContainer);
+        OverlayWindowParamsFactory.detachSafely(attachedOverlay);
+        attachedOverlay = null;
+        if (floatingContainer != null) {
             floatingContainer = null;
             recordingButton = null;
             timeTextView = null;
@@ -351,26 +358,14 @@ public class RecordingFloatingService extends Service {
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
 
-        // 设置布局参数
-        int windowType;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        } else {
-            windowType = WindowManager.LayoutParams.TYPE_PHONE;
-        }
-
-        layoutParams = new WindowManager.LayoutParams(
+        // 设置布局参数（非抢焦、非模态，无障碍激活时优先 2032）
+        layoutParams = OverlayWindowParamsFactory.createMainParams(
+                this,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
-                windowType,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT);
-
-        layoutParams.gravity = Gravity.TOP | Gravity.START;
-
-        // 默认位置：左侧中间
-        layoutParams.x = 20;
-        layoutParams.y = screenHeight / 2 - buttonSize / 2;
+                20,
+                screenHeight / 2 - buttonSize / 2,
+                true);
 
         // 设置触摸事件
         floatingContainer.setOnTouchListener(new View.OnTouchListener() {
@@ -404,7 +399,9 @@ public class RecordingFloatingService extends Service {
 
                             layoutParams.x = newX;
                             layoutParams.y = newY;
-                            windowManager.updateViewLayout(floatingContainer, layoutParams);
+                            if (attachedOverlay != null) {
+                                attachedOverlay.updateLayout();
+                            }
                         }
                         return true;
 
@@ -420,12 +417,13 @@ public class RecordingFloatingService extends Service {
         });
 
         // 添加到窗口
-        try {
-            windowManager.addView(floatingContainer, layoutParams);
-            AppLog.d(TAG, "录制悬浮窗创建成功");
-        } catch (Exception e) {
-            AppLog.e(TAG, "添加悬浮窗失败", e);
+        attachedOverlay = OverlayWindowParamsFactory.attachMainOverlay(
+                this, windowManager, floatingContainer, layoutParams, this::stopSelf);
+        if (attachedOverlay == null) {
+            AppLog.e(TAG, "添加悬浮窗失败");
             stopSelf();
+        } else {
+            AppLog.d(TAG, "录制悬浮窗创建成功");
         }
     }
 

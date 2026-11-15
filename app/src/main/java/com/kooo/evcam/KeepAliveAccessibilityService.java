@@ -235,8 +235,18 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     }
 
     @Override
+    public boolean onUnbind(Intent intent) {
+        AppLog.d(TAG, "无障碍服务 onUnbind，准备清理无障碍悬浮窗句柄");
+        notifyDetachedLocked();
+        instance = null;
+        isServiceRunning = false;
+        return super.onUnbind(intent);
+    }
+
+    @Override
     public void onDestroy() {
         AppLog.d(TAG, "无障碍服务正在销毁...");
+        notifyDetachedLocked();
         
         // 停止心跳
         stopHeartbeat();
@@ -251,6 +261,42 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         
         super.onDestroy();
         AppLog.d(TAG, "无障碍服务已销毁");
+    }
+
+    private static final java.util.concurrent.CopyOnWriteArraySet<Runnable> detachListeners =
+            new java.util.concurrent.CopyOnWriteArraySet<>();
+
+    /** 无障碍服务是否处于激活状态，可供 TYPE_ACCESSIBILITY_OVERLAY 安全挂载。 */
+    public static boolean isAccessibilityServiceActive() {
+        return isRunning();
+    }
+
+    public static void registerDetachListener(Runnable listener) {
+        if (listener != null) {
+            detachListeners.add(listener);
+        }
+    }
+
+    public static void unregisterDetachListener(Runnable listener) {
+        if (listener != null) {
+            detachListeners.remove(listener);
+        }
+    }
+
+    public static void notifyDetachedLocked() {
+        if (detachListeners.isEmpty()) {
+            return;
+        }
+        Runnable[] snapshot = detachListeners.toArray(new Runnable[0]);
+        for (Runnable listener : snapshot) {
+            if (listener != null) {
+                try {
+                    listener.run();
+                } catch (Exception e) {
+                    AppLog.w(TAG, "通知无障碍解绑回调失败: " + e.getMessage());
+                }
+            }
+        }
     }
 
     /**

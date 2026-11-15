@@ -453,6 +453,10 @@ public class MjpegStreamManager {
         glEncoder.setFisheyeParams(k1, k2, zoom, cx, cy, rot);
         glEncoder.setPan(appConfig.getMjpegStreamPanX(), appConfig.getMjpegStreamPanY());
         glEncoder.setCoverScale(appConfig.getMjpegStreamCoverScale());
+        com.kooo.evcam.blindspot.CameraMirrorPolicy.ResolvedMirror streamMirror =
+                appConfig.resolveMirror(com.kooo.evcam.blindspot.MirrorTarget.NETWORK_STREAM, currentCameraPosition);
+        glEncoder.setMirror(streamMirror.physicalH, streamMirror.physicalV,
+                streamMirror.outputH, streamMirror.outputV);
 
         int w = appConfig.getMjpegStreamWidth();
         int h = appConfig.getMjpegStreamHeight();

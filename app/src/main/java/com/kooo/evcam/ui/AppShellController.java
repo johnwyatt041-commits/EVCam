@@ -60,6 +60,7 @@ public final class AppShellController {
     private boolean previewEnabled;
     private boolean layoutEditing;
     private boolean fullscreenPreview;
+    private boolean floatingWindowActive;
     private int lastSysTopInset;
     private PreviewMode activePreviewMode = PreviewMode.MODE_B;
     @Nullable
@@ -141,6 +142,24 @@ public final class AppShellController {
         }
         applyPreviewModeColors(activity);
         updateHeader();
+    }
+
+    /** 绑定 4.2 顶栏"小窗"快捷按钮。 */
+    public void bindFloatingWindowAction(@Nullable Runnable onFloatingWindow) {
+        View btnFloating = shell.findViewById(R.id.ui_floating_window_toggle);
+        if (btnFloating != null) {
+            btnFloating.setOnClickListener(v -> {
+                if (onFloatingWindow != null) {
+                    onFloatingWindow.run();
+                }
+            });
+        }
+        applyPreviewModeColors(activity);
+    }
+
+    public void setFloatingWindowActive(boolean active) {
+        this.floatingWindowActive = active;
+        applyPreviewModeColors(activity);
     }
 
     private void scaleNavDrawable(TextView item) {
@@ -357,6 +376,7 @@ public final class AppShellController {
             fullscreenBtn.setText(fullscreenPreview ? "退出全屏" : "全屏");
             styleShellToggle(fullscreenBtn, themedContext, fullscreenPreview);
         }
+        styleShellToggle(shell.findViewById(R.id.ui_floating_window_toggle), themedContext, floatingWindowActive);
     }
 
     private void styleShellToggle(@Nullable Button button, Context themedContext, boolean active) {

@@ -29,6 +29,7 @@ public class MainFloatingWindowView extends FrameLayout {
 
     private WindowManager windowManager;
     private WindowManager.LayoutParams params;
+    private com.kooo.evcam.ui.OverlayWindowParamsFactory.AttachedOverlay attachedOverlay;
     private AppConfig appConfig;
     private TextureView textureView;
     private Surface cachedSurface;
@@ -111,18 +112,14 @@ public class MainFloatingWindowView extends FrameLayout {
         // 设置背景色，确保圆角区域显示黑色而不是透明
         setBackgroundColor(android.graphics.Color.BLACK);
 
-        params = new WindowManager.LayoutParams(
+        params = com.kooo.evcam.ui.OverlayWindowParamsFactory.createMainParams(
+                getContext(),
                 appConfig.getMainFloatingWidth(),
                 appConfig.getMainFloatingHeight(),
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
-                        WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT
+                appConfig.getMainFloatingX(),
+                appConfig.getMainFloatingY(),
+                true
         );
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.x = appConfig.getMainFloatingX();
-        params.y = appConfig.getMainFloatingY();
 
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
@@ -309,7 +306,7 @@ public class MainFloatingWindowView extends FrameLayout {
                     params.y = (int) (initialY + dy);
                 }
                 
-                windowManager.updateViewLayout(this, params);
+                updateWindowLayoutSafely();
                 return true;
 
             case MotionEvent.ACTION_UP:
@@ -394,7 +391,8 @@ public class MainFloatingWindowView extends FrameLayout {
                 params.alpha = 0f;
                 pendingShowAnimation = true;
 
-                windowManager.addView(this, params);
+                attachedOverlay = com.kooo.evcam.ui.OverlayWindowParamsFactory.attachMainOverlay(
+                        getContext(), windowManager, this, params, null);
                 if (textureView != null && textureView.isAvailable() && cachedSurface != null && cachedSurface.isValid()) {
                     startCameraPreview(cachedSurface);
                 } else {
@@ -418,8 +416,20 @@ public class MainFloatingWindowView extends FrameLayout {
         }
     }
 
+    private WindowManager getActiveWindowManager() {
+        return attachedOverlay != null ? attachedOverlay.getActiveWindowManager() : windowManager;
+    }
+
+    private void updateWindowLayoutSafely() {
+        if (attachedOverlay != null) {
+            attachedOverlay.updateLayout();
+        } else if (windowManager != null) {
+            updateWindowLayoutSafely();
+        }
+    }
+
     private void playShowAnimation() {
-        FloatingWindowDisplayHelper.revealNow(this, windowManager, params);
+        FloatingWindowDisplayHelper.revealNow(this, getActiveWindowManager(), params);
     }
 
     /**
@@ -431,7 +441,7 @@ public class MainFloatingWindowView extends FrameLayout {
         params.width = appConfig.getMainFloatingWidth();
         params.height = appConfig.getMainFloatingHeight();
         try {
-            windowManager.updateViewLayout(this, params);
+            updateWindowLayoutSafely();
         } catch (Exception e) {
             AppLog.e(TAG, "Error updating main floating window layout: " + e.getMessage());
         }
@@ -447,7 +457,11 @@ public class MainFloatingWindowView extends FrameLayout {
             showAnimFallback = null;
         }
 
-        FloatingWindowDisplayHelper.dismissNow(this, windowManager, params);
+        FloatingWindowDisplayHelper.dismissNow(this, getActiveWindowManager(), params);
+        if (attachedOverlay != null) {
+            attachedOverlay.markDetached();
+            attachedOverlay = null;
+        }
     }
 
     /**
@@ -533,7 +547,7 @@ public class MainFloatingWindowView extends FrameLayout {
                 params.height = targetH;
                 try {
                     if (getParent() != null) {
-                        windowManager.updateViewLayout(this, params);
+                        updateWindowLayoutSafely();
                     }
                 } catch (Exception e) {
                     AppLog.e(TAG, "Error updating layout for rotation: " + e.getMessage());
@@ -541,7 +555,8 @@ public class MainFloatingWindowView extends FrameLayout {
             }
         }
 
-        BlindSpotCorrection.apply(textureView, appConfig, cameraPos, 0, isCurrentlySwapped);
+        BlindSpotCorrection.apply(textureView, appConfig,
+                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT, cameraPos, 0, isCurrentlySwapped);
     }
 
     private void scheduleRetryBind() {

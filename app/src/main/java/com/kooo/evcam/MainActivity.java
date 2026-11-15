@@ -420,6 +420,7 @@ public class MainActivity extends AppCompatActivity implements
         if (savedInstanceState == null && !autoStartFromBoot && !autoStartRecording
                 && !appConfig.isAutoStartRecording()) {
             applyDefaultStartPage();
+            applyStartupPreviewPresentation();
         }
         if (autoStartRecording) {
             getIntent().removeExtra("auto_start_recording");
@@ -965,6 +966,7 @@ public class MainActivity extends AppCompatActivity implements
                     uiShell.setFullscreenPreview(!uiShell.isFullscreenPreview());
                 },
                 fullscreen -> previewModeController.onFullscreenStateChanged());
+        uiShell.bindFloatingWindowAction(this::enterFloatingWindowPresentation);
         previewModeController.start();
     }
 
@@ -2539,6 +2541,10 @@ public class MainActivity extends AppCompatActivity implements
      * 应用手机缩放变换，保持摄像头预览的宽高比不被拉伸
      */
     private void applyPhoneScaleTransform(AutoFitTextureView textureView, android.util.Size previewSize, String cameraKey) {
+        textureView.setTag(R.id.tag_main_preview_matrix_managed, Boolean.TRUE);
+        final com.kooo.evcam.blindspot.CameraMirrorPolicy.ResolvedMirror mirror =
+                com.kooo.evcam.blindspot.CameraMirrorPolicy.resolve(
+                        appConfig, com.kooo.evcam.blindspot.MirrorTarget.MAIN_PREVIEW, cameraKey);
         textureView.post(() -> {
             int viewWidth = textureView.getWidth();
             int viewHeight = textureView.getHeight();
@@ -2573,6 +2579,10 @@ public class MainActivity extends AppCompatActivity implements
             // 设置变换矩阵：先缩放，再平移居中
             matrix.setScale(scale, scale);
             matrix.postTranslate(dx, dy);
+
+            if (mirror.effectiveH || mirror.effectiveV) {
+                matrix.postScale(mirror.effectiveH ? -1f : 1f, mirror.effectiveV ? -1f : 1f, centerX, centerY);
+            }
 
             // 保存基础变换，并叠加预览矫正
             previewBaseTransforms.put(cameraKey, new android.graphics.Matrix(matrix));
@@ -2609,6 +2619,7 @@ public class MainActivity extends AppCompatActivity implements
             } else {
                 textureView.setAspectRatio(previewSize.getWidth(), previewSize.getHeight());
                 textureView.setFillContainer(false);
+                com.kooo.evcam.ui.PreviewTransformHelper.applyMainPreviewTransform(textureView, this, cameraKey, 0);
                 AppLog.d(TAG, "设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight() + ", 适应模式");
 
             }
@@ -2634,13 +2645,39 @@ public class MainActivity extends AppCompatActivity implements
                     textureView.setFillContainer(false);
                     AppLog.d(TAG, "设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight() + ", 适应模式");
                 }
+                com.kooo.evcam.ui.PreviewTransformHelper.applyMainPreviewTransform(textureView, this, cameraKey, 0);
 
             }
         }
     }
 
+    /** 刷新主界面所有可见 TextureView 及独立悬浮窗的物理/输出双镜像变换。 */
+    public void refreshMainPreviewTransforms() {
+        runOnUiThread(() -> {
+            if (cameraManager != null) {
+                String[] keys = {"front", "back", "left", "right"};
+                for (String key : keys) {
+                    AutoFitTextureView tv = getTextureViewForKey(key);
+                    android.util.Size ps = cameraManager.getCameraPreviewSize(key);
+                    if (tv != null && ps != null) {
+                        applyPreviewSizeTransform(key, tv, ps);
+                    }
+                    com.kooo.evcam.camera.SingleCamera cam = cameraManager.getCamera(key);
+                    if (cam != null) {
+                        cam.applyPreviewTransformIfUnmanaged();
+                    }
+                }
+            }
+            com.kooo.evcam.ui.StandalonePreviewWindow.refreshTransformIfShowing();
+        });
+    }
+
     private void applyRotationTransform(AutoFitTextureView textureView, android.util.Size previewSize,
                                         int rotation, String cameraKey) {
+        textureView.setTag(R.id.tag_main_preview_matrix_managed, Boolean.TRUE);
+        final com.kooo.evcam.blindspot.CameraMirrorPolicy.ResolvedMirror mirror =
+                com.kooo.evcam.blindspot.CameraMirrorPolicy.resolve(
+                        appConfig, com.kooo.evcam.blindspot.MirrorTarget.MAIN_PREVIEW, cameraKey);
         // 延迟执行，确保 TextureView 已经完成布局
         textureView.post(() -> {
             int viewWidth = textureView.getWidth();
@@ -2675,14 +2712,27 @@ public class MainActivity extends AppCompatActivity implements
                         (float) viewHeight / previewSize.getWidth(),
                         (float) viewWidth / previewSize.getHeight());
                 
-                // 4. 应用缩放
+                // 4. 应用缩放与旋转前物理镜像（Sensor/Buffer 空间）
                 matrix.postScale(scale, scale, centerX, centerY);
-                
+                if (mirror.physicalH || mirror.physicalV) {
+                    matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
+                }
+
                 // 5. 应用旋转
                 matrix.postRotate(rotation, centerX, centerY);
-            } else if (android.view.Surface.ROTATION_180 == rotation) {
-                // 如果需要处理 180 度翻转
-                matrix.postRotate(180, centerX, centerY);
+            } else {
+                if (mirror.physicalH || mirror.physicalV) {
+                    matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
+                }
+                if (android.view.Surface.ROTATION_180 == rotation) {
+                    // 如果需要处理 180 度翻转
+                    matrix.postRotate(180, centerX, centerY);
+                }
+            }
+
+            // 6. 应用旋转后输出镜像（屏幕显示空间）
+            if (mirror.outputH || mirror.outputV) {
+                matrix.postScale(mirror.outputH ? -1f : 1f, mirror.outputV ? -1f : 1f, centerX, centerY);
             }
 
             // 保存基础变换，并叠加预览矫正
@@ -4013,6 +4063,12 @@ public class MainActivity extends AppCompatActivity implements
     protected void onResume() {
         super.onResume();
         com.kooo.evcam.lifecycle.AppLifecycleState.markUiReturnedForeground(this);
+        if (com.kooo.evcam.ui.StandalonePreviewWindow.isShowing()) {
+            com.kooo.evcam.ui.StandalonePreviewWindow.dismiss(false);
+        }
+        if (uiShell != null) {
+            uiShell.setFloatingWindowActive(false);
+        }
         if (uiTheme != null) uiTheme.syncSystemBarsAndTree();
         boolean wasInBackground = isInBackground;
         isInBackground = false;
@@ -4373,33 +4429,132 @@ public class MainActivity extends AppCompatActivity implements
         return instance;
     }
     
+    private void applyStartupPreviewPresentation() {
+        if (uiShell == null || uiShell.getCurrentRoot() != R.id.nav_recording) {
+            return;
+        }
+        com.kooo.evcam.ui.PreviewPresentation presentation = appConfig.getPreviewPresentation();
+        if (presentation == com.kooo.evcam.ui.PreviewPresentation.FULLSCREEN) {
+            uiShell.setFullscreenPreview(true);
+        } else if (presentation == com.kooo.evcam.ui.PreviewPresentation.WINDOW) {
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed() && !isInBackground
+                        && !isRecording && !shouldMoveToBackgroundOnReady
+                        && uiShell != null && uiShell.getCurrentRoot() == R.id.nav_recording) {
+                    enterFloatingWindowPresentation();
+                }
+            }, 800);
+        }
+    }
+
+    /** 切换 4.2 预览三形态（保留侧边栏 / 全屏 / 独立悬浮窗）。 */
+    public void applyPreviewPresentation(com.kooo.evcam.ui.PreviewPresentation presentation) {
+        com.kooo.evcam.ui.PreviewPresentation target =
+                presentation != null ? presentation : com.kooo.evcam.ui.PreviewPresentation.SIDEBAR;
+        if (uiShell == null) {
+            return;
+        }
+        if (target == com.kooo.evcam.ui.PreviewPresentation.SIDEBAR) {
+            com.kooo.evcam.ui.StandalonePreviewWindow.dismiss(false);
+            uiShell.setFloatingWindowActive(false);
+            uiShell.setFullscreenPreview(false);
+        } else if (target == com.kooo.evcam.ui.PreviewPresentation.FULLSCREEN) {
+            com.kooo.evcam.ui.StandalonePreviewWindow.dismiss(false);
+            uiShell.setFloatingWindowActive(false);
+            navigateToSection(R.id.nav_recording);
+            uiShell.setFullscreenPreview(true);
+        } else if (target == com.kooo.evcam.ui.PreviewPresentation.WINDOW) {
+            uiShell.setFullscreenPreview(false);
+            openStandalonePreviewWindow(resolveStandaloneInitialCamera(), false);
+        }
+    }
+
+    /** 顶栏"小窗"快捷入口：打开独立预览悬浮窗并退至后台，不抢占导航焦点栈。 */
+    public void enterFloatingWindowPresentation() {
+        if (previewEditor != null && previewEditor.isEditing()) {
+            Toast.makeText(this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (uiShell != null && uiShell.isFullscreenPreview()) {
+            uiShell.setFullscreenPreview(false);
+        }
+        openStandalonePreviewWindow(resolveStandaloneInitialCamera(), true);
+    }
+
+    private String resolveStandaloneInitialCamera() {
+        String saved = appConfig.getStandaloneWindowCamera();
+        if (saved != null && !saved.isEmpty()) {
+            return saved;
+        }
+        return previewModeController != null ? previewModeController.getActivePrimaryCameraKey() : "front";
+    }
+
+    private void openStandalonePreviewWindow(String cameraPosition, boolean moveUiToBackground) {
+        if (!WakeUpHelper.hasOverlayPermission(this)
+                && !com.kooo.evcam.ui.OverlayWindowParamsFactory.shouldUseAccessibilityOverlay(this)) {
+            Toast.makeText(this, "需要悬浮窗权限才能显示独立预览", Toast.LENGTH_SHORT).show();
+            WakeUpHelper.requestOverlayPermission(this);
+            return;
+        }
+        com.kooo.evcam.ui.StandalonePreviewWindow.show(
+                this,
+                cameraPosition,
+                new com.kooo.evcam.ui.StandalonePreviewWindow.Callbacks() {
+                    @Override
+                    public void onReturnToApp() {
+                        Intent intent = new Intent(MainActivity.this, MainActivity.class);
+                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+                        startActivity(intent);
+                    }
+
+                    @Override
+                    public void onClosed() {
+                        if (uiShell != null) {
+                            runOnUiThread(() -> uiShell.setFloatingWindowActive(false));
+                        }
+                    }
+                }
+        );
+        boolean active = com.kooo.evcam.ui.StandalonePreviewWindow.isShowing();
+        if (uiShell != null) {
+            uiShell.setFloatingWindowActive(active);
+        }
+        if (active && moveUiToBackground) {
+            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(this);
+        }
+    }
+
+    /** 独立悬浮窗关闭时检查是否可释放后台空闲相机。 */
+    public void checkAndCloseCamerasIfIdle() {
+        if (cameraManager == null || !isInBackground) {
+            return;
+        }
+        if (isRecording || isRemoteRecording || isAutoRecordingPending) {
+            return;
+        }
+        if (BlindSpotService.hasActiveCameraWindows()) {
+            return;
+        }
+        AppLog.d(TAG, "Standalone preview closed while in background and no active consumers remaining; closing cameras");
+        cameraManager.closeAllCameras();
+    }
+
     /**
      * 显示摄像头预览悬浮窗
-     * 
+     *
      * @param cameraPosition 要显示的摄像头位置（front/back/left/right）
      */
     public void showCameraPreviewFloating(String cameraPosition) {
-        // 检查悬浮窗权限
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !android.provider.Settings.canDrawOverlays(this)) {
-            Toast.makeText(this, "需要悬浮窗权限才能显示预览", Toast.LENGTH_SHORT).show();
-            Intent intent = new Intent(android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    android.net.Uri.parse("package:" + getPackageName()));
-            startActivity(intent);
-            return;
-        }
-        
-        // TODO: CameraPreviewFloatingService 尚未实现
-        // CameraPreviewFloatingService.start(this, cameraPosition);
-        AppLog.d(TAG, "Camera preview floating not implemented yet for: " + cameraPosition);
-        Toast.makeText(this, "摄像头预览悬浮窗功能尚未实现", Toast.LENGTH_SHORT).show();
+        openStandalonePreviewWindow(cameraPosition, false);
     }
-    
+
     /**
      * 关闭摄像头预览悬浮窗
      */
     public void dismissCameraPreviewFloating() {
-        // TODO: CameraPreviewFloatingService 尚未实现
-        // CameraPreviewFloatingService.stop(this);
-        AppLog.d(TAG, "Camera preview floating stop - not implemented yet");
+        com.kooo.evcam.ui.StandalonePreviewWindow.dismiss(true);
+        if (uiShell != null) {
+            uiShell.setFloatingWindowActive(false);
+        }
     }
 }

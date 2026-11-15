@@ -38,6 +38,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
 
     private WindowManager windowManager;
     public WindowManager.LayoutParams params; // 改为public以便Service访问
+    private com.kooo.evcam.ui.OverlayWindowParamsFactory.AttachedOverlay attachedOverlay;
     private AppConfig appConfig;
     private TextureView textureView;
     private Surface cachedSurface;
@@ -129,18 +130,14 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         initialX = appConfig.getTurnSignalFloatingX();
         initialY = appConfig.getTurnSignalFloatingY();
 
-        params = new WindowManager.LayoutParams(
+        params = com.kooo.evcam.ui.OverlayWindowParamsFactory.createMainParams(
+                getContext(),
                 initialWidth,
                 initialHeight,
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O ?
-                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY :
-                        WindowManager.LayoutParams.TYPE_PHONE,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
-                PixelFormat.TRANSLUCENT
+                initialX,
+                initialY,
+                true
         );
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.x = initialX;
-        params.y = initialY;
 
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
@@ -271,11 +268,11 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                         int newHeight = (int) (initialHeight + dy);
                         if (newHeight > 150) params.height = newHeight;
                     }
-                    windowManager.updateViewLayout(this, params);
+                    updateWindowLayoutSafely();
                 } else if (isSetupMode || isAdjustPreviewMode) {
                     params.x = (int) (initialX + dx);
                     params.y = (int) (initialY + dy);
-                    windowManager.updateViewLayout(this, params);
+                    updateWindowLayoutSafely();
                 }
                 return true;
 
@@ -397,7 +394,8 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                 params.alpha = 0f;
                 pendingShowAnimation = true;
 
-                windowManager.addView(this, params);
+                attachedOverlay = com.kooo.evcam.ui.OverlayWindowParamsFactory.attachMainOverlay(
+                        getContext(), windowManager, this, params, null);
                 if (isAdjustPreviewMode) {
                     moveToAdjustPreviewDefaultPosition();
                 }
@@ -417,8 +415,20 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         }
     }
 
+    private WindowManager getActiveWindowManager() {
+        return attachedOverlay != null ? attachedOverlay.getActiveWindowManager() : windowManager;
+    }
+
+    private void updateWindowLayoutSafely() {
+        if (attachedOverlay != null) {
+            attachedOverlay.updateLayout();
+        } else if (windowManager != null) {
+            updateWindowLayoutSafely();
+        }
+    }
+
     private void playShowAnimation() {
-        FloatingWindowDisplayHelper.revealNow(this, windowManager, params);
+        FloatingWindowDisplayHelper.revealNow(this, getActiveWindowManager(), params);
     }
 
     public void applyTransformNow() {
@@ -448,14 +458,15 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             params.height = targetH;
             try {
                 if (getParent() != null) {
-                    windowManager.updateViewLayout(this, params);
+                    updateWindowLayoutSafely();
                 }
             } catch (Exception e) {
                 // Ignore
             }
         }
 
-        BlindSpotCorrection.apply(textureView, appConfig, cameraPos, currentRotation, isCurrentlySwapped);
+        BlindSpotCorrection.apply(textureView, appConfig,
+                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT, cameraPos, currentRotation, isCurrentlySwapped);
     }
 
     public void enableAdjustPreviewMode() {
@@ -495,7 +506,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         params.y = y;
         if (getParent() != null) {
             try {
-                windowManager.updateViewLayout(this, params);
+                updateWindowLayoutSafely();
             } catch (Exception e) {
                 // Ignore
             }
@@ -516,7 +527,11 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             showAnimFallback = null;
         }
 
-        FloatingWindowDisplayHelper.dismissNow(this, windowManager, params);
+        FloatingWindowDisplayHelper.dismissNow(this, getActiveWindowManager(), params);
+        if (attachedOverlay != null) {
+            attachedOverlay.markDetached();
+            attachedOverlay = null;
+        }
     }
 
     private void scheduleRetryBind() {
@@ -614,7 +629,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             params.width = width;
             params.height = height;
             try {
-                windowManager.updateViewLayout(this, params);
+                updateWindowLayoutSafely();
             } catch (Exception e) {
                 AppLog.e(TAG, "更新悬浮窗位置失败: " + e.getMessage());
             }

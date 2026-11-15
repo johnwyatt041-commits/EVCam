@@ -391,6 +391,119 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content" />
                 </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="14dp"
+                    android:background="@color/ui_border" />
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="默认预览布局形态 (4.2)"
+                    android:textColor="@color/text_primary"
+                    android:textSize="15sp"
+                    android:fontFamily="sans-serif-medium" />
+
+                <TextView
+                    android:id="@+id/tv_preview_presentation_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="当前形态：保留侧边栏（默认）"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:orientation="horizontal">
+
+                    <Button
+                        android:id="@+id/btn_presentation_sidebar"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="保留侧边栏"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_presentation_fullscreen"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="8dp"
+                        android:text="全屏预览"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+
+                    <Button
+                        android:id="@+id/btn_presentation_window"
+                        android:layout_width="0dp"
+                        android:layout_height="44dp"
+                        android:layout_weight="1"
+                        android:text="独立悬浮窗"
+                        android:textSize="13sp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
+                </LinearLayout>
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_marginVertical="14dp"
+                    android:background="@color/ui_border" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:layout_marginEnd="16dp"
+                        android:orientation="vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="无障碍高层级悬浮窗 (2032)"
+                            android:textColor="@color/text_primary"
+                            android:textSize="15sp"
+                            android:fontFamily="sans-serif-medium" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="3dp"
+                            android:text="已启用无障碍保活时优先以 TYPE_ACCESSIBILITY_OVERLAY 显示主屏悬浮窗（不抢焦点/不拦返回，解绑自动降级 2038）；EVCC 副屏固定保持 2038"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_accessibility_overlay"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 4. confirm_door_exit 开关持久化预留 -->

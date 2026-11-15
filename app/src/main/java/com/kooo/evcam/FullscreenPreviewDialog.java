@@ -35,8 +35,13 @@ public class FullscreenPreviewDialog extends Dialog {
         label.setText("front".equals(cameraPosition) ? "前" : "back".equals(cameraPosition) ? "后" : "left".equals(cameraPosition) ? "左" : "右");
         findViewById(R.id.btn_close).setOnClickListener(v -> dismiss());
         textureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
-            @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture texture, int w, int h) { attach(texture); }
-            @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture texture, int w, int h) {}
+            @Override public void onSurfaceTextureAvailable(@NonNull SurfaceTexture texture, int w, int h) {
+                attach(texture);
+                applyPreviewTransform();
+            }
+            @Override public void onSurfaceTextureSizeChanged(@NonNull SurfaceTexture texture, int w, int h) {
+                applyPreviewTransform();
+            }
             @Override public boolean onSurfaceTextureDestroyed(@NonNull SurfaceTexture texture) { detach(); return true; }
             @Override public void onSurfaceTextureUpdated(@NonNull SurfaceTexture texture) {}
         });
@@ -56,6 +61,15 @@ public class FullscreenPreviewDialog extends Dialog {
         }
         surface = new Surface(texture);
         attachedCamera.setFullscreenPreviewSurface(surface, texture);
+    }
+
+    private void applyPreviewTransform() {
+        if (textureView == null) {
+            return;
+        }
+        AppConfig cfg = new AppConfig(getContext());
+        int rotation = "custom".equals(cfg.getCarModel()) ? cfg.getCameraRotation(cameraPosition) : 0;
+        com.kooo.evcam.ui.PreviewTransformHelper.applyMainPreviewTransform(textureView, getContext(), cameraPosition, rotation);
     }
 
     private void detach() {

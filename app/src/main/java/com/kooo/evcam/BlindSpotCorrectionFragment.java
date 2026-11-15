@@ -17,6 +17,9 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.kooo.evcam.blindspot.MirrorTarget;
+import com.kooo.evcam.stream.MjpegStreamManager;
+
 public class BlindSpotCorrectionFragment extends Fragment {
     private static final float SCALE_MIN = 0.10f;
     private static final float SCALE_MAX = 3.00f;
@@ -42,6 +45,12 @@ public class BlindSpotCorrectionFragment extends Fragment {
     private TextView tvTranslateY;
     private TextView tvRotation;
 
+    private Button btnPhysicalMirrorH;
+    private Button btnPhysicalMirrorV;
+    private Button btnTargetBlindSpot;
+    private Button btnTargetMain;
+    private Button btnTargetSecondary;
+    private Button btnTargetStream;
     private Button btnMirrorH;
     private Button btnMirrorV;
 
@@ -50,6 +59,7 @@ public class BlindSpotCorrectionFragment extends Fragment {
 
     private AppConfig appConfig;
     private String currentCameraPos = "front";
+    private MirrorTarget currentMirrorTarget = MirrorTarget.BLIND_SPOT;
 
     @Nullable
     @Override
@@ -91,6 +101,12 @@ public class BlindSpotCorrectionFragment extends Fragment {
         tvTranslateY = view.findViewById(R.id.tv_translate_y);
         tvRotation = view.findViewById(R.id.tv_rotation);
 
+        btnPhysicalMirrorH = view.findViewById(R.id.btn_physical_mirror_h);
+        btnPhysicalMirrorV = view.findViewById(R.id.btn_physical_mirror_v);
+        btnTargetBlindSpot = view.findViewById(R.id.btn_mirror_target_blind_spot);
+        btnTargetMain = view.findViewById(R.id.btn_mirror_target_main);
+        btnTargetSecondary = view.findViewById(R.id.btn_mirror_target_secondary);
+        btnTargetStream = view.findViewById(R.id.btn_mirror_target_stream);
         btnMirrorH = view.findViewById(R.id.btn_mirror_h);
         btnMirrorV = view.findViewById(R.id.btn_mirror_v);
 
@@ -191,29 +207,67 @@ public class BlindSpotCorrectionFragment extends Fragment {
             public void onStopTrackingTouch(SeekBar seekBar) {}
         });
 
-        btnMirrorH.setOnClickListener(v -> {
-            boolean current = appConfig.getBlindSpotCorrectionMirrorH(currentCameraPos);
-            appConfig.setBlindSpotCorrectionMirrorH(currentCameraPos, !current);
+        if (btnPhysicalMirrorH != null) {
+            btnPhysicalMirrorH.setOnClickListener(v -> {
+                boolean current = appConfig.isPhysicalMirrorH(currentCameraPos);
+                appConfig.setPhysicalMirrorH(currentCameraPos, !current);
+                updateMirrorButtonStyles();
+                notifyAllMirrorConsumers();
+            });
+        }
+
+        if (btnPhysicalMirrorV != null) {
+            btnPhysicalMirrorV.setOnClickListener(v -> {
+                boolean current = appConfig.isPhysicalMirrorV(currentCameraPos);
+                appConfig.setPhysicalMirrorV(currentCameraPos, !current);
+                updateMirrorButtonStyles();
+                notifyAllMirrorConsumers();
+            });
+        }
+
+        View.OnClickListener targetClickListener = v -> {
+            if (v == btnTargetMain) {
+                currentMirrorTarget = MirrorTarget.MAIN_PREVIEW;
+            } else if (v == btnTargetSecondary) {
+                currentMirrorTarget = MirrorTarget.SECONDARY_HUD;
+            } else if (v == btnTargetStream) {
+                currentMirrorTarget = MirrorTarget.NETWORK_STREAM;
+            } else {
+                currentMirrorTarget = MirrorTarget.BLIND_SPOT;
+            }
             updateMirrorButtonStyles();
-            BlindSpotService.update(requireContext());
+        };
+        if (btnTargetBlindSpot != null) btnTargetBlindSpot.setOnClickListener(targetClickListener);
+        if (btnTargetMain != null) btnTargetMain.setOnClickListener(targetClickListener);
+        if (btnTargetSecondary != null) btnTargetSecondary.setOnClickListener(targetClickListener);
+        if (btnTargetStream != null) btnTargetStream.setOnClickListener(targetClickListener);
+
+        btnMirrorH.setOnClickListener(v -> {
+            boolean current = appConfig.isOutputMirrorH(currentMirrorTarget, currentCameraPos);
+            appConfig.setOutputMirrorH(currentMirrorTarget, currentCameraPos, !current);
+            updateMirrorButtonStyles();
+            notifyAllMirrorConsumers();
         });
 
         btnMirrorV.setOnClickListener(v -> {
-            boolean current = appConfig.getBlindSpotCorrectionMirrorV(currentCameraPos);
-            appConfig.setBlindSpotCorrectionMirrorV(currentCameraPos, !current);
+            boolean current = appConfig.isOutputMirrorV(currentMirrorTarget, currentCameraPos);
+            appConfig.setOutputMirrorV(currentMirrorTarget, currentCameraPos, !current);
             updateMirrorButtonStyles();
-            BlindSpotService.update(requireContext());
+            notifyAllMirrorConsumers();
         });
 
         resetButton.setOnClickListener(v -> {
             appConfig.resetBlindSpotCorrection(currentCameraPos);
+            appConfig.setPhysicalMirrorH(currentCameraPos, false);
+            appConfig.setPhysicalMirrorV(currentCameraPos, false);
+            appConfig.resetMirrorForTarget(currentMirrorTarget, currentCameraPos);
             loadFromConfig(currentCameraPos);
-            BlindSpotService.update(requireContext());
+            notifyAllMirrorConsumers();
         });
 
         saveButton.setOnClickListener(v -> {
-            BlindSpotService.update(requireContext());
-            Toast.makeText(requireContext(), "矫正参数已保存并应用", Toast.LENGTH_SHORT).show();
+            notifyAllMirrorConsumers();
+            Toast.makeText(requireContext(), "矫正及双镜像参数已保存并应用", Toast.LENGTH_SHORT).show();
         });
     }
 
@@ -279,18 +333,52 @@ public class BlindSpotCorrectionFragment extends Fragment {
     }
 
     private void updateMirrorButtonStyles() {
-        boolean mirrorH = appConfig.getBlindSpotCorrectionMirrorH(currentCameraPos);
-        boolean mirrorV = appConfig.getBlindSpotCorrectionMirrorV(currentCameraPos);
+        boolean physH = appConfig.isPhysicalMirrorH(currentCameraPos);
+        boolean physV = appConfig.isPhysicalMirrorV(currentCameraPos);
+        boolean outH = appConfig.isOutputMirrorH(currentMirrorTarget, currentCameraPos);
+        boolean outV = appConfig.isOutputMirrorV(currentMirrorTarget, currentCameraPos);
 
         int accentColor = getResources().getColor(R.color.button_accent, null);
         int normalColor = getResources().getColor(R.color.button_background, null);
         int whiteText = getResources().getColor(R.color.white, null);
         int normalText = getResources().getColor(R.color.button_text, null);
 
-        btnMirrorH.setBackgroundTintList(ColorStateList.valueOf(mirrorH ? accentColor : normalColor));
-        btnMirrorH.setTextColor(mirrorH ? whiteText : normalText);
-        btnMirrorV.setBackgroundTintList(ColorStateList.valueOf(mirrorV ? accentColor : normalColor));
-        btnMirrorV.setTextColor(mirrorV ? whiteText : normalText);
+        styleToggleButton(btnPhysicalMirrorH, physH, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnPhysicalMirrorV, physV, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnTargetBlindSpot, currentMirrorTarget == MirrorTarget.BLIND_SPOT, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnTargetMain, currentMirrorTarget == MirrorTarget.MAIN_PREVIEW, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnTargetSecondary, currentMirrorTarget == MirrorTarget.SECONDARY_HUD, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnTargetStream, currentMirrorTarget == MirrorTarget.NETWORK_STREAM, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnMirrorH, outH, accentColor, normalColor, whiteText, normalText);
+        styleToggleButton(btnMirrorV, outV, accentColor, normalColor, whiteText, normalText);
+    }
+
+    private static void styleToggleButton(
+            @Nullable Button button,
+            boolean active,
+            int accentColor,
+            int normalColor,
+            int whiteText,
+            int normalText) {
+        if (button == null) {
+            return;
+        }
+        button.setBackgroundTintList(ColorStateList.valueOf(active ? accentColor : normalColor));
+        button.setTextColor(active ? whiteText : normalText);
+    }
+
+    private void notifyAllMirrorConsumers() {
+        if (getContext() != null) {
+            BlindSpotService.update(requireContext());
+        }
+        MainActivity main = MainActivity.getInstance();
+        if (main != null) {
+            main.refreshMainPreviewTransforms();
+        }
+        MjpegStreamManager streamManager = MjpegStreamManager.getInstance();
+        if (streamManager != null) {
+            streamManager.applyParams();
+        }
     }
 
     private int scaleToProgress(float scale) {

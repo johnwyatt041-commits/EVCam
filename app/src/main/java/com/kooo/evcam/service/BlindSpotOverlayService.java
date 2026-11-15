@@ -63,6 +63,7 @@ public class BlindSpotOverlayService extends Service {
     // 窗口管理
     private WindowManager windowManager;
     private WindowManager.LayoutParams layoutParams;
+    private com.kooo.evcam.ui.OverlayWindowParamsFactory.AttachedOverlay attachedOverlay;
 
     // 视图组件
     private FrameLayout containerView;
@@ -218,12 +219,13 @@ public class BlindSpotOverlayService extends Service {
         if (!isOverlayShowing) {
             return;
         }
+        hideFloatingWindow();
+    }
 
-        if (containerView != null && windowManager != null) {
-            windowManager.removeView(containerView);
-            containerView = null;
-        }
-
+    private void hideFloatingWindow() {
+        com.kooo.evcam.ui.OverlayWindowParamsFactory.detachSafely(attachedOverlay);
+        attachedOverlay = null;
+        containerView = null;
         blindSpotTextureView = null;
         controlBar = null;
         isOverlayShowing = false;
@@ -242,26 +244,9 @@ public class BlindSpotOverlayService extends Service {
         origX = blindSpotConfig.getWindowX();
         origY = blindSpotConfig.getWindowY();
 
-        // 创建布局参数
-        int layoutType;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            layoutType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        } else {
-            layoutType = WindowManager.LayoutParams.TYPE_SYSTEM_ALERT;
-        }
-
-        layoutParams = new WindowManager.LayoutParams(
-                origW,
-                origH,
-                origX,
-                origY,
-                layoutType,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE |
-                        WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL |
-                        WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
-                PixelFormat.TRANSLUCENT);
-
-        layoutParams.gravity = Gravity.TOP | Gravity.START;
+        // 创建非抢焦、非模态布局参数（无障碍激活时优先 2032）
+        layoutParams = com.kooo.evcam.ui.OverlayWindowParamsFactory.createMainParams(
+                this, origW, origH, origX, origY, true);
 
         // 创建容器视图
         containerView = new FrameLayout(this);
@@ -280,8 +265,12 @@ public class BlindSpotOverlayService extends Service {
         // 添加控制栏
         addControlBar();
 
-        // 添加窗口
-        windowManager.addView(containerView, layoutParams);
+        // 安全挂载窗口
+        attachedOverlay = com.kooo.evcam.ui.OverlayWindowParamsFactory.attachMainOverlay(
+                this, windowManager, containerView, layoutParams, () -> {
+                    isOverlayShowing = false;
+                    stopSelf();
+                });
     }
 
     private void addControlBar() {
@@ -377,7 +366,11 @@ public class BlindSpotOverlayService extends Service {
         layoutParams.width = width;
         layoutParams.height = height;
 
-        windowManager.updateViewLayout(containerView, layoutParams);
+        if (attachedOverlay != null) {
+            attachedOverlay.updateLayout();
+        } else {
+            windowManager.updateViewLayout(containerView, layoutParams);
+        }
 
         // 保存配置
         blindSpotConfig.setWindowPosition(x, y);

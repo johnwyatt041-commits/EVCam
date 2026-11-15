@@ -34,7 +34,8 @@ public class BlindSpotSettingsFragment extends Fragment {
     private EditText turnSignalRightLogEditText;
     private boolean isUpdatingFromPreset = false; // 防止 TextWatcher 在预设填充时触发
 
-    // 全景影像避让UI控件
+    // 全景影像避让 / 360 暂停补盲 UI控件
+    private SwitchMaterial blindSpotSuppressOn360Switch;
     private SwitchMaterial avmAvoidanceSwitch;
     private LinearLayout avmAvoidanceDetailLayout;
     private EditText avmAvoidanceActivityEditText;
@@ -63,6 +64,7 @@ public class BlindSpotSettingsFragment extends Fragment {
     private SwitchMaterial mainFloatingAspectRatioLockSwitch;
     private SwitchMaterial mainFloatingLongPressDragSwitch;
     private Button resetMainFloatingButton;
+    private Button resetStandaloneWindowButton;
     private Button logcatDebugButton;
     private android.widget.EditText logFilterEditText;
     private Button menuButton;
@@ -101,7 +103,8 @@ public class BlindSpotSettingsFragment extends Fragment {
         adjustMjpegStreamButton = view.findViewById(R.id.btn_adjust_mjpeg_stream);
         adjustMjpegStreamButton.setVisibility(AppFeatures.NETWORK_STREAMING ? View.VISIBLE : View.GONE);
         
-        // 全景影像避让UI初始化
+        // 全景影像避让 / 360 暂停补盲 UI初始化
+        blindSpotSuppressOn360Switch = view.findViewById(R.id.switch_blind_spot_suppress_on_360);
         avmAvoidanceSwitch = view.findViewById(R.id.switch_avm_avoidance);
         avmAvoidanceDetailLayout = view.findViewById(R.id.layout_avm_avoidance_detail);
         avmAvoidanceActivityEditText = view.findViewById(R.id.et_avm_avoidance_activity);
@@ -118,6 +121,7 @@ public class BlindSpotSettingsFragment extends Fragment {
         mainFloatingAspectRatioLockSwitch = view.findViewById(R.id.switch_main_floating_aspect_ratio_lock);
         mainFloatingLongPressDragSwitch = view.findViewById(R.id.switch_main_floating_long_press_drag);
         resetMainFloatingButton = view.findViewById(R.id.btn_reset_main_floating);
+        resetStandaloneWindowButton = view.findViewById(R.id.btn_reset_standalone_window);
 
         carApiStatusText = view.findViewById(R.id.tv_car_api_status);
 
@@ -213,7 +217,10 @@ public class BlindSpotSettingsFragment extends Fragment {
         mainFloatingAspectRatioLockSwitch.setChecked(appConfig.isMainFloatingAspectRatioLocked());
         mainFloatingLongPressDragSwitch.setChecked(appConfig.isMainFloatingLongPressDragEnabled());
         
-        // 全景影像避让配置加载
+        // 全景影像避让 / 360 暂停补盲配置加载
+        if (blindSpotSuppressOn360Switch != null) {
+            blindSpotSuppressOn360Switch.setChecked(appConfig.isBlindSpotSuppressOn360());
+        }
         boolean avmEnabled = appConfig.isAvmAvoidanceEnabled();
         avmAvoidanceSwitch.setChecked(avmEnabled);
         avmAvoidanceDetailLayout.setVisibility(avmEnabled ? View.VISIBLE : View.GONE);
@@ -404,6 +411,13 @@ public class BlindSpotSettingsFragment extends Fragment {
             Toast.makeText(requireContext(), "主屏悬浮窗已重置", Toast.LENGTH_SHORT).show();
         });
 
+        if (resetStandaloneWindowButton != null) {
+            resetStandaloneWindowButton.setOnClickListener(v -> {
+                appConfig.resetStandaloneWindowBounds();
+                Toast.makeText(requireContext(), "独立预览小窗位置和尺寸已重置", Toast.LENGTH_SHORT).show();
+            });
+        }
+
         adjustBlindSpotCorrectionButton.setOnClickListener(v -> {
             if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
                 Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
@@ -471,7 +485,14 @@ public class BlindSpotSettingsFragment extends Fragment {
             });
         }
 
-        // ==================== 全景影像避让监听器 ====================
+        // ==================== 全景影像避让 / 360 暂停补盲监听器 ====================
+
+        if (blindSpotSuppressOn360Switch != null) {
+            blindSpotSuppressOn360Switch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                appConfig.setBlindSpotSuppressOn360(isChecked);
+                BlindSpotService.update(requireContext());
+            });
+        }
 
         avmAvoidanceSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             appConfig.setAvmAvoidanceEnabled(isChecked);

@@ -4,6 +4,9 @@ import android.graphics.Matrix;
 import android.graphics.SurfaceTexture;
 import android.view.TextureView;
 
+import com.kooo.evcam.blindspot.CameraMirrorPolicy;
+import com.kooo.evcam.blindspot.MirrorTarget;
+
 public final class BlindSpotCorrection {
     private static final float MIN_SCALE = 0.1f;
     private static final float MAX_SCALE = 3.0f;
@@ -17,7 +20,19 @@ public final class BlindSpotCorrection {
      * 矫正旋转仅做纯旋转，不做比例修正，可能出现黑角和轻微形变。
      */
     public static void apply(TextureView textureView, AppConfig appConfig, String cameraPos, int baseRotation) {
-        apply(textureView, appConfig, cameraPos, baseRotation, false);
+        apply(textureView, appConfig, MirrorTarget.BLIND_SPOT, cameraPos, baseRotation, false);
+    }
+
+    /**
+     * 指定输出端（主屏补盲 / 副屏 HUD / 主预览等）应用几何矫正与物理/输出双镜像。
+     */
+    public static void apply(
+            TextureView textureView,
+            AppConfig appConfig,
+            MirrorTarget target,
+            String cameraPos,
+            int baseRotation) {
+        apply(textureView, appConfig, target, cameraPos, baseRotation, false);
     }
 
     /**
@@ -27,7 +42,20 @@ public final class BlindSpotCorrection {
      *                      否则 90° 时画面会被错误放大裁切。
      */
     public static void apply(TextureView textureView, AppConfig appConfig, String cameraPos, int baseRotation, boolean windowSwapped) {
+        apply(textureView, appConfig, MirrorTarget.BLIND_SPOT, cameraPos, baseRotation, windowSwapped);
+    }
+
+    public static void apply(
+            TextureView textureView,
+            AppConfig appConfig,
+            MirrorTarget target,
+            String cameraPos,
+            int baseRotation,
+            boolean windowSwapped) {
         if (textureView == null || appConfig == null) return;
+        final MirrorTarget resolvedTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        final CameraMirrorPolicy.ResolvedMirror mirror =
+                CameraMirrorPolicy.resolve(appConfig, resolvedTarget, cameraPos);
 
         textureView.post(() -> {
             int viewWidth = textureView.getWidth();
@@ -89,6 +117,11 @@ public final class BlindSpotCorrection {
                 matrix.postScale(scaleXFill, scaleYFill, centerX, centerY);
             }
 
+            // 物理镜像（硬件安装方向翻转，同一摄像头各输出共用），先于挂载旋转在 Buffer 空间生效
+            if (mirror.physicalH || mirror.physicalV) {
+                matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
+            }
+
             // 应用 baseRotation（副屏方向补偿）
             if (baseRotation != 0) {
                 matrix.postRotate(baseRotation, centerX, centerY);
@@ -104,8 +137,6 @@ public final class BlindSpotCorrection {
                 float scaleY = clamp(appConfig.getBlindSpotCorrectionScaleY(cameraPos), MIN_SCALE, MAX_SCALE);
                 float translateX = clamp(appConfig.getBlindSpotCorrectionTranslateX(cameraPos), MIN_TRANSLATE, MAX_TRANSLATE);
                 float translateY = clamp(appConfig.getBlindSpotCorrectionTranslateY(cameraPos), MIN_TRANSLATE, MAX_TRANSLATE);
-                boolean mirrorH = appConfig.getBlindSpotCorrectionMirrorH(cameraPos);
-                boolean mirrorV = appConfig.getBlindSpotCorrectionMirrorV(cameraPos);
 
                 if (correctionRotation != 0 && windowSwapped && previewW > 0 && previewH > 0) {
                     // 悬浮窗已互换宽高且有旋转 → 在 buffer 空间中旋转，保证画面比例不变形
@@ -125,6 +156,11 @@ public final class BlindSpotCorrection {
 
                     // 还原到 buffer 坐标系
                     matrix.postScale((float) previewW / viewWidth, (float) previewH / viewHeight, centerX, centerY);
+
+                    // 在 buffer 空间先应用物理镜像
+                    if (mirror.physicalH || mirror.physicalV) {
+                        matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
+                    }
 
                     // 在 buffer 空间中应用 baseRotation
                     if (baseRotation != 0) {
@@ -152,13 +188,11 @@ public final class BlindSpotCorrection {
 
                     matrix.postTranslate(translateX * viewWidth, translateY * viewHeight);
                 }
+            }
 
-                // 镜像翻转（在所有变换之后应用）
-                if (mirrorH || mirrorV) {
-                    float mx = mirrorH ? -1f : 1f;
-                    float my = mirrorV ? -1f : 1f;
-                    matrix.postScale(mx, my, centerX, centerY);
-                }
+            // 输出镜像（在旋转与位移之后、最终屏幕坐标系中翻转，由目标端独立控制）
+            if (mirror.outputH || mirror.outputV) {
+                matrix.postScale(mirror.outputH ? -1f : 1f, mirror.outputV ? -1f : 1f, centerX, centerY);
             }
 
             textureView.setTransform(matrix);

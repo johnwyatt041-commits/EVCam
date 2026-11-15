@@ -19,6 +19,7 @@ import androidx.core.content.ContextCompat;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.AutoFitTextureView;
+import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.vehicle.VehicleSignalHub;
@@ -347,10 +348,21 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
     }
 
-    private void applyStateToLayoutAndShell() {
-        if (modeAContainer != null && modeAContainer.getVisibility() != View.GONE) {
-            modeAContainer.setVisibility(View.GONE);
+    @NonNull
+    public String getActivePrimaryCameraKey() {
+        if (currentMode == PreviewMode.MODE_C && modeCPrimaryIndex == PreviewLayoutModel.BACK) {
+            return "back";
         }
+        return "front";
+    }
+
+    private void applyStateToLayoutAndShell() {
+        boolean internal360Visible = modeAContainer != null && modeAContainer.getVisibility() == View.VISIBLE;
+        if (modeAContainer != null && internal360Visible) {
+            modeAContainer.setVisibility(View.GONE);
+            internal360Visible = false;
+        }
+        BlindSpotService.setInternal360Active(context, internal360Visible);
         if (previewLayout != null) {
             previewLayout.setPreviewState(currentMode, modeCPrimaryIndex);
         }

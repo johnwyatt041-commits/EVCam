@@ -20,6 +20,8 @@ import android.view.WindowManager;
 
 import androidx.annotation.Nullable;
 
+import com.kooo.evcam.ui.OverlayWindowParamsFactory;
+
 /**
  * 悬浮窗服务
  * 显示一个悬浮按钮，与录制状态同步（录制时绿色闪烁，未录制时红色）
@@ -41,6 +43,7 @@ public class FloatingWindowService extends Service {
     private WindowManager windowManager;
     private View floatingView;
     private WindowManager.LayoutParams layoutParams;
+    private OverlayWindowParamsFactory.AttachedOverlay attachedOverlay;
     private AppConfig appConfig;
     
     // 录制状态
@@ -122,12 +125,10 @@ public class FloatingWindowService extends Service {
         stopBlinkAnimation();
         
         // 移除悬浮窗
-        if (floatingView != null && windowManager != null) {
-            try {
-                windowManager.removeView(floatingView);
-            } catch (Exception e) {
-                AppLog.e(TAG, "移除悬浮窗失败", e);
-            }
+        OverlayWindowParamsFactory.detachSafely(attachedOverlay);
+        attachedOverlay = null;
+        if (floatingView != null) {
+            floatingView = null;
         }
         
         // 注销广播接收器
@@ -181,34 +182,20 @@ public class FloatingWindowService extends Service {
         floatingView = new FloatingButtonView(this, sizePx);
         floatingView.setAlpha(alpha / 100f);
         
-        // 设置布局参数
-        int windowType;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            windowType = WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY;
-        } else {
-            windowType = WindowManager.LayoutParams.TYPE_PHONE;
-        }
-        
-        layoutParams = new WindowManager.LayoutParams(
-                sizePx,
-                sizePx,
-                windowType,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
-                PixelFormat.TRANSLUCENT
-        );
-        
-        layoutParams.gravity = Gravity.TOP | Gravity.START;
-        
-        // 恢复保存的位置或使用默认位置
+        // 设置非抢焦、非模态布局参数（无障碍激活时优先 TYPE_ACCESSIBILITY_OVERLAY）
+        int initialXVal;
+        int initialYVal;
         if (savedX >= 0 && savedY >= 0) {
-            layoutParams.x = savedX;
-            layoutParams.y = savedY;
+            initialXVal = savedX;
+            initialYVal = savedY;
         } else {
             // 默认位置：右侧中间
             DisplayMetrics metrics = getResources().getDisplayMetrics();
-            layoutParams.x = metrics.widthPixels - sizePx - 20;
-            layoutParams.y = metrics.heightPixels / 2 - sizePx / 2;
+            initialXVal = metrics.widthPixels - sizePx - 20;
+            initialYVal = metrics.heightPixels / 2 - sizePx / 2;
         }
+        layoutParams = OverlayWindowParamsFactory.createMainParams(
+                this, sizePx, sizePx, initialXVal, initialYVal, true);
         
         // 设置触摸事件
         floatingView.setOnTouchListener(new View.OnTouchListener() {
@@ -249,7 +236,9 @@ public class FloatingWindowService extends Service {
                             
                             layoutParams.x = newX;
                             layoutParams.y = newY;
-                            windowManager.updateViewLayout(floatingView, layoutParams);
+                            if (attachedOverlay != null) {
+                                attachedOverlay.updateLayout();
+                            }
                         }
                         return true;
                         
@@ -268,12 +257,13 @@ public class FloatingWindowService extends Service {
         });
         
         // 添加到窗口
-        try {
-            windowManager.addView(floatingView, layoutParams);
-            AppLog.d(TAG, "悬浮窗创建成功，大小: " + sizePx + "px, 透明度: " + alpha + "%");
-        } catch (Exception e) {
-            AppLog.e(TAG, "添加悬浮窗失败", e);
+        attachedOverlay = OverlayWindowParamsFactory.attachMainOverlay(
+                this, windowManager, floatingView, layoutParams, this::stopSelf);
+        if (attachedOverlay == null) {
+            AppLog.e(TAG, "添加悬浮窗失败");
             stopSelf();
+        } else {
+            AppLog.d(TAG, "悬浮窗创建成功，大小: " + sizePx + "px, 透明度: " + alpha + "%");
         }
     }
     
@@ -430,13 +420,8 @@ public class FloatingWindowService extends Service {
      * 更新悬浮窗（应用新设置）
      */
     private void updateFloatingWindow() {
-        if (floatingView != null && windowManager != null) {
-            try {
-                windowManager.removeView(floatingView);
-            } catch (Exception e) {
-                AppLog.e(TAG, "移除旧悬浮窗失败", e);
-            }
-        }
+        OverlayWindowParamsFactory.detachSafely(attachedOverlay);
+        attachedOverlay = null;
         
         createFloatingWindow();
     }

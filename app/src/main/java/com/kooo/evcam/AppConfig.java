@@ -3,14 +3,17 @@ package com.kooo.evcam;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import com.kooo.evcam.blindspot.CameraMirrorPolicy;
+import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.config.BlindSpotConfig;
 import com.kooo.evcam.config.RecordingConfig;
+import com.kooo.evcam.ui.PreviewPresentation;
 
 /**
  * 应用配置管理类
  * 管理应用级别的配置项
  */
-public class AppConfig {
+public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String TAG = "AppConfig";
     private static final String PREF_NAME = "app_config";
     
@@ -3436,6 +3439,260 @@ public class AppConfig {
     public void setPreviewViewShortcutsEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_VIEW_SHORTCUTS_ENABLED, enabled).apply();
         AppLog.d(TAG, "画面内视图切换快捷键显隐已设置: " + enabled);
+    }
+
+    // ==================== T04 悬浮小窗与双镜像配置 ====================
+
+    private static final String KEY_PREVIEW_PRESENTATION = "t04_preview_presentation";
+    private static final String KEY_STANDALONE_WINDOW_X = "t04_standalone_window_x";
+    private static final String KEY_STANDALONE_WINDOW_Y = "t04_standalone_window_y";
+    private static final String KEY_STANDALONE_WINDOW_WIDTH = "t04_standalone_window_width";
+    private static final String KEY_STANDALONE_WINDOW_HEIGHT = "t04_standalone_window_height";
+    private static final String KEY_STANDALONE_WINDOW_CAMERA = "t04_standalone_window_camera";
+    private static final String KEY_ACCESSIBILITY_OVERLAY_ENABLED = "t04_accessibility_overlay_enabled";
+    private static final String KEY_BLIND_SPOT_SUPPRESS_ON_360 = "t04_blind_spot_suppress_on_360";
+    private static final String KEY_T04_MIRROR_MIGRATED_V1 = "t04_mirror_migrated_v1";
+
+    public static final int DEFAULT_STANDALONE_WINDOW_X = 60;
+    public static final int DEFAULT_STANDALONE_WINDOW_Y = 90;
+    public static final int DEFAULT_STANDALONE_WINDOW_WIDTH = 720;
+    public static final int DEFAULT_STANDALONE_WINDOW_HEIGHT = 440;
+
+    public PreviewPresentation getPreviewPresentation() {
+        return PreviewPresentation.fromKey(prefs.getString(KEY_PREVIEW_PRESENTATION, PreviewPresentation.SIDEBAR.getKey()));
+    }
+
+    public String getPreviewPresentationKey() {
+        return getPreviewPresentation().getKey();
+    }
+
+    public void setPreviewPresentation(PreviewPresentation presentation) {
+        PreviewPresentation safe = presentation != null ? presentation : PreviewPresentation.SIDEBAR;
+        prefs.edit().putString(KEY_PREVIEW_PRESENTATION, safe.getKey()).apply();
+    }
+
+    public void setPreviewPresentationKey(String rawKey) {
+        setPreviewPresentation(PreviewPresentation.fromKey(rawKey));
+    }
+
+    public int getStandaloneWindowX() {
+        return prefs.getInt(KEY_STANDALONE_WINDOW_X, DEFAULT_STANDALONE_WINDOW_X);
+    }
+
+    public int getStandaloneWindowY() {
+        return prefs.getInt(KEY_STANDALONE_WINDOW_Y, DEFAULT_STANDALONE_WINDOW_Y);
+    }
+
+    public void setStandaloneWindowPosition(int x, int y) {
+        prefs.edit()
+                .putInt(KEY_STANDALONE_WINDOW_X, x)
+                .putInt(KEY_STANDALONE_WINDOW_Y, y)
+                .apply();
+    }
+
+    public int getStandaloneWindowWidth() {
+        return prefs.getInt(KEY_STANDALONE_WINDOW_WIDTH, DEFAULT_STANDALONE_WINDOW_WIDTH);
+    }
+
+    public int getStandaloneWindowHeight() {
+        return prefs.getInt(KEY_STANDALONE_WINDOW_HEIGHT, DEFAULT_STANDALONE_WINDOW_HEIGHT);
+    }
+
+    public void setStandaloneWindowSize(int width, int height) {
+        prefs.edit()
+                .putInt(KEY_STANDALONE_WINDOW_WIDTH, width)
+                .putInt(KEY_STANDALONE_WINDOW_HEIGHT, height)
+                .apply();
+    }
+
+    public void resetStandaloneWindowBounds() {
+        prefs.edit()
+                .remove(KEY_STANDALONE_WINDOW_X)
+                .remove(KEY_STANDALONE_WINDOW_Y)
+                .remove(KEY_STANDALONE_WINDOW_WIDTH)
+                .remove(KEY_STANDALONE_WINDOW_HEIGHT)
+                .apply();
+    }
+
+    public String getStandaloneWindowCamera() {
+        return prefs.getString(KEY_STANDALONE_WINDOW_CAMERA, "front");
+    }
+
+    public void setStandaloneWindowCamera(String cameraPosition) {
+        if (cameraPosition == null || cameraPosition.trim().isEmpty()) {
+            return;
+        }
+        prefs.edit().putString(KEY_STANDALONE_WINDOW_CAMERA, cameraPosition).apply();
+    }
+
+    public boolean isAccessibilityOverlayEnabled() {
+        return prefs.getBoolean(KEY_ACCESSIBILITY_OVERLAY_ENABLED, true);
+    }
+
+    public void setAccessibilityOverlayEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_ACCESSIBILITY_OVERLAY_ENABLED, enabled).apply();
+    }
+
+    public boolean isBlindSpotSuppressOn360() {
+        return prefs.getBoolean(KEY_BLIND_SPOT_SUPPRESS_ON_360, true);
+    }
+
+    public void setBlindSpotSuppressOn360(boolean enabled) {
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_SUPPRESS_ON_360, enabled).apply();
+    }
+
+    private static String physicalMirrorKey(String cameraPosition, boolean vertical) {
+        return (vertical ? "phys_mirror_v_" : "phys_mirror_h_") + normalizeCameraPos(cameraPosition);
+    }
+
+    private static String outputMirrorKey(MirrorTarget target, String cameraPosition, boolean vertical) {
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        return "out_mirror_" + safeTarget.getKey() + "_" + normalizeCameraPos(cameraPosition)
+                + (vertical ? "_v" : "_h");
+    }
+
+    private static String normalizeCameraPos(String cameraPosition) {
+        if ("front".equals(cameraPosition) || "back".equals(cameraPosition)
+                || "left".equals(cameraPosition) || "right".equals(cameraPosition)) {
+            return cameraPosition;
+        }
+        return "front";
+    }
+
+    private void ensureT04MirrorMigrated() {
+        if (prefs.getBoolean(KEY_T04_MIRROR_MIGRATED_V1, false)) {
+            return;
+        }
+        SharedPreferences.Editor editor = prefs.edit();
+        String[] positions = new String[]{"front", "back", "left", "right"};
+        for (String pos : positions) {
+            String legacyBlindH = "blind_spot_correction_" + pos + "_mirror_h";
+            String legacyBlindV = "blind_spot_correction_" + pos + "_mirror_v";
+            if (prefs.contains(legacyBlindH)) {
+                boolean h = prefs.getBoolean(legacyBlindH, false);
+                String blindOutH = outputMirrorKey(MirrorTarget.BLIND_SPOT, pos, false);
+                String secOutH = outputMirrorKey(MirrorTarget.SECONDARY_HUD, pos, false);
+                if (!prefs.contains(blindOutH)) {
+                    editor.putBoolean(blindOutH, h);
+                }
+                if (!prefs.contains(secOutH)) {
+                    editor.putBoolean(secOutH, h);
+                }
+            }
+            if (prefs.contains(legacyBlindV)) {
+                boolean v = prefs.getBoolean(legacyBlindV, false);
+                String blindOutV = outputMirrorKey(MirrorTarget.BLIND_SPOT, pos, true);
+                String secOutV = outputMirrorKey(MirrorTarget.SECONDARY_HUD, pos, true);
+                if (!prefs.contains(blindOutV)) {
+                    editor.putBoolean(blindOutV, v);
+                }
+                if (!prefs.contains(secOutV)) {
+                    editor.putBoolean(secOutV, v);
+                }
+            }
+        }
+        editor.putBoolean(KEY_T04_MIRROR_MIGRATED_V1, true);
+        editor.apply();
+    }
+
+    @Override
+    public boolean isPhysicalMirrorH(String cameraPosition) {
+        ensureT04MirrorMigrated();
+        return prefs.getBoolean(physicalMirrorKey(cameraPosition, false), false);
+    }
+
+    @Override
+    public boolean isPhysicalMirrorV(String cameraPosition) {
+        ensureT04MirrorMigrated();
+        return prefs.getBoolean(physicalMirrorKey(cameraPosition, true), false);
+    }
+
+    public void setPhysicalMirrorH(String cameraPosition, boolean mirror) {
+        ensureT04MirrorMigrated();
+        prefs.edit().putBoolean(physicalMirrorKey(cameraPosition, false), mirror).apply();
+    }
+
+    public void setPhysicalMirrorV(String cameraPosition, boolean mirror) {
+        ensureT04MirrorMigrated();
+        prefs.edit().putBoolean(physicalMirrorKey(cameraPosition, true), mirror).apply();
+    }
+
+    @Override
+    public boolean isOutputMirrorH(MirrorTarget target, String cameraPosition) {
+        ensureT04MirrorMigrated();
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        String pos = normalizeCameraPos(cameraPosition);
+        String key = outputMirrorKey(safeTarget, pos, false);
+        if (prefs.contains(key)) {
+            return prefs.getBoolean(key, false);
+        }
+        if (safeTarget == MirrorTarget.BLIND_SPOT || safeTarget == MirrorTarget.SECONDARY_HUD) {
+            String legacyKey = "blind_spot_correction_" + pos + "_mirror_h";
+            if (prefs.contains(legacyKey)) {
+                return prefs.getBoolean(legacyKey, false);
+            }
+        }
+        return CameraMirrorPolicy.defaultOutputMirrorH(safeTarget, pos);
+    }
+
+    @Override
+    public boolean isOutputMirrorV(MirrorTarget target, String cameraPosition) {
+        ensureT04MirrorMigrated();
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        String pos = normalizeCameraPos(cameraPosition);
+        String key = outputMirrorKey(safeTarget, pos, true);
+        if (prefs.contains(key)) {
+            return prefs.getBoolean(key, false);
+        }
+        if (safeTarget == MirrorTarget.BLIND_SPOT || safeTarget == MirrorTarget.SECONDARY_HUD) {
+            String legacyKey = "blind_spot_correction_" + pos + "_mirror_v";
+            if (prefs.contains(legacyKey)) {
+                return prefs.getBoolean(legacyKey, false);
+            }
+        }
+        return false;
+    }
+
+    public void setOutputMirrorH(MirrorTarget target, String cameraPosition, boolean mirror) {
+        ensureT04MirrorMigrated();
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        String pos = normalizeCameraPos(cameraPosition);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putBoolean(outputMirrorKey(safeTarget, pos, false), mirror);
+        if (safeTarget == MirrorTarget.BLIND_SPOT) {
+            editor.putBoolean("blind_spot_correction_" + pos + "_mirror_h", mirror);
+        }
+        editor.apply();
+    }
+
+    public void setOutputMirrorV(MirrorTarget target, String cameraPosition, boolean mirror) {
+        ensureT04MirrorMigrated();
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        String pos = normalizeCameraPos(cameraPosition);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putBoolean(outputMirrorKey(safeTarget, pos, true), mirror);
+        if (safeTarget == MirrorTarget.BLIND_SPOT) {
+            editor.putBoolean("blind_spot_correction_" + pos + "_mirror_v", mirror);
+        }
+        editor.apply();
+    }
+
+    public CameraMirrorPolicy.ResolvedMirror resolveMirror(MirrorTarget target, String cameraPosition) {
+        return CameraMirrorPolicy.resolve(this, target, cameraPosition);
+    }
+
+    public void resetMirrorForTarget(MirrorTarget target, String cameraPosition) {
+        ensureT04MirrorMigrated();
+        MirrorTarget safeTarget = target != null ? target : MirrorTarget.BLIND_SPOT;
+        String pos = normalizeCameraPos(cameraPosition);
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.remove(outputMirrorKey(safeTarget, pos, false));
+        editor.remove(outputMirrorKey(safeTarget, pos, true));
+        if (safeTarget == MirrorTarget.BLIND_SPOT) {
+            editor.remove("blind_spot_correction_" + pos + "_mirror_h");
+            editor.remove("blind_spot_correction_" + pos + "_mirror_v");
+        }
+        editor.apply();
     }
 
 }

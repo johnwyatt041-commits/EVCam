@@ -152,10 +152,13 @@ public class SingleCamera {
     public void setCameraPosition(String position) {
         this.cameraPosition = position;
 
-        // 如果是后摄像头，应用左右镜像变换
-        if ("back".equals(position) && textureView != null) {
+        if (textureView != null) {
             applyMirrorTransform();
         }
+    }
+
+    public int getCustomRotation() {
+        return customRotation;
     }
 
     public void setTextureView(TextureView textureView) {
@@ -164,11 +167,8 @@ public class SingleCamera {
         }
         this.textureView = textureView;
         clearPreviewSurface();
-        if ("back".equals(cameraPosition) && this.textureView != null) {
-            applyMirrorTransform();
-        }
-        if (customRotation != 0 && this.textureView != null && this.textureView.isAvailable()) {
-            applyCustomRotation();
+        if (this.textureView != null) {
+            applyPreviewTransformIfUnmanaged();
         }
     }
 
@@ -262,26 +262,38 @@ public class SingleCamera {
     }
 
     /**
-     * 应用左右镜像变换到TextureView
+     * 应用镜像及旋转变换到 TextureView（由物理镜像 + 输出镜像策略驱动，不再硬编码 back）
      */
     private void applyMirrorTransform() {
+        applyPreviewTransformIfUnmanaged();
+    }
+
+    public void applyPreviewTransformIfUnmanaged() {
         if (textureView == null) {
             return;
         }
-
-        // 在主线程中执行UI操作
+        if (Boolean.TRUE.equals(textureView.getTag(com.kooo.evcam.R.id.tag_main_preview_matrix_managed))) {
+            return;
+        }
         textureView.post(() -> {
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-
-            // 获取TextureView的中心点
-            float centerX = textureView.getWidth() / 2f;
-            float centerY = textureView.getHeight() / 2f;
-
-            // 应用水平镜像：scaleX = -1
-            matrix.setScale(-1f, 1f, centerX, centerY);
-
+            if (textureView == null
+                    || Boolean.TRUE.equals(textureView.getTag(com.kooo.evcam.R.id.tag_main_preview_matrix_managed))) {
+                return;
+            }
+            int width = textureView.getWidth();
+            int height = textureView.getHeight();
+            if (width <= 0 || height <= 0) {
+                return;
+            }
+            com.kooo.evcam.blindspot.CameraMirrorPolicy.ResolvedMirror mirror =
+                    com.kooo.evcam.blindspot.CameraMirrorPolicy.resolve(
+                            new AppConfig(context),
+                            com.kooo.evcam.blindspot.MirrorTarget.MAIN_PREVIEW,
+                            cameraPosition
+                    );
+            android.graphics.Matrix matrix = com.kooo.evcam.ui.PreviewTransformHelper.buildMatrix(
+                    width, height, customRotation, 1f, 1f, 0f, 0f, mirror);
             textureView.setTransform(matrix);
-            AppLog.d(TAG, "Camera " + cameraId + " (back) applied mirror transform");
         });
     }
 
@@ -289,29 +301,7 @@ public class SingleCamera {
      * 应用自定义旋转角度（仅用于自定义车型）
      */
     private void applyCustomRotation() {
-        if (textureView == null || customRotation == 0) {
-            return;
-        }
-
-        // 在主线程中执行UI操作
-        textureView.post(() -> {
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-
-            // 获取TextureView的中心点
-            float centerX = textureView.getWidth() / 2f;
-            float centerY = textureView.getHeight() / 2f;
-
-            // 应用旋转
-            matrix.setRotate(customRotation, centerX, centerY);
-
-            // 如果是后摄像头，还需要应用镜像
-            if ("back".equals(cameraPosition)) {
-                matrix.postScale(-1f, 1f, centerX, centerY);
-            }
-
-            textureView.setTransform(matrix);
-            AppLog.d(TAG, "Camera " + cameraId + " (" + cameraPosition + ") applied custom rotation: " + customRotation + "°");
-        });
+        applyPreviewTransformIfUnmanaged();
     }
 
     public String getCameraId() {

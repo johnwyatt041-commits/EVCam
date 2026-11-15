@@ -236,6 +236,19 @@
                         android:elevation="0dp"
                         android:fontFamily="sans-serif-medium"
                         android:textAllCaps="false" />
+                    <Button
+                        android:id="@+id/btn_reset_standalone_window"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="重置 4.2 独立预览小窗 (恢复默认位置和大小)"
+                        android:layout_marginTop="10dp"
+                        android:backgroundTint="@color/button_background"
+                        android:textColor="@color/button_text"
+                        android:textSize="15sp"
+                        android:minHeight="48dp"
+                        android:elevation="0dp"
+                        android:fontFamily="sans-serif-medium"
+                        android:textAllCaps="false" />
                 </LinearLayout>
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -663,6 +676,38 @@
                     android:padding="16dp"
                     android:background="@drawable/ui_card"
                     android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="14dp">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="显示 360 时暂停补盲"
+                                android:textColor="@color/text_primary"
+                                android:textSize="18sp"
+                                android:fontFamily="sans-serif-medium" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="360 视图或全景避让期间仅暂停主屏补盲弹窗，EVCC 副屏与 ESP32 推流继续跟随转向联动"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_blind_spot_suppress_on_360"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp" />
+                    </LinearLayout>
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
