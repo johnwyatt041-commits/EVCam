@@ -1,7 +1,7 @@
 # EVCam 融合 Smartcam V3.0.56 重构蓝图与多轮接力总规
 
-- 创建/更新时间：`2026-11-16 00:07:46 +08:00`（Asia/Hong_Kong）
-- 代码基线：`codex/e5-recording-startup-fix` / 源码 `4706b6f`（`T03` `1.6.6-test-11160002` 已完成离线验证；最新已封装发布包仍为 `build02` `1.6.6-test-11152245` / `72dc456`，**均未实车测试**）
+- 创建/更新时间：`2026-11-16 01:18:33 +08:00`（Asia/Hong_Kong）
+- 代码基线：`codex/e5-recording-startup-fix` / `1.6.6-test-11160002`（`build03` 已打包并推送 GitHub，包含 `T01`–`T03` `4706b6f`，**未实车测试**；下一会话准备启动 `T04`）
 - 对标分析对象：`Smartcam-V3.0.56_11_14_15_39.apk`（全功能清单见 [SMARTCAM_FEATURE_CATALOG.md](SMARTCAM_FEATURE_CATALOG.md)，3.0.56 差异见 [SMARTCAM_V3.0.56_DIFF.md](SMARTCAM_V3.0.56_DIFF.md)）
 - 目标硬件：吉利银河 E5（`2560×1600`，LongYing-1 SoC）；不再引入通用“屏幕尺寸设置”。
 
@@ -73,7 +73,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | **T01** | **精简架构底座、退出机制与补盲遗留清理** | 全局退出与状态、移除补盲警告/动效、信号面收窄规范化、后台保活/懒加载接口预留 | SC `Ll33`/`Lkh` 退出态思想（去双进程）、`Ler3` 裁剪为 4 类信号、移除 EC 遗留干扰弹窗与动画 | `lifecycle/*`, `vehicle/*`, `FloatingWindowDisplayHelper`, `MainActivity`, `CameraForegroundService`, `BootReceiver`, `KeepAlive*`, `AppConfig`, `BlindSpot*`, `MainFloatingWindowView`, `RemoteServiceManager` | **中**（牵涉生命周期与全局状态收敛） | **P0**（首推起步） | 无 | `[~] build01 已存档 / 待实车`（`ea395a0`，Tag `v1.6.6-test-11152059-build01`，174 项 JVM+Debug/Release R8+0 新增 Lint；见 [t01任务](tasks/t01-lifecycle-and-signal-foundation.md)） |
 | **T02** | **全局外壳 UI、SC 风格左栏与深浅色主题** | 学习 SC 菜单/UI、`设置`/`退出`放左下角、去主页/投票、默认进记录仪、跟随系统主题、`1.外观与交互`（深浅色/默认页/开门退出）、去`屏幕尺寸`、移除`4.外设`/`7.`/`8.`/`9.`入口 | SC `appearance`/`theme_mode`/`default_page`/`confirm_door_exit`，沿用 EC 原生资源避免双份页面和录制中重建 `Activity` | `UiThemeController`, `UiThemeRepainter`, `AppShellController`, `SettingsCatalog`, `AppearanceSettingsFragment`, `PlaybackHubFragment`, `SettingsFragment`, `Recorder/Update/DebugLogSettingsFragment`, `ui_app_shell.xml`, `MainActivity` | **中**（布局与多分类导航重构） | **P0**（次推） | 建议在 T01 后 | `[~] build02 已存档 / 待实车`（`72dc456`，Tag `v1.6.6-test-11152245-build02`，188 项 JVM+Debug/Release R8+0 新增 Lint；见 [t02任务](tasks/t02-shell-navigation-and-theme.md)） |
-| **T03** | **多模式主预览框架与动态关流（模式 B+C）** | **模式 B**（3 列：首列前/后上下排+2/3 列左右长条，可调位置/比例，按路显隐）、**模式 C**（三路大屏：D 前/R 后 + 右侧左右 2 列，统一圆角分割）、**隐藏/未用彻底停绘停流**、左上角“返回/设置”及视图切换快捷键显隐开关 | EC `EditablePreviewLayout`/`CustomLayoutManager` 升级 + 真·停绘停流（修复 SC 后台空取流），统一圆角分割样式 | `EditablePreviewLayout`, `PreviewLayoutModel`, `PreviewEditorController`, `PreviewModeController`, `AppShellController`, `MultiCameraManager`, `SingleCamera`, `MainActivity` | **中高**（涉及动态切换 Surface 与安全开关 Camera2 会话） | **P1** | T01（部分依赖 T02 容器） | `[~] 已完成离线验证（源码 4706b6f，214 测/0 新增 Lint；待实车）` |
+| **T03** | **多模式主预览框架与动态关流（模式 B+C）** | **模式 B**（3 列：首列前/后上下排+2/3 列左右长条，可调位置/比例，按路显隐）、**模式 C**（三路大屏：D 前/R 后 + 右侧左右 2 列，统一圆角分割）、**隐藏/未用彻底停绘停流**、左上角“返回/设置”及视图切换快捷键显隐开关 | EC `EditablePreviewLayout`/`CustomLayoutManager` 升级 + 真·停绘停流（修复 SC 后台空取流），统一圆角分割样式 | `EditablePreviewLayout`, `PreviewLayoutModel`, `PreviewEditorController`, `PreviewModeController`, `AppShellController`, `MultiCameraManager`, `SingleCamera`, `MainActivity` | **中高**（涉及动态切换 Surface 与安全开关 Camera2 会话） | **P1** | T01（部分依赖 T02 容器） | `[~] build03 已存档 / 待实车`（`4706b6f`，Tag `v1.6.6-test-11160002-build03`，214 项 JVM+Debug/Release R8+0 新增 Lint；见 [t03任务](tasks/t03-multi-mode-preview-and-dynamic-stream.md)） |
 | **T04** | **悬浮小窗架构与补盲择优融合（含 HUD）** | `4.2` 预览三布局（全屏/保留侧边栏/独立悬浮窗）、`5.`/`6.` EC+SC 补盲择优、保留 HUD（`EVCC`+`ESP32`）、物理/输出镜像解耦、悬浮窗不抢导航栈、显示360暂停补盲接口 | SC `Lqw2` 三模式、`Lq01` 双镜像解耦 + EC 更强的 `BlindSpotCorrection` 与双 HUD，确保 WindowManager Flag 不抢栈 | `BlindSpotService`, `BlindSpotFloatingWindowView`, `BlindSpotCorrection`, `BlindSpotSettingsFragment`, `BlindSpotLabFragment`, `BlindSpotCorrectionFragment`, `SecondaryBlindSpotAdjustFragment` | **中高**（GL 双镜像与多 Window/HUD 状态一致） | **P1** | T01 | `[ ] 待启动` |
 | **T05** | **视频管线优化、调色/水印/提示音（`3.2`–`3.4`）** | `3.2 画面`（画质/亮度/对比度/饱和度/镜像/裁剪 + 总开关直通旁路 6-FBO 与 `Lf9`）、**已定方案 A**（录像目标帧率 + 可选预览限帧）、`3.3 显示`（浮窗+4模块水印/位置/卡片样式）、`3.4 提示音`（开始/结束自定义音效）、EC 4 路独立录制开关（不干扰预览） | 彻底绕开 SC 6 槽 FBO 与 `Lf9` 20ms 网格；改用 `EglSurfaceEncoder` 同上下文按需着色与相机真实时间戳；修复 `Lif4`/`Lfo2` | `CodecVideoRecorder`, `EglSurfaceEncoder`, `VideoRecorder`, `MultiCameraManager`, `RecordingFpsPolicy`, 录制设置子页, `AppConfig` | **高**（OpenGL/MediaCodec 管线与多路时间戳核心） | **P1** | T01 | `[ ] 待启动` |
 | **T06** | **车辆状态规则引擎与信号预设匹配（`3.1`+`10.`）** | `3.1` 保摄像头前台恢复、分段时长、**已定方案 A** 帧率政策、4 条件规则引擎（档位/车速/四门/转向灯 + SC 默认 2 条 + **新增 R/D 换挡自动弹出记录仪并在 X 秒后退后台**）、向 `T10` 导出标准档位订阅状态、`10. 信号预设与匹配` | 参考 SC `Lo33`/`Lgk1.k()`/`Lu70`/`Lm33` 架构重建精简本地规则引擎；避免无意义的全局主进程长驻监听 | 新车辆规则引擎模块, `RecordingVehicleSource`, `VhalSignalObserver`, `CarSignalManagerObserver`, `CameraForegroundService`, `MainActivity` | **中高**（状态去抖、前后台切换与 R/D 超时退回逻辑） | **P1** | T01, T04 | `[ ] 待启动` |
@@ -94,12 +94,12 @@
    - 遵循根目录 `AGENTS.md`：不在 `MainActivity` 堆业务逻辑；Shell 命令参数**纯英文**；保留 HUD（`EVCC` 副屏 + `Wi-Fi/ESP32`）和飞书基础代码目录；每次修改代码必须更新 `app/build.gradle.kts` 的 `versionName`（`1.6.6-test-MMddHHmm`）。
    - 离线通过（`tools/verify.ps1` / `./gradlew test` / `assembleDebug`）不冒充 E5 实车验证；未在实车测过帧率/内存/VHAL 的项必须标明 **`待实车确认`**。
 4. **单包最小闭环验收**：每个任务包完成编码后，必须运行单元测试 + 编译 + Lint 检查（注明既有 19 项基线 Lint 不因禁用掩盖），并将未解耦完的边界记入本蓝图对应状态或 `PITFALLS.md`。
-5. **四件套强制同步（收尾必做）**：每次完成或挂起任意任务包，必须同步更新：
-   - 本蓝图 [EVCAM_SMARTCAM_REFACTOR_PLAN.md](EVCAM_SMARTCAM_REFACTOR_PLAN.md) 的对应任务状态（`[x]` / `[~]` + commit / 结果）
+5. **四件套同步 + 递增记录点发布（收尾必做）**：每次完成或挂起任意任务包，必须同步更新：
+   - 本蓝图 [EVCAM_SMARTCAM_REFACTOR_PLAN.md](EVCAM_SMARTCAM_REFACTOR_PLAN.md) 的对应任务状态（`[x]` / `[~]` + commit / Tag / 结果）
    - 专属任务文档 `docs/tasks/<task-id>.md`（<=80 行、<=6000 字符）
    - 总览 [STATUS.md](STATUS.md)（<=80 行、<=6000 字符、最近更新<=5 条）
    - 共享登记 `work/ACTIVE_TASKS.md`
-   并运行 `python work/progress-rules/check_docs.py` 校验通过，否则禁止宣称完成。
+   并运行 `python work/progress-rules/check_docs.py` 校验通过，否则禁止宣称完成。任务包离线验证通过后，按固定交付节奏**新增递增 `buildXX` 记录点、打包 A/B 双风味 Release APK（含 `mappings`/`manifest`/`SHA256`/`notes`）并打 annotated tag 推送 GitHub Pre-release**。
 6. **接力交接尾段格式**：每次向用户交付当前任务包结果时，末尾必须列出：
    - 已变更状态摘要 + 验证范围（明确区分离线验证 vs 待实车项）
-   - **接下来的推荐选项（1–2 个，附难度与建议原因）**，交由用户决定下一步改哪一块。
+   - **接下来的推荐选项（1–2 个，附难度与建议原因）**，以及**可直接用于新会话启动下一任务包的完整提示词**。

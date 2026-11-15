@@ -1,11 +1,11 @@
 # 任务记录：T03 多模式主预览框架与动态关流（模式 B+C）
 
-- 最后更新：2026-11-16 00:07:46 +08:00（Asia/Hong_Kong）
-- 最后核对：2026-11-16 00:07:46 +08:00（Asia/Hong_Kong）
+- 最后更新：2026-11-16 01:18:33 +08:00（Asia/Hong_Kong）
+- 最后核对：2026-11-16 01:18:33 +08:00（Asia/Hong_Kong）
 - 任务/执行者：`t03-multi-mode-preview-and-dynamic-stream` / Antigravity
-- 分支/工作树：`codex/e5-recording-startup-fix` / `E:\GPT\EVCam`（源码 `4706b6f`，`versionName` `1.6.6-test-11160002`）
-- 状态：已完成代码与离线构建/单测/Lint 验证（**尚未实车测试**；尚未封存 `build03`）
-- 当前结论：已在现有编辑预览与需求驱动链路之上落地 **模式 B（3 列智能重排）**、**模式 C（D 前/R 后 + 侧栏两路大屏）**、**16dp 统一圆角分割**、**真·Surface 解绑与会话关闭**、**左栏↔全屏联动及左上角叠加控制条**，并预留 `T07` 360 模式 A 容器锚点。
+- 分支/工作树：`codex/e5-recording-startup-fix` / `E:\GPT\EVCam`（源码 `4706b6f`，Tag `v1.6.6-test-11160002-build03`）
+- 状态：已完成 `build03` 打包与 GitHub 发布（**尚未实车测试**）
+- 当前结论：已将 `T03` 封存为记录点 `build03`（`1.6.6-test-11160002`：A `6,451,763` 字节 / B `6,468,147` 字节），完成模式 B/C、16dp 圆角分割、全屏角落控制、真·Surface 解绑停流与 `T07` 容器预留，签名与 `libvhal_decoder.so` 校验通过；准备新会话启动 `T04`。
 
 ## 实施摘要（源码提交 `4706b6f`）
 
@@ -18,15 +18,18 @@
 3. **动态 Surface 解绑、隐藏停流与离屏拍照**：
    - 改造 [SingleCamera.java](../../app/src/main/java/com/kooo/evcam/camera/SingleCamera.java) 与 [MultiCameraManager.java](../../app/src/main/java/com/kooo/evcam/camera/MultiCameraManager.java)：区分 `isMainPreviewEnabled()` 与次级流（含 `streamSurface` 回退），`switchToPreviewOnlyMode()` 通过 `collectActiveNonRecordSurfaces()` 保留仍需输出的预览目标；主预览隐藏且无录制/副流/离线拍照租约时解绑输出 Surface 并 `closeIfUnused()` 关闭 Camera2 会话；[MainActivity.java](../../app/src/main/java/com/kooo/evcam/MainActivity.java) 改为单键动态初始化等待并按新尺寸重算预览矩阵。
 
-## 验证与差距（仅离线）
+## 验证与 `build03` 交付（仅离线）
 
-- **离线验证**：`tools/verify.ps1` 退出 0（`work/verification/build-20261116-000639-272.log`；`214` 项 JVM 单测：Independent `107` + Composite `107`，0 失败/错误/跳过；Debug + Release R8 编包通过）；`:app:lintIndependentDebug` 为 `19` 项既有错误（`0` 新增）。注：PowerShell 5.1 初次冷编时因 Glide javac stderr 注解触发 `verify.ps1` 报错，预编译后再跑 `verify.ps1` 全流程通过。
+- **离线验证**：`tools/verify.ps1` 退出 0（`work/verification/build-20261116-000639-272.log`；`214` 项 JVM 单测：Independent `107` + Composite `107`，0 失败/错误/跳过；Debug + Release R8 编包通过）；`:app:lintIndependentDebug` 为 `19` 项既有错误（`0` 新增，1714 警告）；`apksigner verify` 签名 `a40da80a...bf5dc` 与 `libvhal_decoder.so`（`243a92bc...e666`）校验通过。
+- **`build03` 产物**：`outputs/EVCam-E5-{A-Independent,B-Composite}-1.6.6-test-11160002-build03-release.apk`、`-manifest.json`、`-mappings.zip`、`-notes.md`、`-SHA256.txt`。
 - **待实车确认**：E5 车机真实 Camera2 隐藏停流/重开稳定性、模式 C `200ms` 挡位防抖与倒车响应延迟、全屏与左上角胶囊触控、隐藏摄像头时离线拍照暂存及双 HUD/11 布局兼容性。
 
 ## 最近记录（最多5条）
 
+- 2026-11-16 01:18:33 +08:00 | build03存档 | 基于 `T03`（`4706b6f` / `1.6.6-test-11160002`）打包 `build03` 双风味 Release APK、校验签名/SHA256/mappings 并推送 GitHub，转交新会话做 `T04`。| [总览](../STATUS.md)
 - 2026-11-16 00:07:46 +08:00 | T03完成(离线) | 完成模式 B/C、16dp 圆角分割、全屏角落快捷键与真·Surface 解绑停流（`4706b6f`），214 测 + Debug/Release + 0 新增 Lint 通过 | [总览](../STATUS.md)
 
 ## 下一步
 
-1. 若准备实车对照 `T03`，可另按需打包 `build03`（`1.6.6-test-11160002`）或继续推进下一授权任务包 **`T04`（双 HUD 解耦与扩展能力）** / **`T05`**。
+1. 在新会话启动授权任务包 **`T04`（悬浮小窗架构与补盲择优融合（含 HUD））**。
+2. 实车时使用 `build03` 安装包联合验收 `T01`–`T03` 待实车项。
