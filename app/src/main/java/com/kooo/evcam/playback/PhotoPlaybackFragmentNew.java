@@ -19,8 +19,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.FileProvider;
-import androidx.core.view.GravityCompat;
-import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -190,19 +188,9 @@ public class PhotoPlaybackFragmentNew extends Fragment {
     }
 
     private void setupListeners() {
-        // 菜单按钮
-        btnMenu.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                DrawerLayout drawerLayout = getActivity().findViewById(R.id.drawer_layout);
-                if (drawerLayout != null) {
-                    if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                        drawerLayout.closeDrawer(GravityCompat.START);
-                    } else {
-                        drawerLayout.openDrawer(GravityCompat.START);
-                    }
-                }
-            }
-        });
+        if (btnMenu != null) {
+            btnMenu.setVisibility(View.GONE);
+        }
 
         // 返回主界面
         btnHome.setOnClickListener(v -> {

@@ -94,29 +94,7 @@
         android:insetBottom="8dp"
         app:cornerRadius="10dp" />
 
-    <Button
-        android:id="@+id/btn_exit"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:text="关闭"
-        android:textSize="18sp"
-        android:textStyle="bold"
-        android:fontFamily="sans-serif-medium"
-        android:backgroundTint="@color/button_background"
-        android:textColor="@color/button_text"
-        android:elevation="4dp"
-        android:insetTop="8dp"
-        android:insetBottom="8dp"
-        app:cornerRadius="10dp" />
-
     <!-- 隐藏按钮 -->
-    <Button
-        android:id="@+id/btn_menu"
-        android:layout_width="0dp"
-        android:layout_height="0dp"
-        android:visibility="gone" />
-
     <Button
         android:id="@+id/btn_remote_view"
         android:layout_width="0dp"

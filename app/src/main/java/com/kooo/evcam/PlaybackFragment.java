@@ -10,8 +10,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.view.GravityCompat;
-import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -81,18 +79,9 @@ public class PlaybackFragment extends Fragment {
             }
         });
 
-        btnMenu.setOnClickListener(v -> {
-            if (getActivity() != null) {
-                DrawerLayout drawerLayout = getActivity().findViewById(R.id.drawer_layout);
-                if (drawerLayout != null) {
-                    if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                        drawerLayout.closeDrawer(GravityCompat.START);
-                    } else {
-                        drawerLayout.openDrawer(GravityCompat.START);
-                    }
-                }
-            }
-        });
+        if (btnMenu != null) {
+            btnMenu.setVisibility(View.GONE);
+        }
 
         btnRefresh.setOnClickListener(v -> updateVideoList());
 

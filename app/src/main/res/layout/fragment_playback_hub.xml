@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/playback_hub_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/page_background">
+
+    <LinearLayout
+        android:id="@+id/playback_tab_bar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:paddingStart="@dimen/ui_page_padding"
+        android:paddingEnd="@dimen/ui_page_padding"
+        android:paddingTop="10dp"
+        android:paddingBottom="10dp"
+        android:background="@color/menu_background">
+
+        <Button
+            android:id="@+id/btn_tab_video"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:minWidth="120dp"
+            android:layout_marginEnd="12dp"
+            android:text="视频回看"
+            android:textSize="18sp"
+            android:fontFamily="sans-serif-medium" />
+
+        <Button
+            android:id="@+id/btn_tab_photo"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:minWidth="120dp"
+            android:text="照片回看"
+            android:textSize="18sp"
+            android:fontFamily="sans-serif-medium" />
+    </LinearLayout>
+
+    <View
+        android:id="@+id/playback_tab_divider"
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/ui_border" />
+
+    <FrameLayout
+        android:id="@+id/playback_tab_container"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/page_background" />
+</LinearLayout>

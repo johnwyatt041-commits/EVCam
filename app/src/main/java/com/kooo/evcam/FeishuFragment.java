@@ -15,8 +15,6 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.appcompat.widget.SwitchCompat;
-import androidx.core.view.GravityCompat;
-import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 
 import com.kooo.evcam.feishu.FeishuConfig;
@@ -76,19 +74,9 @@ public class FeishuFragment extends Fragment {
     }
 
     private void setupListeners() {
-        btnMenu.setOnClickListener(v -> {
-            if (getActivity() instanceof MainActivity) {
-                MainActivity activity = (MainActivity) getActivity();
-                DrawerLayout drawerLayout = activity.findViewById(R.id.drawer_layout);
-                if (drawerLayout != null) {
-                    if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                        drawerLayout.closeDrawer(GravityCompat.START);
-                    } else {
-                        drawerLayout.openDrawer(GravityCompat.START);
-                    }
-                }
-            }
-        });
+        if (btnMenu != null) {
+            btnMenu.setVisibility(View.GONE);
+        }
 
         // 主页按钮
         btnHome.setOnClickListener(v -> {

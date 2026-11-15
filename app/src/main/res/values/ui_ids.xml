@@ -3,6 +3,27 @@
         name="ui_screen_title"
         type="id" />
     <item
+        name="ui_theme_bg_role"
+        type="id" />
+    <item
+        name="ui_theme_text_role"
+        type="id" />
+    <item
+        name="nav_recording"
+        type="id" />
+    <item
+        name="nav_playback"
+        type="id" />
+    <item
+        name="nav_secondary_display"
+        type="id" />
+    <item
+        name="nav_feishu"
+        type="id" />
+    <item
+        name="nav_settings"
+        type="id" />
+    <item
         name="btn_playback"
         type="id" />
     <item

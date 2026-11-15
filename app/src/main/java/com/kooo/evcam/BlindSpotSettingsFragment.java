@@ -459,17 +459,17 @@ public class BlindSpotSettingsFragment extends Fragment {
             }
         });
 
-        menuButton.setOnClickListener(v -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).toggleDrawer();
-            }
-        });
+        if (menuButton != null) {
+            menuButton.setVisibility(View.GONE);
+        }
 
-        homeButton.setOnClickListener(v -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).goToRecordingInterface();
-            }
-        });
+        if (homeButton != null) {
+            homeButton.setOnClickListener(v -> {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).goToRecordingInterface();
+                }
+            });
+        }
 
         // ==================== 全景影像避让监听器 ====================
 

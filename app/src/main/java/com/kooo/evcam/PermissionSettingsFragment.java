@@ -21,13 +21,18 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.switchmaterial.SwitchMaterial;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 /**
- * 权限设置界面 Fragment
+ * 13. 系统与权限设置界面 Fragment
  */
 public class PermissionSettingsFragment extends Fragment {
+
+    private AppConfig appConfig;
+    private SwitchMaterial autoStartSwitch;
+    private Button btnUsageGuide;
 
     // ADB 一键获取
     private Button btnAdbGrantAll;
@@ -117,6 +122,21 @@ public class PermissionSettingsFragment extends Fragment {
     }
 
     private void initViews(View view) {
+        if (getContext() != null) {
+            appConfig = new AppConfig(getContext());
+        }
+        autoStartSwitch = view.findViewById(R.id.switch_auto_start);
+        if (autoStartSwitch != null && appConfig != null) {
+            autoStartSwitch.setChecked(appConfig.isAutoStartOnBoot());
+            autoStartSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (getContext() != null && appConfig != null) {
+                    appConfig.setAutoStartOnBoot(isChecked);
+                    Toast.makeText(getContext(), isChecked ? "开机自启动已启用" : "开机自启动已禁用", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+        btnUsageGuide = view.findViewById(R.id.btn_usage_guide);
+
         // ADB 一键获取
         btnAdbGrantAll = view.findViewById(R.id.btn_adb_grant_all);
         scrollAdbLog = view.findViewById(R.id.scroll_adb_log);
@@ -192,6 +212,10 @@ public class PermissionSettingsFragment extends Fragment {
     }
 
     private void setupClickListeners() {
+        if (btnUsageGuide != null) {
+            btnUsageGuide.setOnClickListener(v -> showUsageGuideDialog());
+        }
+
         // ADB 一键获取权限
         btnAdbGrantAll.setOnClickListener(v -> startAdbGrant());
 
@@ -774,5 +798,25 @@ public class PermissionSettingsFragment extends Fragment {
                 }
             }
         });
+    }
+
+    private void showUsageGuideDialog() {
+        if (getContext() == null) return;
+
+        android.app.Dialog dialog = new android.app.Dialog(getContext());
+        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
+        dialog.setContentView(R.layout.dialog_first_launch_guide);
+        dialog.setCancelable(true);
+
+        android.view.Window window = dialog.getWindow();
+        if (window != null) {
+            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
+            android.view.WindowManager.LayoutParams params = window.getAttributes();
+            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.85);
+            window.setAttributes(params);
+        }
+
+        dialog.findViewById(R.id.btn_confirm).setOnClickListener(v -> dialog.dismiss());
+        dialog.show();
     }
 }

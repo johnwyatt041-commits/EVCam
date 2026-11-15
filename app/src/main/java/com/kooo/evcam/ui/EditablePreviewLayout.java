@@ -40,6 +40,14 @@ public final class EditablePreviewLayout extends ViewGroup {
         arrow.setColor(ContextCompat.getColor(context, R.color.ui_on_accent)); arrow.setStrokeWidth(2 * density);
         setWillNotDraw(false);
     }
+
+    /** 主题原地切换后刷新编辑边框和手柄画笔颜色。 */
+    public void refreshThemeColors(Context themedContext) {
+        border.setColor(ContextCompat.getColor(themedContext, R.color.button_accent));
+        handle.setColor(ContextCompat.getColor(themedContext, R.color.button_accent));
+        arrow.setColor(ContextCompat.getColor(themedContext, R.color.ui_on_accent));
+        invalidate();
+    }
     @Override protected void onFinishInflate() {
         super.onFinishInflate();
         if (preferences.getBoolean("saved", false)) {

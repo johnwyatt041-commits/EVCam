@@ -5,14 +5,12 @@ import android.Manifest;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.hardware.camera2.CameraAccessException;
 import android.hardware.camera2.CameraManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
-import android.view.Menu;
-import android.view.MenuItem;
-import android.view.SubMenu;
 import android.view.TextureView;
 import android.view.View;
 import android.widget.Button;
@@ -24,13 +22,9 @@ import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
-import androidx.core.view.GravityCompat;
-import androidx.drawerlayout.widget.DrawerLayout;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 import androidx.fragment.app.FragmentTransaction;
-
-import com.google.android.material.navigation.NavigationView;
 
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
@@ -39,8 +33,6 @@ import com.kooo.evcam.StorageHelper;
 
 import com.kooo.evcam.remote.RemoteCommandDispatcher;
 import com.kooo.evcam.remote.handler.RemoteCommandHandler;
-import com.kooo.evcam.playback.PlaybackFragmentNew;
-import com.kooo.evcam.playback.PhotoPlaybackFragmentNew;
 import com.kooo.evcam.view.MacOSToggleButton;
 
 import java.io.BufferedReader;
@@ -53,10 +45,15 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
-public class MainActivity extends AppCompatActivity {
+public class MainActivity extends AppCompatActivity implements com.kooo.evcam.ui.UiThemeController.Host {
     private com.kooo.evcam.ui.AppShellController uiShell;
     private com.kooo.evcam.ui.UiThemeController uiTheme;
     private com.kooo.evcam.ui.PreviewEditorController previewEditor;
+
+    @Override
+    public com.kooo.evcam.ui.UiThemeController getUiThemeController() {
+        return uiTheme;
+    }
 
     private static final String TAG = "MainActivity";
     private static final int REQUEST_PERMISSIONS = 100;
@@ -96,7 +93,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int DEBUG_TAP_COUNT = 5;
     private static final long DEBUG_TAP_INTERVAL_MS = 800;  // 连续点击的最大间隔
 
-    private Button btnStartRecord, btnExit, btnTakePhoto;
+    private Button btnStartRecord, btnTakePhoto;
     private MultiCameraManager cameraManager;
 
     public MultiCameraManager getCameraManager() {
@@ -175,8 +172,6 @@ public class MainActivity extends AppCompatActivity {
     private static final long DOUBLE_CLICK_INTERVAL = 500;  // 双击判定间隔（毫秒）
 
     // 导航相关
-    private DrawerLayout drawerLayout;
-    private NavigationView navigationView;
     private PreviewVisibilityController previewVisibilityController;
     private View recordingLayout;  // 录制界面布局
     private View fragmentContainer;  // Fragment容器
@@ -238,20 +233,28 @@ public class MainActivity extends AppCompatActivity {
         setupStatusBar();
 
         initViews();
-        setupNavigationDrawer();
         uiTheme = new com.kooo.evcam.ui.UiThemeController(this,
                 () -> isRecording || isRemoteRecording || isPreparingRecording
                         || (previewEditor != null && previewEditor.isEditing())
                         || (cameraManager != null && (cameraManager.isRecording()
-                                || cameraManager.isStoppingRecording())));
+                                || cameraManager.isStoppingRecording())),
+                () -> previewEditor != null && previewEditor.isEditing());
+        uiTheme.setShellController(uiShell);
         previewEditor = new com.kooo.evcam.ui.PreviewEditorController(this, editing -> {
             uiShell.setLayoutEditing(editing);
-            if (!editing && uiTheme != null) uiTheme.applyIfIdle();
+            if (!editing && uiTheme != null) uiTheme.syncSystemBarsAndTree();
         });
-        uiShell.bind(this::navigateToSection, this::onBackPressed,
-                () -> setMainPreviewEnabled(!appConfig.isMainPreviewEnabled()), this::chooseAppearance, previewEditor::begin);
+        uiShell.bind(
+                this::navigateToSection,
+                this::showExitConfirmationDialog,
+                this::onBackPressed,
+                () -> setMainPreviewEnabled(!appConfig.isMainPreviewEnabled()),
+                previewEditor::begin);
         uiShell.setPreviewEnabled(appConfig.isMainPreviewEnabled());
-        if (savedInstanceState != null) uiShell.restore(savedInstanceState.getInt("ui_destination", R.id.nav_recording));
+        uiTheme.syncSystemBarsAndTree();
+        if (savedInstanceState != null) {
+            uiShell.restore(savedInstanceState.getInt("ui_destination", R.id.nav_recording));
+        }
 
         // 检查是否需要在主题切换后恢复录制
         if (savedInstanceState != null) {
@@ -382,6 +385,10 @@ public class MainActivity extends AppCompatActivity {
 
         // 检查是否是从录制悬浮按钮启动（需要自动开始录制）
         boolean autoStartRecording = getIntent().getBooleanExtra("auto_start_recording", false);
+        if (savedInstanceState == null && !autoStartFromBoot && !autoStartRecording
+                && !appConfig.isAutoStartRecording()) {
+            applyDefaultStartPage();
+        }
         if (autoStartRecording) {
             getIntent().removeExtra("auto_start_recording");
             AppLog.d(TAG, "从录制悬浮按钮启动，准备自动开始录制");
@@ -789,26 +796,8 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void initViews() {
-        drawerLayout = findViewById(R.id.drawer_layout);
-        navigationView = findViewById(R.id.nav_view);
         recordingLayout = findViewById(R.id.main);
         fragmentContainer = findViewById(R.id.fragment_container);
-        
-        // 设置导航头部版本号
-        if (navigationView != null) {
-            View headerView = navigationView.getHeaderView(0);
-            if (headerView != null) {
-                TextView versionText = headerView.findViewById(R.id.nav_header_version);
-                if (versionText != null) {
-                    try {
-                        String versionName = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-                        versionText.setText("版本：v" + versionName);
-                    } catch (Exception e) {
-                        // 忽略异常，保持默认文本
-                    }
-                }
-            }
-        }
 
         // 根据布局获取TextureView（不同布局有不同数量的TextureView）
         textureFront = findViewById(R.id.texture_front);
@@ -820,7 +809,6 @@ public class MainActivity extends AppCompatActivity {
         previewVisibilityController.setPreviewEnabled(appConfig.isMainPreviewEnabled());  // 1摄和2摄布局中为null
         
         btnStartRecord = findViewById(R.id.btn_start_record);
-        btnExit = findViewById(R.id.btn_exit);
         btnTakePhoto = findViewById(R.id.btn_take_photo);
         
         // 初始化录制状态显示
@@ -836,18 +824,6 @@ public class MainActivity extends AppCompatActivity {
 
         // 初始化自定义布局管理器（如果是自定义车型）
         initCustomLayoutManager();
-
-        // 菜单按钮点击事件（部分布局可能没有此按钮）
-        View btnMenu = findViewById(R.id.btn_menu);
-        if (btnMenu != null) {
-            btnMenu.setOnClickListener(v -> {
-                if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                    drawerLayout.closeDrawer(GravityCompat.START);
-                } else {
-                    drawerLayout.openDrawer(GravityCompat.START);
-                }
-            });
-        }
         
         // 多按钮布局的快捷导航按钮（仅在 L7-多按钮 布局中存在）
         View btnVideoPlayback = findViewById(R.id.btn_video_playback);
@@ -883,13 +859,6 @@ public class MainActivity extends AppCompatActivity {
 
         // 录制按钮：点击切换录制状态
         btnStartRecord.setOnClickListener(v -> toggleRecording());
-
-        // 退出按钮：完全退出应用
-        btnExit.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                .setTitle("退出 EVCam？").setMessage("退出会停止录像和后台服务。只想隐藏界面，可选择后台运行。")
-                .setPositiveButton("退出应用", (dialog, which) -> exitApp())
-                .setNeutralButton("后台运行", (dialog, which) -> com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this))
-                .setNegativeButton("取消", null).show());
 
         btnTakePhoto.setOnClickListener(v -> takePicture());
 
@@ -1265,19 +1234,11 @@ public class MainActivity extends AppCompatActivity {
 
         // 重新获取按钮引用
         btnStartRecord = targetContainer.findViewById(R.id.btn_start_record);
-        btnExit = targetContainer.findViewById(R.id.btn_exit);
         btnTakePhoto = targetContainer.findViewById(R.id.btn_take_photo);
 
         // 设置按钮点击事件
         if (btnStartRecord != null) {
             btnStartRecord.setOnClickListener(v -> toggleRecording());
-        }
-        if (btnExit != null) {
-            btnExit.setOnClickListener(v -> new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
-                .setTitle("退出 EVCam？").setMessage("退出会停止录像和后台服务。只想隐藏界面，可选择后台运行。")
-                .setPositiveButton("退出应用", (dialog, which) -> exitApp())
-                .setNeutralButton("后台运行", (dialog, which) -> com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this))
-                .setNegativeButton("取消", null).show());
         }
         if (btnTakePhoto != null) {
             btnTakePhoto.setOnClickListener(v -> takePicture());
@@ -1297,20 +1258,6 @@ public class MainActivity extends AppCompatActivity {
         View btnSettings = targetContainer.findViewById(R.id.btn_settings);
         if (btnSettings != null) {
             btnSettings.setOnClickListener(v -> showSettingsInterface());
-        }
-        
-        // 菜单按钮（标准按钮样式有此按钮）
-        View btnMenu = targetContainer.findViewById(R.id.btn_menu);
-        if (btnMenu != null) {
-            btnMenu.setOnClickListener(v -> {
-                if (drawerLayout != null) {
-                    if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                        drawerLayout.closeDrawer(GravityCompat.START);
-                    } else {
-                        drawerLayout.openDrawer(GravityCompat.START);
-                    }
-                }
-            });
         }
     }
     
@@ -1641,38 +1588,36 @@ public class MainActivity extends AppCompatActivity {
     }
 
     /**
-     * 切换侧边栏的打开/关闭状态
-     */
-    public void toggleDrawer() {
-        if (drawerLayout != null) {
-            if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-                drawerLayout.closeDrawer(GravityCompat.START);
-            } else {
-                drawerLayout.openDrawer(GravityCompat.START);
-            }
-        }
-    }
-
-    /**
-     * 设置导航抽屉
+     * 切换主界面实时预览开关
      */
     public void setMainPreviewEnabled(boolean enabled) {
         appConfig.setMainPreviewEnabled(enabled);
         if (uiShell != null) uiShell.setPreviewEnabled(enabled);
         if (cameraManager != null) cameraManager.setMainPreviewEnabled(enabled && !isInBackground);
         if (previewVisibilityController != null) previewVisibilityController.setPreviewEnabled(enabled);
-        if (navigationView != null) {
-            MenuItem item = navigationView.getMenu().findItem(R.id.nav_main_preview_toggle);
-            if (item != null) item.setTitle(enabled ? "关闭实时预览" : "开启实时预览");
-        }
     }
 
-    private void chooseAppearance() {
-        if (previewEditor != null && previewEditor.isEditing()) {
-            Toast.makeText(this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
-            return;
+    private void showExitConfirmationDialog() {
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(this)
+                .setTitle("退出 EVCam？")
+                .setMessage("退出会停止录像和后台服务。只想隐藏界面，可选择后台运行。")
+                .setPositiveButton("退出应用", (dialog, which) -> exitApp())
+                .setNeutralButton("后台运行", (dialog, which) ->
+                        com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this))
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void applyDefaultStartPage() {
+        if (appConfig == null) return;
+        String startPage = appConfig.getDefaultStartPage();
+        if (AppConfig.START_PAGE_PLAYBACK.equals(startPage)) {
+            showPlaybackInterface();
+        } else if (AppConfig.START_PAGE_SETTINGS.equals(startPage)) {
+            showSettingsInterface();
+        } else {
+            showRecordingInterface();
         }
-        uiTheme.choose();
     }
 
     private void navigateToSection(int destination) {
@@ -1682,122 +1627,20 @@ public class MainActivity extends AppCompatActivity {
         }
         if (destination == R.id.nav_recording) showRecordingInterface();
         else if (destination == R.id.nav_playback) showPlaybackInterface();
-        else if (destination == R.id.nav_photo_playback) showPhotoPlaybackInterface();
         else if (destination == R.id.nav_secondary_display) showBlindSpotInterface();
         else if (destination == R.id.nav_feishu) showFeishuInterface();
         else if (destination == R.id.nav_settings) showSettingsInterface();
     }
 
-    private void setupNavigationDrawer() {
-        navigationView.getMenu().add(Menu.NONE, R.id.nav_main_preview_toggle, 1,
-                appConfig.isMainPreviewEnabled() ? "关闭实时预览" : "开启实时预览").setCheckable(false);
-
-        // 设置导航菜单点击监听
-        navigationView.setNavigationItemSelectedListener(item -> {
-            int itemId = item.getItemId();
-            // 先清除所有菜单项的选中状态（处理跨组选中）
-            clearAllNavigationChecks();
-            
-            if (itemId == R.id.nav_main_preview_toggle) {
-                setMainPreviewEnabled(!appConfig.isMainPreviewEnabled());
-            } else if (itemId == R.id.nav_recording) {
-                // 显示录制界面
-                showRecordingInterface();
-            } else if (itemId == R.id.nav_playback) {
-                // 显示回看界面
-                showPlaybackInterface();
-            } else if (itemId == R.id.nav_photo_playback) {
-                // 显示图片回看界面
-                showPhotoPlaybackInterface();
-            } else if (itemId == R.id.nav_feishu) {
-                // 显示飞书远程界面
-                showFeishuInterface();
-            } else if (itemId == R.id.nav_secondary_display) {
-                // 显示补盲选项界面
-                showBlindSpotInterface();
-            } else if (itemId == R.id.nav_settings) {
-                showSettingsInterface();
-            }
-            // 设置当前项为选中
-            navigationView.setCheckedItem(itemId);
-            drawerLayout.closeDrawer(GravityCompat.START);
-            return true;
-        });
-
-        // 默认选中录制界面
-        navigationView.setCheckedItem(R.id.nav_recording);
-    }
-    
     /**
-     * 清除所有导航菜单项的选中状态
-     * 用于处理跨组选中时的状态同步
-     */
-    private void clearAllNavigationChecks() {
-        Menu menu = navigationView.getMenu();
-        for (int i = 0; i < menu.size(); i++) {
-            MenuItem item = menu.getItem(i);
-            item.setChecked(false);
-            // 处理子菜单
-            if (item.hasSubMenu()) {
-                SubMenu subMenu = item.getSubMenu();
-                for (int j = 0; j < subMenu.size(); j++) {
-                    subMenu.getItem(j).setChecked(false);
-                }
-            }
-        }
-    }
-
-    /**
-     * 检查并处理首次启动
-     * 首次启动时自动进入设置界面并显示引导弹窗
+     * 首次启动不再强跳设置页；静默记录首次启动已完成，引导可从「13. 系统与权限」查看。
      */
     private void checkFirstLaunch() {
         if (appConfig == null || !appConfig.isFirstLaunch()) {
             return;
         }
-
-        AppLog.d(TAG, "检测到首次启动，进入设置界面");
-
-        // 标记首次启动已完成（在显示弹窗前标记，避免重复触发）
+        AppLog.d(TAG, "首次启动按默认页面启动（不再强跳设置页）");
         appConfig.setFirstLaunchCompleted();
-
-        // 延迟执行，确保 UI 完全初始化
-        new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-            // 进入设置界面
-            showSettingsInterface();
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_settings);
-
-            // 显示引导弹窗
-            showFirstLaunchGuideDialog();
-        }, 300);
-    }
-
-    /**
-     * 显示首次启动引导弹窗（美化版）
-     */
-    private void showFirstLaunchGuideDialog() {
-        // 创建自定义对话框
-        android.app.Dialog dialog = new android.app.Dialog(this);
-        dialog.requestWindowFeature(android.view.Window.FEATURE_NO_TITLE);
-        dialog.setContentView(R.layout.dialog_first_launch_guide);
-        dialog.setCancelable(false);
-
-        // 设置对话框窗口属性
-        android.view.Window window = dialog.getWindow();
-        if (window != null) {
-            // 设置背景透明（让圆角生效）
-            window.setBackgroundDrawable(new android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT));
-            // 设置对话框宽度
-            android.view.WindowManager.LayoutParams params = window.getAttributes();
-            params.width = (int) (getResources().getDisplayMetrics().widthPixels * 0.85);
-            window.setAttributes(params);
-        }
-
-        // 设置确认按钮点击事件
-        dialog.findViewById(R.id.btn_confirm).setOnClickListener(v -> dialog.dismiss());
-
-        dialog.show();
     }
 
     /**
@@ -1805,10 +1648,6 @@ public class MainActivity extends AppCompatActivity {
      */
     public void showRecordingInterface() {
         uiShell.showRoot(R.id.nav_recording, null);
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_recording);
-        }
     }
 
     /**
@@ -1816,38 +1655,25 @@ public class MainActivity extends AppCompatActivity {
      * 供 Fragment 中的主页按钮调用
      */
     public void goToRecordingInterface() {
-        // 关闭侧边栏（如果打开的话）
-        if (drawerLayout != null && drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        }
         showRecordingInterface();
-        // 更新导航菜单选中状态（先清除所有选中，再设置当前项）
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_recording);
-        }
     }
 
     /**
-     * 显示回看界面（新版四宫格界面）
+     * 显示回看界面（视频/照片合并入口，默认视频列表）
      */
     private void showPlaybackInterface() {
-        uiShell.showRoot(R.id.nav_playback, new PlaybackFragmentNew());
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_playback);
-        }
+        uiShell.showRoot(R.id.nav_playback,
+                com.kooo.evcam.playback.PlaybackHubFragment.newInstance(
+                        com.kooo.evcam.playback.PlaybackHubFragment.TAB_VIDEO));
     }
 
     /**
-     * 显示图片回看界面（新版四宫格界面）
+     * 显示图片回看界面（切换至合并回看入口的图片标签）
      */
     private void showPhotoPlaybackInterface() {
-        uiShell.showRoot(R.id.nav_photo_playback, new PhotoPlaybackFragmentNew());
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_photo_playback);
-        }
+        uiShell.showRoot(R.id.nav_playback,
+                com.kooo.evcam.playback.PlaybackHubFragment.newInstance(
+                        com.kooo.evcam.playback.PlaybackHubFragment.TAB_PHOTO));
     }
 
     /**
@@ -1855,21 +1681,13 @@ public class MainActivity extends AppCompatActivity {
      */
     private void showFeishuInterface() {
         uiShell.showRoot(R.id.nav_feishu, new FeishuFragment());
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_feishu);
-        }
     }
-    
+
     /**
      * 显示软件设置界面
      */
     private void showSettingsInterface() {
         uiShell.showRoot(R.id.nav_settings, new SettingsFragment());
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_settings);
-        }
     }
 
     /**
@@ -1877,10 +1695,6 @@ public class MainActivity extends AppCompatActivity {
      */
     private void showBlindSpotInterface() {
         uiShell.showRoot(R.id.nav_secondary_display, new BlindSpotSettingsFragment());
-        if (navigationView != null) {
-            clearAllNavigationChecks();
-            navigationView.setCheckedItem(R.id.nav_secondary_display);
-        }
     }
 
     /**
@@ -4066,10 +3880,18 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    public void onConfigurationChanged(@NonNull Configuration newConfig) {
+        super.onConfigurationChanged(newConfig);
+        if (uiTheme != null) {
+            uiTheme.onConfigurationChanged(newConfig);
+        }
+    }
+
+    @Override
     protected void onResume() {
         super.onResume();
         com.kooo.evcam.lifecycle.AppLifecycleState.markUiReturnedForeground(this);
-        if (uiTheme != null) uiTheme.applyIfIdle();
+        if (uiTheme != null) uiTheme.syncSystemBarsAndTree();
         boolean wasInBackground = isInBackground;
         isInBackground = false;
         updateRecordingFloatingVisibility(true);
@@ -4326,9 +4148,7 @@ public class MainActivity extends AppCompatActivity {
             previewEditor.finish(false);
             return;
         }
-        if (drawerLayout.isDrawerOpen(GravityCompat.START)) {
-            drawerLayout.closeDrawer(GravityCompat.START);
-        } else if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
+        if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
             // 如果 Fragment 返回栈不为空（在二级菜单中），则返回上一级
             getSupportFragmentManager().popBackStack();
             AppLog.d(TAG, "Popped fragment back stack, returning to previous screen");

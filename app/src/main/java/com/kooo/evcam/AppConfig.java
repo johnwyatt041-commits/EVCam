@@ -3344,4 +3344,40 @@ public class AppConfig {
         return prefs.getInt(getFisheyeCorrectionKey(cameraPos, "rotation"), 0);
     }
 
+    // ==================== 外观与交互配置 ====================
+
+    public static final String START_PAGE_RECORDING = "recording";
+    public static final String START_PAGE_PLAYBACK = "playback";
+    public static final String START_PAGE_SETTINGS = "settings";
+
+    private static final String KEY_DEFAULT_START_PAGE = "default_start_page";
+    private static final String KEY_CONFIRM_DOOR_EXIT = "confirm_door_exit";
+
+    /** 规范化启动页标识，未知值回退到默认「记录仪」。 */
+    public static String normalizeDefaultStartPage(String page) {
+        if (START_PAGE_PLAYBACK.equals(page)) return START_PAGE_PLAYBACK;
+        if (START_PAGE_SETTINGS.equals(page)) return START_PAGE_SETTINGS;
+        return START_PAGE_RECORDING;
+    }
+
+    public String getDefaultStartPage() {
+        return normalizeDefaultStartPage(prefs.getString(KEY_DEFAULT_START_PAGE, START_PAGE_RECORDING));
+    }
+
+    public void setDefaultStartPage(String page) {
+        String normalized = normalizeDefaultStartPage(page);
+        prefs.edit().putString(KEY_DEFAULT_START_PAGE, normalized).apply();
+        AppLog.d(TAG, "默认启动页已设置: " + normalized);
+    }
+
+    /** 车门打开确认退出开关持久化（T02 预留，T06 接入 VehicleSignalHub 自动触发）。 */
+    public boolean isConfirmDoorExitEnabled() {
+        return prefs.getBoolean(KEY_CONFIRM_DOOR_EXIT, false);
+    }
+
+    public void setConfirmDoorExitEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_CONFIRM_DOOR_EXIT, enabled).apply();
+        AppLog.d(TAG, "下车退出确认开关已设置: " + enabled);
+    }
+
 }
