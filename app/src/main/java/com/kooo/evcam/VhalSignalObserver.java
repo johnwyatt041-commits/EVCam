@@ -24,16 +24,46 @@ import io.grpc.stub.StreamObserver;
 public class VhalSignalObserver {
     private static final String TAG = "VhalSignalObserver";
 
-    /** Optional raw consumer; inactive unless a recording status watermark is enabled. */
+    /** Optional raw consumer; inactive unless watermark or Mode A steering guidance is enabled. */
     public interface PropertyListener {
         void onBatch(byte[] bytes);
         void onConnectionChanged(boolean connected);
     }
     private volatile PropertyListener propertyListener;
+    private final java.util.concurrent.CopyOnWriteArrayList<PropertyListener> extraPropertyListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
     private static final java.util.List<VhalSignalObserver> liveObservers = new java.util.ArrayList<>();
     private static volatile Runnable observerLifecycleListener;
+    private static final java.util.concurrent.CopyOnWriteArrayList<Runnable> extraLifecycleListeners =
+            new java.util.concurrent.CopyOnWriteArrayList<>();
 
-    public void setPropertyListener(PropertyListener listener) { propertyListener = listener; }
+    public void addPropertyListener(PropertyListener listener) {
+        if (listener != null) {
+            extraPropertyListeners.addIfAbsent(listener);
+        }
+    }
+
+    public void removePropertyListener(PropertyListener listener) {
+        if (listener != null) {
+            extraPropertyListeners.remove(listener);
+        }
+    }
+
+    public void setPropertyListener(PropertyListener listener) {
+        propertyListener = listener;
+    }
+
+    public static void addObserverLifecycleListener(Runnable listener) {
+        if (listener != null) {
+            extraLifecycleListeners.addIfAbsent(listener);
+        }
+    }
+
+    public static void removeObserverLifecycleListener(Runnable listener) {
+        if (listener != null) {
+            extraLifecycleListeners.remove(listener);
+        }
+    }
 
     public static void setObserverLifecycleListener(Runnable listener) {
         observerLifecycleListener = listener;
@@ -49,8 +79,15 @@ public class VhalSignalObserver {
     }
 
     private void notifyObserverLifecycle() {
-        Runnable callback = observerLifecycleListener;
-        if (callback != null) callback.run();
+        Runnable primary = observerLifecycleListener;
+        if (primary != null) {
+            primary.run();
+        }
+        for (Runnable callback : extraLifecycleListeners) {
+            if (callback != null) {
+                callback.run();
+            }
+        }
     }
 
     /** One initial snapshot when attaching to a stream already used by blind-spot monitoring. */
@@ -152,6 +189,7 @@ public class VhalSignalObserver {
     public void stopAsync() {
         running = false;
         propertyListener = null;
+        extraPropertyListeners.clear();
         synchronized (liveObservers) { liveObservers.remove(this); }
         notifyObserverLifecycle();
         Thread previous = connectThread;
@@ -376,8 +414,17 @@ public class VhalSignalObserver {
      */
     private void processPropertyBatch(byte[] data) {
         com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onRawBatch(data);
-        PropertyListener consumer = propertyListener;
-        if (running && consumer != null) consumer.onBatch(data);
+        if (running) {
+            PropertyListener primary = propertyListener;
+            if (primary != null) {
+                primary.onBatch(data);
+            }
+            for (PropertyListener consumer : extraPropertyListeners) {
+                if (consumer != null) {
+                    consumer.onBatch(data);
+                }
+            }
+        }
         if (!VhalNative.isLibraryLoaded()) {
             AppLog.w(TAG, "Native library not loaded, skipping property batch processing");
             return;
@@ -453,8 +500,15 @@ public class VhalSignalObserver {
         if (!isConnected) {
             com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().reset();
         }
-        PropertyListener consumer = propertyListener;
-        if (consumer != null) consumer.onConnectionChanged(isConnected);
+        PropertyListener primary = propertyListener;
+        if (primary != null) {
+            primary.onConnectionChanged(isConnected);
+        }
+        for (PropertyListener consumer : extraPropertyListeners) {
+            if (consumer != null) {
+                consumer.onConnectionChanged(isConnected);
+            }
+        }
         mainHandler.post(() -> {
             if (listener != null) {
                 listener.onConnectionStateChanged(isConnected);

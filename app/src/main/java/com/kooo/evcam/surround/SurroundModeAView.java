@@ -29,6 +29,7 @@ import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.SurroundLayoutSpec;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.ViewportBox;
+import com.kooo.evcam.vehicle.SurroundSteeringAngleSource;
 import com.kooo.evcam.vehicle.VehicleSignalHub;
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear;
@@ -78,7 +79,17 @@ public final class SurroundModeAView extends FrameLayout {
     @Nullable
     private SurroundViewMode manualBottomOverride;
     private boolean inReverseGear = false;
-    private float currentWheelAngleDeg = 0f;
+    private volatile float currentWheelAngleDeg = 0f;
+    @Nullable
+    private SurroundSteeringAngleSource.Lease steeringAngleLease;
+    private final SurroundSteeringAngleSource.AngleListener steeringAngleListener = angleDeg -> {
+        float clamped = Math.max(-45f, Math.min(45f, angleDeg));
+        currentWheelAngleDeg = clamped;
+        SurroundGlRenderer renderer = this.glRenderer;
+        if (active && renderer != null) {
+            renderer.updateGuidanceAngle(clamped);
+        }
+    };
 
     // 分视窗交互 UI 叠加层（仅在激活时可见，不含任何环境或前雷达文字）
     private final FrameLayout overlayRoot;
@@ -322,6 +333,7 @@ public final class SurroundModeAView extends FrameLayout {
         active = false;
         surfacesReady = false;
         VehicleSignalHub.getInstance().removeListener(signalListener);
+        releaseSteeringAngleSubscription();
 
         final GLSurfaceView viewToRelease = this.glSurfaceView;
         final SurroundGlRenderer rendererToRelease = this.glRenderer;
@@ -341,6 +353,7 @@ public final class SurroundModeAView extends FrameLayout {
     }
 
     public void refreshFromPreferences() {
+        syncSteeringAngleSubscription();
         if (glRenderer != null) {
             glRenderer.reloadConfigurationFromPrefs();
         }
@@ -348,8 +361,39 @@ public final class SurroundModeAView extends FrameLayout {
     }
 
     public void updateSteeringWheelAngle(float angleDeg) {
-        this.currentWheelAngleDeg = Math.max(-45f, Math.min(45f, angleDeg));
-        refreshLayoutAndRenderState();
+        float clamped = Math.max(-45f, Math.min(45f, angleDeg));
+        this.currentWheelAngleDeg = clamped;
+        SurroundGlRenderer renderer = this.glRenderer;
+        if (active && renderer != null) {
+            renderer.updateGuidanceAngle(clamped);
+        } else {
+            refreshLayoutAndRenderState();
+        }
+    }
+
+    private void syncSteeringAngleSubscription() {
+        boolean wantSteering = active && appConfig.isPreviewGuidanceEnabled();
+        if (wantSteering) {
+            if (steeringAngleLease == null) {
+                steeringAngleLease = SurroundSteeringAngleSource.acquire(steeringAngleListener);
+            }
+        } else {
+            releaseSteeringAngleSubscription();
+        }
+    }
+
+    private void releaseSteeringAngleSubscription() {
+        if (steeringAngleLease != null) {
+            steeringAngleLease.close();
+            steeringAngleLease = null;
+            appConfig.setPreviewGuidanceLastAngleDeg(currentWheelAngleDeg);
+        }
+    }
+
+    @Override
+    protected void onDetachedFromWindow() {
+        releaseSteeringAngleSubscription();
+        super.onDetachedFromWindow();
     }
 
     @Override

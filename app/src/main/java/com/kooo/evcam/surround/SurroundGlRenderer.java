@@ -316,6 +316,18 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         requestRenderSafe();
     }
 
+    /** 仅更新方向盘转角对应的动态引导线状态（零布局重算、低于 0.4° 不重绘）。 */
+    public void updateGuidanceAngle(float wheelAngleDeg) {
+        synchronized (stateLock) {
+            if (Math.abs(this.wheelAngleDeg - wheelAngleDeg) <= 0.4f) {
+                return;
+            }
+            this.wheelAngleDeg = wheelAngleDeg;
+            this.guidanceDirty.set(true);
+        }
+        requestRenderSafe();
+    }
+
     public void requestRenderSafe() {
         if (!released && hostGlView != null) {
             hostGlView.requestRender();
