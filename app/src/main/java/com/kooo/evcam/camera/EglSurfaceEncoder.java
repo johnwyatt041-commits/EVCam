@@ -50,7 +50,7 @@ public class EglSurfaceEncoder {
             "    vTextureCoord = (uTexMatrix * aTextureCoord).xy;\n" +
             "}\n";
 
-    // Fragment shader - 使用外部纹理（OES）采样（无水印版本）
+    // Fragment shader - 使用外部纹理（OES）采样（无水印、无调色直通版本）
     private static final String FRAGMENT_SHADER =
             "#extension GL_OES_EGL_image_external : require\n" +
             "precision mediump float;\n" +
@@ -58,6 +58,22 @@ public class EglSurfaceEncoder {
             "uniform samplerExternalOES sTexture;\n" +
             "void main() {\n" +
             "    gl_FragColor = texture2D(sTexture, vTextureCoord);\n" +
+            "}\n";
+
+    // Fragment shader - 按需单遍调色版本（亮度/对比度/饱和度，无 FBO 拷贝）
+    private static final String FRAGMENT_SHADER_ADJUST =
+            "#extension GL_OES_EGL_image_external : require\n" +
+            "precision mediump float;\n" +
+            "varying vec2 vTextureCoord;\n" +
+            "uniform samplerExternalOES sTexture;\n" +
+            "uniform vec3 uImageAdjustments;\n" +
+            "void main() {\n" +
+            "    vec4 c = texture2D(sTexture, vTextureCoord);\n" +
+            "    vec3 rgb = c.rgb + (uImageAdjustments.x - 1.0);\n" +
+            "    rgb = (rgb - 0.5) * uImageAdjustments.y + 0.5;\n" +
+            "    float luma = dot(rgb, vec3(0.299, 0.587, 0.114));\n" +
+            "    rgb = mix(vec3(luma), rgb, uImageAdjustments.z);\n" +
+            "    gl_FragColor = vec4(clamp(rgb, 0.0, 1.0), c.a);\n" +
             "}\n";
 
     // Fragment shader - 带时间水印版本
@@ -114,9 +130,18 @@ public class EglSurfaceEncoder {
 
     // OpenGL 相关
     private int program;
+    private int adjustProgram;
+    private int adjustPositionHandle;
+    private int adjustTexCoordHandle;
+    private int adjustMvpMatrixHandle;
+    private int adjustTexMatrixHandle;
+    private int adjustTextureHandle;
+    private int adjustUniformHandle;
     private int textureId;
     private FloatBuffer vertexBuffer;
     private FloatBuffer texCoordBuffer;
+    private FloatBuffer adjustedTexCoordBuffer;
+    private ImageAdjustmentConfig imageAdjustmentConfig = ImageAdjustmentConfig.disabled();
 
     // Shader 变量位置
     private int positionHandle;
@@ -139,6 +164,44 @@ public class EglSurfaceEncoder {
     // 时间水印相关
     private boolean watermarkEnabled = false;
     private VehicleStatusWatermark vehicleStatusWatermark;
+    private VehicleStatusWatermark.WatermarkOptions watermarkOptions;
+
+    /** 设置 3.2 画面调节配置（关闭总开关或全默认时自动走零开销直通路径）。 */
+    public void setImageAdjustmentConfig(ImageAdjustmentConfig config) {
+        ImageAdjustmentConfig effective = config != null ? config : ImageAdjustmentConfig.disabled();
+        this.imageAdjustmentConfig = effective;
+        if (effective.isUvTransformIdentity()) {
+            this.adjustedTexCoordBuffer = null;
+        } else {
+            this.adjustedTexCoordBuffer = createFloatBuffer(effective.buildTexCoords());
+        }
+    }
+
+    /** 设置 3.3 统一四模块水印配置（在编码线程 EGL 上下文中调用；全部关闭时释放零残留）。 */
+    public void setWatermarkOptions(VehicleStatusWatermark.WatermarkOptions options) {
+        this.watermarkOptions = options;
+        if (isReleased || !isInitialized) return;
+        boolean needUnified = options != null && options.hasAnyEnabled();
+        if (!needUnified) {
+            if (vehicleStatusWatermark == null) return;
+            VehicleStatusWatermark previous = vehicleStatusWatermark;
+            vehicleStatusWatermark = null;
+            try { makeCurrent(); }
+            catch (RuntimeException e) { AppLog.w(TAG, "Closing unified watermark after EGL loss"); }
+            finally { previous.close(); }
+            return;
+        }
+        try {
+            makeCurrent();
+            if (vehicleStatusWatermark == null) {
+                vehicleStatusWatermark = new VehicleStatusWatermark(options);
+            } else {
+                vehicleStatusWatermark.setOptions(options);
+            }
+        } catch (RuntimeException e) {
+            AppLog.e(TAG, "Unified watermark unavailable; recording continues", e);
+        }
+    }
 
     /** Must be called on the encoder thread with this EGL context current. */
     public void setVehicleStatusWatermarkEnabled(boolean enabled) {
@@ -153,7 +216,9 @@ public class EglSurfaceEncoder {
         } else if (vehicleStatusWatermark == null) {
             try {
                 makeCurrent();
-                vehicleStatusWatermark = new VehicleStatusWatermark();
+                vehicleStatusWatermark = (watermarkOptions != null && watermarkOptions.hasAnyEnabled())
+                        ? new VehicleStatusWatermark(watermarkOptions)
+                        : new VehicleStatusWatermark();
             } catch (RuntimeException e) {
                 AppLog.e(TAG, "Vehicle status watermark unavailable; recording continues", e);
             }
@@ -292,7 +357,8 @@ public class EglSurfaceEncoder {
                 GLES20.glClear(GLES20.GL_COLOR_BUFFER_BIT);
                 needsClear = false;
             }
-            if (watermarkEnabled && watermarkProgram != 0) {
+            boolean useUnifiedWatermark = watermarkOptions != null && watermarkOptions.hasAnyEnabled() && vehicleStatusWatermark != null;
+            if (!useUnifiedWatermark && watermarkEnabled && watermarkProgram != 0 && imageAdjustmentConfig.isColorShaderIdentity()) {
                 drawFrameWithWatermark();
             } else {
                 drawFrameWithoutWatermark();
@@ -316,7 +382,44 @@ public class EglSurfaceEncoder {
     }
 
     private void drawFrameWithoutWatermark() {
-        // 使用着色器程序
+        FloatBuffer activeTexCoords = (!imageAdjustmentConfig.isUvTransformIdentity() && adjustedTexCoordBuffer != null)
+                ? adjustedTexCoordBuffer
+                : texCoordBuffer;
+
+        if (!imageAdjustmentConfig.isColorShaderIdentity()) {
+            ensureAdjustProgramInitialized();
+            if (adjustProgram != 0) {
+                GLES20.glUseProgram(adjustProgram);
+                checkGlError("glUseProgram adjust");
+
+                GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, textureId);
+
+                GLES20.glUniformMatrix4fv(adjustMvpMatrixHandle, 1, false, mvpMatrix, 0);
+                GLES20.glUniformMatrix4fv(adjustTexMatrixHandle, 1, false, texMatrix, 0);
+                GLES20.glUniform1i(adjustTextureHandle, 0);
+                GLES20.glUniform3f(
+                        adjustUniformHandle,
+                        imageAdjustmentConfig.getBrightnessFactor(),
+                        imageAdjustmentConfig.getContrastFactor(),
+                        imageAdjustmentConfig.getSaturationFactor());
+
+                GLES20.glEnableVertexAttribArray(adjustPositionHandle);
+                GLES20.glVertexAttribPointer(adjustPositionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
+
+                GLES20.glEnableVertexAttribArray(adjustTexCoordHandle);
+                GLES20.glVertexAttribPointer(adjustTexCoordHandle, 2, GLES20.GL_FLOAT, false, 0, activeTexCoords);
+
+                GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
+                checkGlError("glDrawArrays adjust");
+
+                GLES20.glDisableVertexAttribArray(adjustPositionHandle);
+                GLES20.glDisableVertexAttribArray(adjustTexCoordHandle);
+                return;
+            }
+        }
+
+        // 零开销直通着色器程序（默认及旁路态）
         GLES20.glUseProgram(program);
         checkGlError("glUseProgram");
 
@@ -334,7 +437,7 @@ public class EglSurfaceEncoder {
         GLES20.glVertexAttribPointer(positionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
 
         GLES20.glEnableVertexAttribArray(texCoordHandle);
-        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+        GLES20.glVertexAttribPointer(texCoordHandle, 2, GLES20.GL_FLOAT, false, 0, activeTexCoords);
 
         // 绘制
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
@@ -343,6 +446,23 @@ public class EglSurfaceEncoder {
         // 禁用顶点属性
         GLES20.glDisableVertexAttribArray(positionHandle);
         GLES20.glDisableVertexAttribArray(texCoordHandle);
+    }
+
+    private void ensureAdjustProgramInitialized() {
+        if (adjustProgram != 0) {
+            return;
+        }
+        adjustProgram = createProgram(VERTEX_SHADER, FRAGMENT_SHADER_ADJUST);
+        if (adjustProgram == 0) {
+            AppLog.w(TAG, "Camera " + cameraId + " Adjust shader unavailable, fallback to passthrough");
+            return;
+        }
+        adjustPositionHandle = GLES20.glGetAttribLocation(adjustProgram, "aPosition");
+        adjustTexCoordHandle = GLES20.glGetAttribLocation(adjustProgram, "aTextureCoord");
+        adjustMvpMatrixHandle = GLES20.glGetUniformLocation(adjustProgram, "uMVPMatrix");
+        adjustTexMatrixHandle = GLES20.glGetUniformLocation(adjustProgram, "uTexMatrix");
+        adjustTextureHandle = GLES20.glGetUniformLocation(adjustProgram, "sTexture");
+        adjustUniformHandle = GLES20.glGetUniformLocation(adjustProgram, "uImageAdjustments");
     }
 
     // 性能优化：缓存水印位置（只需计算一次）
@@ -389,11 +509,14 @@ public class EglSurfaceEncoder {
         GLES20.glUniform4f(watermarkRectHandle, watermarkX, watermarkY, watermarkW, watermarkH);
 
         // 设置顶点属性
+        FloatBuffer activeTexCoords = (!imageAdjustmentConfig.isUvTransformIdentity() && adjustedTexCoordBuffer != null)
+                ? adjustedTexCoordBuffer
+                : texCoordBuffer;
         GLES20.glEnableVertexAttribArray(watermarkPositionHandle);
         GLES20.glVertexAttribPointer(watermarkPositionHandle, 2, GLES20.GL_FLOAT, false, 0, vertexBuffer);
 
         GLES20.glEnableVertexAttribArray(watermarkTexCoordHandle);
-        GLES20.glVertexAttribPointer(watermarkTexCoordHandle, 2, GLES20.GL_FLOAT, false, 0, texCoordBuffer);
+        GLES20.glVertexAttribPointer(watermarkTexCoordHandle, 2, GLES20.GL_FLOAT, false, 0, activeTexCoords);
 
         // 绘制
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
@@ -500,6 +623,14 @@ public class EglSurfaceEncoder {
                     AppLog.w(TAG, "Camera " + cameraId + " Error deleting program: " + e.getMessage());
                 }
                 program = 0;
+            }
+            if (adjustProgram != 0) {
+                try {
+                    GLES20.glDeleteProgram(adjustProgram);
+                } catch (Exception e) {
+                    AppLog.w(TAG, "Camera " + cameraId + " Error deleting adjustProgram: " + e.getMessage());
+                }
+                adjustProgram = 0;
             }
 
             if (textureId != 0) {

@@ -3465,6 +3465,7 @@ public class MainActivity extends AppCompatActivity implements
                     String cameraText = cameraCount == appConfig.getCameraCount() ? "全部" : cameraCount + "个";
                     Toast.makeText(this, "开始录制" + cameraText + "摄像头", Toast.LENGTH_SHORT).show();
                 }
+                com.kooo.evcam.camera.RecordingSoundPlayer.playStartSound(this, appConfig);
                 AppLog.d(TAG, "Recording started with " + enabledCameras.size() + " camera(s): " + enabledCameras);
             } else {
                 Toast.makeText(this, "录制失败", Toast.LENGTH_SHORT).show();
@@ -3496,6 +3497,7 @@ public class MainActivity extends AppCompatActivity implements
             }
 
             Toast.makeText(this, "录制已停止", Toast.LENGTH_SHORT).show();
+            com.kooo.evcam.camera.RecordingSoundPlayer.playStopSound(this, appConfig);
             AppLog.d(TAG, "Recording stopped, foreground service stopped");
         }
     }

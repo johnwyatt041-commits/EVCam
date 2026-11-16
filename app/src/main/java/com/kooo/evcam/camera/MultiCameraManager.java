@@ -49,6 +49,41 @@ public class MultiCameraManager {
         }
     }
 
+    /** 将 3.2 画面调节与 3.3 四模块水印配置实时同步到正在录制的解码器（分辨率缩放下一段/下次录制生效）。 */
+    public synchronized void refreshActiveRecorderSettings() {
+        AppConfig config = new AppConfig(context);
+        vehicleStatusWatermarkOverride = null;
+        VehicleStatusWatermark.WatermarkOptions watermarkOpts = config.getWatermarkOptions();
+        for (Map.Entry<String, CodecVideoRecorder> entry : codecRecorders.entrySet()) {
+            String key = entry.getKey();
+            CodecVideoRecorder recorder = entry.getValue();
+            if (recorder == null) continue;
+            if ("combined".equals(key)) {
+                ImageAdjustmentConfig globalAdj = config.isVideoImageAdjustEnabled()
+                        ? new ImageAdjustmentConfig(true, config.getVideoImageQualityPercent(),
+                                config.getVideoImageBrightnessPercent(),
+                                config.getVideoImageContrastPercent(),
+                                config.getVideoImageSaturationPercent(),
+                                0, false)
+                        : ImageAdjustmentConfig.disabled();
+                recorder.setImageAdjustmentConfig(globalAdj);
+            } else {
+                recorder.setImageAdjustmentConfig(config.getImageAdjustmentConfig(key));
+            }
+            recorder.setWatermarkOptions(watermarkOpts);
+        }
+    }
+
+    /** 当非录制空闲预览态更新预览限帧档位时，平滑刷新各已打开摄像头的捕获会话。 */
+    public synchronized void refreshPreviewFrameLimit() {
+        if (isRecording) return;
+        for (SingleCamera camera : cameras.values()) {
+            if (camera != null && camera.isCameraOpened() && camera.hasValidPreviewSurface()) {
+                camera.recreateSession();
+            }
+        }
+    }
+
     private synchronized void registerCodecRecorder(String key, CodecVideoRecorder recorder) {
         codecRecorders.put(key, recorder);
         Boolean override = vehicleStatusWatermarkOverride;
@@ -1384,10 +1419,11 @@ public class MultiCameraManager {
             
             // 最大编码分辨率限制（H.264 编码器硬件限制，固定值）
             final int MAX_ENCODE_SIZE = 4096;
-            
-            // 计算调整后的编码分辨率（防止超大分辨率摄像头导致编码失败）
-            int encodeWidth = previewSize.getWidth();
-            int encodeHeight = previewSize.getHeight();
+
+            // 计算调整后的编码分辨率（3.2 画面画质缩放 + 防止超大分辨率失败，保持偶数对齐）
+            ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
+            int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
+            int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
             if (encodeWidth > MAX_ENCODE_SIZE || encodeHeight > MAX_ENCODE_SIZE) {
                 float widthRatio = (float) MAX_ENCODE_SIZE / encodeWidth;
                 float heightRatio = (float) MAX_ENCODE_SIZE / encodeHeight;
@@ -1396,40 +1432,27 @@ public class MultiCameraManager {
                 encodeHeight = ((int) (encodeHeight * scaleFactor) / 2) * 2;
                 if (encodeWidth < 2) encodeWidth = 2;
                 if (encodeHeight < 2) encodeHeight = 2;
-                AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " + 
-                        previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " + 
+                AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " +
+                        previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " +
                         encodeWidth + "x" + encodeHeight + " (max: " + MAX_ENCODE_SIZE + ")");
             }
-            
+
             // 计算码率（基于调整后的分辨率和帧率）
             int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, targetFrameRate);
 
             // 创建软编码录制器（使用调整后的分辨率）
             CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
-                    camera.getCameraId(), 
-                    encodeWidth, 
+                    camera.getCameraId(),
+                    encodeWidth,
                     encodeHeight
             );
 
-            // 设置统一时间戳提供者（确保多路摄像头分段切换时使用相同时间戳）
-            codecRecorder.setTimestampProvider(segmentTimestampProvider);
-
-            // 设置录制参数
-            codecRecorder.setSegmentDuration(segmentDurationMs);
-            codecRecorder.setBitRate(bitrate);
-            codecRecorder.setFrameRate(targetFrameRate);
-            codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
-            camera.setRecordingFrameRate(targetFrameRate);
-            codecRecorder.setQualityLevel(3);  // 设置最高画质
-            codecRecorder.setForceH264(appConfig.isForceH264Encoding());
-
-            AppLog.d(TAG, "Codec recording params for " + key + ": " +
-                    encodeWidth + "x" + encodeHeight +
-                    " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate));
-
-            // 设置时间水印（从配置读取，使用方法开头已创建的 appConfig）
-            codecRecorder.setWatermarkEnabled(appConfig.isTimestampWatermarkEnabled());
-            codecRecorder.setVehicleStatusWatermarkEnabled(appConfig.isVehicleStatusWatermarkEnabled());
+            Size sourceSize = camera.getPreviewSize();
+            int srcW = sourceSize != null ? sourceSize.getWidth() : encodeWidth;
+            int srcH = sourceSize != null ? sourceSize.getHeight() : encodeHeight;
+            configureCodecRecorderCommon(
+                    key, camera, codecRecorder, segmentDurationMs,
+                    bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight, appConfig, adjConfig);
 
             // 设置回调
             codecRecorder.setCallback(new RecordCallback() {
@@ -1764,24 +1787,24 @@ public class MultiCameraManager {
                 previewSize = new Size(1280, 800);
             }
 
+            AppConfig appConfig = new AppConfig(context);
+            ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
+            int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
+            int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
+            int fps = appConfig.getActualFrameRate(25);
+            int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, fps);
+
             // 创建软编码录制器
             CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
                     camera.getCameraId(),
-                    previewSize.getWidth(),
-                    previewSize.getHeight()
+                    encodeWidth,
+                    encodeHeight
             );
 
-            // 设置录制参数
-            AppConfig appConfig = new AppConfig(context);
-            codecRecorder.setSegmentDuration(appConfig.getSegmentDurationMs());
-            codecRecorder.setBitRate(appConfig.getActualBitrate(previewSize.getWidth(), previewSize.getHeight(), 25));  // 使用25fps降低CPU占用
-            codecRecorder.setFrameRate(appConfig.getActualFrameRate(25));  // 使用25fps降低CPU占用
-            codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
-            camera.setRecordingFrameRate(appConfig.getActualFrameRate(25));
-            codecRecorder.setQualityLevel(3);  // 设置最高画质
-            codecRecorder.setForceH264(appConfig.isForceH264Encoding());
-            codecRecorder.setWatermarkEnabled(appConfig.isTimestampWatermarkEnabled());
-            codecRecorder.setVehicleStatusWatermarkEnabled(appConfig.isVehicleStatusWatermarkEnabled());
+            configureCodecRecorderCommon(
+                    key, camera, codecRecorder, appConfig.getSegmentDurationMs(),
+                    bitrate, fps, previewSize.getWidth(), previewSize.getHeight(),
+                    encodeWidth, encodeHeight, appConfig, adjConfig);
 
             // 准备录制
             String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
@@ -2700,5 +2723,36 @@ public class MultiCameraManager {
             }
         }
         return sb.toString();
+    }
+
+    private void configureCodecRecorderCommon(
+            String key,
+            SingleCamera camera,
+            CodecVideoRecorder codecRecorder,
+            long segmentDurationMs,
+            int bitrate,
+            int targetFrameRate,
+            int sourceWidth,
+            int sourceHeight,
+            int encodeWidth,
+            int encodeHeight,
+            AppConfig appConfig,
+            ImageAdjustmentConfig adjConfig) {
+        codecRecorder.setSourceSize(sourceWidth, sourceHeight);
+        codecRecorder.setTimestampProvider(segmentTimestampProvider);
+        codecRecorder.setSegmentDuration(segmentDurationMs);
+        codecRecorder.setBitRate(bitrate);
+        codecRecorder.setFrameRate(targetFrameRate);
+        codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
+        camera.setRecordingFrameRate(targetFrameRate);
+        codecRecorder.setQualityLevel(3);
+        codecRecorder.setForceH264(appConfig.isForceH264Encoding());
+        codecRecorder.setImageAdjustmentConfig(adjConfig);
+        codecRecorder.setWatermarkOptions(appConfig.getWatermarkOptions());
+
+        AppLog.d(TAG, "Codec recording params for " + key + ": src=" +
+                sourceWidth + "x" + sourceHeight + " -> encode=" +
+                encodeWidth + "x" + encodeHeight +
+                " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate));
     }
 }

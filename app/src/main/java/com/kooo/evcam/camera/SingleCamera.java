@@ -1435,7 +1435,8 @@ public class SingleCamera {
                 AppLog.w(TAG, "RECORD template unsupported; retaining PREVIEW template with recording target");
             }
             final CaptureRequest.Builder previewRequestBuilder = requestBuilder;
-            if (recordSurface != null && !RecordingDeviceProfile.isE5(new AppConfig(context).getCarModel())) {
+            AppConfig captureAppConfig = new AppConfig(context);
+            if (recordSurface != null && !RecordingDeviceProfile.isE5(captureAppConfig.getCarModel())) {
                 try {
                     CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
                     Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
@@ -1450,6 +1451,22 @@ public class SingleCamera {
                 }
             } else if (recordSurface != null) {
                 AppLog.i(TAG,"E5 recording source camera="+cameraId+", HAL default FPS (working baseline)");
+            } else {
+                int previewFpsLimit = captureAppConfig.getPreviewFpsLimit();
+                if (previewFpsLimit > 0 && !RecordingDeviceProfile.isE5(captureAppConfig.getCarModel())) {
+                    try {
+                        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                        Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
+                                CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), previewFpsLimit);
+                        if (range != null) {
+                            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
+                            AppLog.d(TAG, "Preview limit camera=" + cameraId + ", requestedFps="
+                                    + previewFpsLimit + ", range=" + range);
+                        }
+                    } catch (Exception e) {
+                        AppLog.w(TAG, "Preview FPS limit unavailable; retaining HAL default: " + e.getMessage());
+                    }
+                }
             }
             
             currentRequestBuilder = previewRequestBuilder;
@@ -1622,11 +1639,12 @@ public class SingleCamera {
                         try {
                             captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
                         } catch (IllegalArgumentException rejectedRange) {
-                            if (recordSurface == null || previewRequestBuilder.get(
-                                    CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) == null) throw rejectedRange;
+                            if (previewRequestBuilder.get(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) == null) {
+                                throw rejectedRange;
+                            }
                             previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
                             captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
-                            AppLog.w(TAG, "Recording FPS range rejected by active stream combination; using HAL default");
+                            AppLog.w(TAG, "FPS range rejected by active stream combination; using HAL default");
                         }
                         AppLog.d(TAG, "Camera " + cameraId + " preview started!");
                         lastFrameTimestampMs = System.currentTimeMillis();

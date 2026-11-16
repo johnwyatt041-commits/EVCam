@@ -22,13 +22,18 @@ final class MultiCameraCompositor implements AutoCloseable {
         final String name;
         final Size size;
         final float[] matrix = new float[16];
+        FloatBuffer customUv;
         SurfaceTexture texture;
         Surface surface;
         int id;
         boolean pending;
         long lastLatch;
         long callbacks;
-        Input(String name, Size size) { this.name = name; this.size = size; }
+        Input(String name, Size size, FloatBuffer customUv) {
+            this.name = name;
+            this.size = size;
+            this.customUv = customUv;
+        }
     }
     private final Map<String, Input> inputs = new LinkedHashMap<>();
     private final HandlerThread thread = new HandlerThread("RecordingCompositor");
@@ -49,14 +54,26 @@ final class MultiCameraCompositor implements AutoCloseable {
 
     MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps)
             throws Exception {
-        this(output,sources,width,height,fps,sources.size());
+        this(output, sources, width, height, fps, sources.size(), null);
     }
-    MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps,int columns)
+
+    MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps, int columns)
+            throws Exception {
+        this(output, sources, width, height, fps, columns, null);
+    }
+
+    MultiCameraCompositor(Surface output, Map<String, Size> sources, int width, int height, int fps, int columns,
+                          Map<String, ImageAdjustmentConfig> adjustments)
             throws Exception {
         this.width = width; this.height = height; intervalNs = 1_000_000_000L / fps;
         this.columns=Math.max(1,columns); this.rows=(sources.size()+this.columns-1)/this.columns;
         for (String name : new String[]{"left", "back", "right", "front"}) {
-            if (sources.containsKey(name)) inputs.put(name, new Input(name, sources.get(name)));
+            if (sources.containsKey(name)) {
+                ImageAdjustmentConfig adj = adjustments != null ? adjustments.get(name) : null;
+                FloatBuffer uvBuf = (adj != null && !adj.isUvTransformIdentity())
+                        ? floats(adj.buildTexCoords()) : null;
+                inputs.put(name, new Input(name, sources.get(name), uvBuf));
+            }
         }
         if (inputs.isEmpty()) throw new IllegalArgumentException("No composite inputs");
         thread.start(); handler = new Handler(thread.getLooper());
@@ -143,6 +160,9 @@ final class MultiCameraCompositor implements AutoCloseable {
                     int x=(index%columns)*cellWidth+(cellWidth-w)/2;
                     int y=height-(index/columns+1)*cellHeight+(cellHeight-h)/2;
                     GLES20.glViewport(x,y,w,h);
+                    FloatBuffer tileUv = input.customUv != null ? input.customUv : uv;
+                    tileUv.position(0);
+                    GLES20.glVertexAttribPointer(uvLocation,2,GLES20.GL_FLOAT,false,0,tileUv);
                     GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES,input.id);
                     GLES20.glUniformMatrix4fv(matrixLocation,1,false,input.matrix,0);
                     GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP,0,4);

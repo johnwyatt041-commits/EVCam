@@ -20,14 +20,24 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentTransaction;
 
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.kooo.evcam.camera.CameraManagerHolder;
+import com.kooo.evcam.camera.ImageAdjustmentConfig;
+import com.kooo.evcam.camera.MultiCameraManager;
+import com.kooo.evcam.camera.RecordingSoundPlayer;
+import com.kooo.evcam.camera.VehicleStatusWatermark;
+import com.kooo.evcam.stream.MjpegStreamManager;
 
+import java.io.File;
 import java.util.List;
 
 /**
@@ -103,6 +113,68 @@ public class RecorderSettingsFragment extends Fragment {
     private android.widget.CheckBox cbRecordCameraRight;
     private boolean isInitializingRecordingCameraSelection = false;
 
+    // T05: 3.1 / 3.2 / 3.3 / 3.4 分区切换与新增控件
+    private Button btnTabRecord31, btnTabImage32, btnTabDisplay33, btnTabSound34;
+    private View sectionRecord31, sectionImage32, sectionDisplay33, sectionSound34;
+    private android.widget.ScrollView scrollRecorderSettings;
+
+    // T05: 3.1 方案 A（录像目标帧率 + 空闲预览限帧）
+    private static final int[] TARGET_FPS_VALUES = {0, 15, 20, 25, 30};
+    private static final String[] TARGET_FPS_LABELS = {"自动 (E5 25fps)", "15 fps", "20 fps", "25 fps", "30 fps"};
+    private static final int[] PREVIEW_LIMIT_VALUES = {0, 25, 15};
+    private static final String[] PREVIEW_LIMIT_LABELS = {"不限帧（流畅）", "标准 (25 fps)", "省电 (15 fps)"};
+
+    // T05: 3.2 画面调节
+    private static final String[] CAMERA_POS_KEYS = {"front", "back", "left", "right"};
+    private static final String[] CAMERA_POS_LABELS = {"前", "后", "左", "右"};
+    private String selectedImageCameraPos = "front";
+    private SwitchMaterial switchImageAdjustEnabled;
+    private View layoutImageGlobalAdjust;
+    private SeekBar seekImageQuality, seekImageBrightness, seekImageContrast, seekImageSaturation, seekImageCrop;
+    private TextView tvImageQualityValue, tvImageBrightnessValue, tvImageContrastValue, tvImageSaturationValue, tvImageCropValue;
+    private SwitchMaterial switchImageMirror;
+    private boolean isUpdatingImageUi = false;
+
+    // T05: 3.3 四模块水印 + 位置 + 样式
+    private LinearLayout layoutWatermarkVehicleSuboptions;
+    private android.widget.CheckBox cbWatermarkSpeed, cbWatermarkGearTurn;
+    private SwitchMaterial switchWatermarkCustomText;
+    private EditText etWatermarkCustomText;
+    private boolean isUpdatingDisplayUi = false;
+
+    // T05: 3.4 提示音与系统音频选取器
+    private static final String[] SOUND_MODE_KEYS = {
+            RecordingSoundPlayer.MODE_NONE,
+            RecordingSoundPlayer.MODE_SYSTEM,
+            RecordingSoundPlayer.MODE_CUSTOM
+    };
+    private static final String[] SOUND_MODE_LABELS = {"不播放", "系统提示音", "自定义音频 (<=20MB)"};
+    private Spinner spinnerStartSoundMode, spinnerStopSoundMode;
+    private TextView tvStartSoundStatus, tvStopSoundStatus;
+    private Button btnPickStartSound, btnPickStopSound;
+    private boolean isUpdatingSoundUi = false;
+    private boolean pendingPickForStartSound = true;
+
+    private final ActivityResultLauncher<String[]> audioPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                if (uri == null || getContext() == null || appConfig == null) return;
+                boolean forStart = pendingPickForStartSound;
+                try {
+                    File imported = RecordingSoundPlayer.importCustomSoundUri(getContext(), uri, forStart);
+                    if (forStart) {
+                        appConfig.setRecordStartSoundPath(imported.getAbsolutePath());
+                        appConfig.setRecordStartSoundMode(RecordingSoundPlayer.MODE_CUSTOM);
+                    } else {
+                        appConfig.setRecordStopSoundPath(imported.getAbsolutePath());
+                        appConfig.setRecordStopSoundMode(RecordingSoundPlayer.MODE_CUSTOM);
+                    }
+                    refreshSoundSectionUi();
+                    Toast.makeText(getContext(), "已导入音频：" + imported.getName(), Toast.LENGTH_SHORT).show();
+                } catch (Exception e) {
+                    Toast.makeText(getContext(), "导入音频失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                }
+            });
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
@@ -119,6 +191,9 @@ public class RecorderSettingsFragment extends Fragment {
         if (getContext() != null) {
             appConfig = new AppConfig(getContext());
 
+            // 初始化顶部分区切换（3.1 录制 / 3.2 画面 / 3.3 显示 / 3.4 提示音）
+            initRecorderSubTabs(view);
+
             // 初始化车型配置
             initCarModelConfig(view);
 
@@ -128,6 +203,9 @@ public class RecorderSettingsFragment extends Fragment {
             // 初始化分段时长配置
             initSegmentDurationConfig(view);
 
+            // 初始化方案 A 帧率与预览限帧配置
+            initFrameRatePolicyConfig(view);
+
             // 初始化录制摄像头选择配置
             initRecordingCameraSelectionConfig(view);
 
@@ -136,6 +214,9 @@ public class RecorderSettingsFragment extends Fragment {
 
             // 初始化存储清理配置
             initStorageCleanupConfig(view);
+
+            // 初始化 3.2 画面调节与总开关旁路
+            initImageAdjustSection(view);
         }
 
         // 初始化分辨率设置入口
@@ -163,7 +244,7 @@ public class RecorderSettingsFragment extends Fragment {
             }
         });
 
-        // 初始化时间角标开关
+        // 初始化时间角标开关与 3.3 显示/水印设置
         timestampWatermarkSwitch = view.findViewById(R.id.switch_timestamp_watermark);
         if (getContext() != null && appConfig != null) {
             timestampWatermarkSwitch.setChecked(appConfig.isTimestampWatermarkEnabled());
@@ -173,9 +254,12 @@ public class RecorderSettingsFragment extends Fragment {
         timestampWatermarkSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (getContext() != null && appConfig != null) {
                 appConfig.setTimestampWatermarkEnabled(isChecked);
-                String message = isChecked ? "时间角标已开启" : "时间角标已关闭";
-                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
-                AppLog.d("SettingsFragment", message);
+                notifyActiveRecorders();
+                if (!isUpdatingDisplayUi) {
+                    String message = isChecked ? "时间角标已开启" : "时间角标已关闭";
+                    Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+                    AppLog.d("SettingsFragment", message);
+                }
             }
         });
 
@@ -186,12 +270,21 @@ public class RecorderSettingsFragment extends Fragment {
         vehicleStatusSwitch.setChecked(appConfig.isVehicleStatusWatermarkEnabled());
         vehicleStatusSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
             appConfig.setVehicleStatusWatermarkEnabled(checked);
-            com.kooo.evcam.camera.MultiCameraManager manager =
-                    com.kooo.evcam.camera.CameraManagerHolder.getInstance().getCameraManager();
-            if (manager != null) manager.setVehicleStatusWatermarkEnabled(checked);
-            Toast.makeText(getContext(), checked ? "车辆状态水印已开启，未读取到的信号显示未知"
-                    : "车辆状态水印已关闭", Toast.LENGTH_SHORT).show();
+            updateWatermarkVehicleSuboptionsVisibility(checked);
+            MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+            if (manager != null) {
+                manager.setVehicleStatusWatermarkEnabled(checked);
+                manager.refreshActiveRecorderSettings();
+            }
+            if (!isUpdatingDisplayUi) {
+                Toast.makeText(getContext(), checked ? "车辆状态水印已开启，未读取到的信号显示未知"
+                        : "车辆状态水印已关闭", Toast.LENGTH_SHORT).show();
+            }
         });
+
+        // 初始化 3.3 扩展水印配置与 3.4 提示音配置
+        initDisplayWatermarkExtensions(view);
+        initSoundSection(view);
 
         // 初始化强制 H.264 编码开关
         forceH264Switch = view.findViewById(R.id.switch_force_h264);
@@ -1774,5 +1867,686 @@ public class RecorderSettingsFragment extends Fragment {
     private void openResolutionSettings() {
         SettingsFragment.openSubPage(this, new ResolutionSettingsFragment());
     }
-    
+
+    // ==================== T05: 3.1–3.4 分区切换、方案A帧率、画面、水印与提示音 ====================
+
+    private void initRecorderSubTabs(View root) {
+        btnTabRecord31 = root.findViewById(R.id.btn_tab_record_31);
+        btnTabImage32 = root.findViewById(R.id.btn_tab_image_32);
+        btnTabDisplay33 = root.findViewById(R.id.btn_tab_display_33);
+        btnTabSound34 = root.findViewById(R.id.btn_tab_sound_34);
+
+        sectionRecord31 = root.findViewById(R.id.section_record_31);
+        sectionImage32 = root.findViewById(R.id.section_image_32);
+        sectionDisplay33 = root.findViewById(R.id.section_display_33);
+        sectionSound34 = root.findViewById(R.id.section_sound_34);
+        scrollRecorderSettings = root.findViewById(R.id.scroll_recorder_settings);
+
+        if (btnTabRecord31 != null) btnTabRecord31.setOnClickListener(v -> selectRecorderSubTab(0));
+        if (btnTabImage32 != null) btnTabImage32.setOnClickListener(v -> selectRecorderSubTab(1));
+        if (btnTabDisplay33 != null) btnTabDisplay33.setOnClickListener(v -> selectRecorderSubTab(2));
+        if (btnTabSound34 != null) btnTabSound34.setOnClickListener(v -> selectRecorderSubTab(3));
+
+        selectRecorderSubTab(0);
+    }
+
+    private void selectRecorderSubTab(int tabIndex) {
+        if (sectionRecord31 != null) sectionRecord31.setVisibility(tabIndex == 0 ? View.VISIBLE : View.GONE);
+        if (sectionImage32 != null) sectionImage32.setVisibility(tabIndex == 1 ? View.VISIBLE : View.GONE);
+        if (sectionDisplay33 != null) sectionDisplay33.setVisibility(tabIndex == 2 ? View.VISIBLE : View.GONE);
+        if (sectionSound34 != null) sectionSound34.setVisibility(tabIndex == 3 ? View.VISIBLE : View.GONE);
+
+        styleTabPill(btnTabRecord31, tabIndex == 0);
+        styleTabPill(btnTabImage32, tabIndex == 1);
+        styleTabPill(btnTabDisplay33, tabIndex == 2);
+        styleTabPill(btnTabSound34, tabIndex == 3);
+
+        if (scrollRecorderSettings != null) {
+            scrollRecorderSettings.scrollTo(0, 0);
+        }
+    }
+
+    private void styleTabPill(@Nullable Button button, boolean selected) {
+        Context ctx = getContext();
+        if (button == null || ctx == null) return;
+        int bgColor = ContextCompat.getColor(ctx, selected ? R.color.ui_accent_soft : R.color.button_background);
+        int textColor = ContextCompat.getColor(ctx, selected ? R.color.ui_option_pill_selected_text : R.color.button_text);
+        button.setBackgroundTintList(android.content.res.ColorStateList.valueOf(bgColor));
+        button.setTextColor(textColor);
+    }
+
+    private void initFrameRatePolicyConfig(View view) {
+        Spinner targetFpsSpinner = view.findViewById(R.id.spinner_target_recording_fps);
+        Spinner previewLimitSpinner = view.findViewById(R.id.spinner_preview_fps_limit);
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+
+        if (targetFpsSpinner != null) {
+            ArrayAdapter<String> fpsAdapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, TARGET_FPS_LABELS);
+            fpsAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            targetFpsSpinner.setAdapter(fpsAdapter);
+
+            int savedFps = appConfig.getTargetRecordingFps();
+            int initialIdx = 0;
+            for (int i = 0; i < TARGET_FPS_VALUES.length; i++) {
+                if (TARGET_FPS_VALUES[i] == savedFps) {
+                    initialIdx = i;
+                    break;
+                }
+            }
+            targetFpsSpinner.setSelection(initialIdx);
+            final boolean[] init = {true};
+            targetFpsSpinner.post(() -> init[0] = false);
+            targetFpsSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                    if (init[0]) return;
+                    int newFps = TARGET_FPS_VALUES[position];
+                    if (newFps != appConfig.getTargetRecordingFps()) {
+                        appConfig.setTargetRecordingFps(newFps);
+                        Toast.makeText(ctx, "录像目标帧率已设为「" + TARGET_FPS_LABELS[position] + "」，下次录制生效", Toast.LENGTH_SHORT).show();
+                    }
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+
+        if (previewLimitSpinner != null) {
+            ArrayAdapter<String> limitAdapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, PREVIEW_LIMIT_LABELS);
+            limitAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            previewLimitSpinner.setAdapter(limitAdapter);
+
+            int savedLimit = appConfig.getPreviewFpsLimit();
+            int initialIdx = 0;
+            for (int i = 0; i < PREVIEW_LIMIT_VALUES.length; i++) {
+                if (PREVIEW_LIMIT_VALUES[i] == savedLimit) {
+                    initialIdx = i;
+                    break;
+                }
+            }
+            previewLimitSpinner.setSelection(initialIdx);
+            final boolean[] init = {true};
+            previewLimitSpinner.post(() -> init[0] = false);
+            previewLimitSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                    if (init[0]) return;
+                    int newLimit = PREVIEW_LIMIT_VALUES[position];
+                    if (newLimit != appConfig.getPreviewFpsLimit()) {
+                        appConfig.setPreviewFpsLimit(newLimit);
+                        MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+                        if (manager != null) {
+                            manager.refreshPreviewFrameLimit();
+                        }
+                        Toast.makeText(ctx, "预览限帧已设为「" + PREVIEW_LIMIT_LABELS[position] + "」", Toast.LENGTH_SHORT).show();
+                    }
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+    }
+
+    private void initImageAdjustSection(View view) {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+
+        switchImageAdjustEnabled = view.findViewById(R.id.switch_image_adjust_enabled);
+        layoutImageGlobalAdjust = view.findViewById(R.id.layout_image_global_adjust);
+        seekImageQuality = view.findViewById(R.id.seekbar_image_quality);
+        seekImageBrightness = view.findViewById(R.id.seekbar_image_brightness);
+        seekImageContrast = view.findViewById(R.id.seekbar_image_contrast);
+        seekImageSaturation = view.findViewById(R.id.seekbar_image_saturation);
+        seekImageCrop = view.findViewById(R.id.seekbar_image_crop);
+
+        tvImageQualityValue = view.findViewById(R.id.tv_image_quality_value);
+        tvImageBrightnessValue = view.findViewById(R.id.tv_image_brightness_value);
+        tvImageContrastValue = view.findViewById(R.id.tv_image_contrast_value);
+        tvImageSaturationValue = view.findViewById(R.id.tv_image_saturation_value);
+        tvImageCropValue = view.findViewById(R.id.tv_image_crop_value);
+
+        Spinner cameraPosSpinner = view.findViewById(R.id.spinner_image_camera_pos);
+        switchImageMirror = view.findViewById(R.id.switch_image_mirror);
+        Button btnResetImage = view.findViewById(R.id.btn_reset_image_adjust);
+
+        if (cameraPosSpinner != null) {
+            ArrayAdapter<String> posAdapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, CAMERA_POS_LABELS);
+            posAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            cameraPosSpinner.setAdapter(posAdapter);
+            cameraPosSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                    selectedImageCameraPos = CAMERA_POS_KEYS[position];
+                    refreshPerCameraImageUi();
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {}
+            });
+        }
+
+        if (switchImageAdjustEnabled != null) {
+            switchImageAdjustEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isUpdatingImageUi) return;
+                appConfig.setVideoImageAdjustEnabled(isChecked);
+                refreshImageAdjustSectionUi();
+                notifyActiveRecorders();
+                Toast.makeText(ctx,
+                        isChecked ? "画面调节已启用（实时单遍处理，零 FBO 拷贝）"
+                                : "画面调节已关闭，已切回零开销直通旁路",
+                        Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (seekImageQuality != null) {
+            seekImageQuality.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    int val = ImageAdjustmentConfig.MIN_QUALITY_PERCENT + progress;
+                    if (tvImageQualityValue != null) tvImageQualityValue.setText(formatPercent(val));
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    appConfig.setVideoImageQualityPercent(ImageAdjustmentConfig.MIN_QUALITY_PERCENT + seekBar.getProgress());
+                    Toast.makeText(ctx, "录像画质缩放将在下次/下一段录制生效", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
+
+        if (seekImageBrightness != null) {
+            seekImageBrightness.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    int val = ImageAdjustmentConfig.MIN_BRIGHTNESS_PERCENT + progress;
+                    if (tvImageBrightnessValue != null) tvImageBrightnessValue.setText(formatPercent(val));
+                    if (fromUser) {
+                        appConfig.setVideoImageBrightnessPercent(val);
+                        notifyActiveRecorders();
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    appConfig.setVideoImageBrightnessPercent(ImageAdjustmentConfig.MIN_BRIGHTNESS_PERCENT + seekBar.getProgress());
+                    notifyActiveRecorders();
+                }
+            });
+        }
+
+        if (seekImageContrast != null) {
+            seekImageContrast.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    int val = ImageAdjustmentConfig.MIN_CONTRAST_PERCENT + progress;
+                    if (tvImageContrastValue != null) tvImageContrastValue.setText(formatPercent(val));
+                    if (fromUser) {
+                        appConfig.setVideoImageContrastPercent(val);
+                        notifyActiveRecorders();
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    appConfig.setVideoImageContrastPercent(ImageAdjustmentConfig.MIN_CONTRAST_PERCENT + seekBar.getProgress());
+                    notifyActiveRecorders();
+                }
+            });
+        }
+
+        if (seekImageSaturation != null) {
+            seekImageSaturation.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (tvImageSaturationValue != null) tvImageSaturationValue.setText(formatPercent(progress));
+                    if (fromUser) {
+                        appConfig.setVideoImageSaturationPercent(progress);
+                        notifyActiveRecorders();
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    appConfig.setVideoImageSaturationPercent(seekBar.getProgress());
+                    notifyActiveRecorders();
+                }
+            });
+        }
+
+        if (seekImageCrop != null) {
+            seekImageCrop.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                    if (tvImageCropValue != null) tvImageCropValue.setText(formatPercent(progress));
+                    if (fromUser) {
+                        appConfig.setVideoImageCropPercent(selectedImageCameraPos, progress);
+                        notifyActiveRecorders();
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar seekBar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar seekBar) {
+                    appConfig.setVideoImageCropPercent(selectedImageCameraPos, seekBar.getProgress());
+                    notifyActiveRecorders();
+                }
+            });
+        }
+
+        if (switchImageMirror != null) {
+            switchImageMirror.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (isUpdatingImageUi) return;
+                appConfig.setPhysicalMirrorH(selectedImageCameraPos, isChecked);
+                notifyAllMirrorAndRecorderConsumers();
+            });
+        }
+
+        if (btnResetImage != null) {
+            btnResetImage.setOnClickListener(v -> {
+                appConfig.resetVideoImageAdjustments();
+                refreshImageAdjustSectionUi();
+                notifyActiveRecorders();
+                Toast.makeText(ctx, "已恢复默认画质与色彩参数", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        refreshImageAdjustSectionUi();
+    }
+
+    private void refreshImageAdjustSectionUi() {
+        if (appConfig == null) return;
+        isUpdatingImageUi = true;
+        try {
+            boolean enabled = appConfig.isVideoImageAdjustEnabled();
+            if (switchImageAdjustEnabled != null) switchImageAdjustEnabled.setChecked(enabled);
+            int q = appConfig.getVideoImageQualityPercent();
+            int b = appConfig.getVideoImageBrightnessPercent();
+            int c = appConfig.getVideoImageContrastPercent();
+            int s = appConfig.getVideoImageSaturationPercent();
+
+            if (seekImageQuality != null) {
+                seekImageQuality.setProgress(q - ImageAdjustmentConfig.MIN_QUALITY_PERCENT);
+                seekImageQuality.setEnabled(enabled);
+            }
+            if (tvImageQualityValue != null) tvImageQualityValue.setText(formatPercent(q));
+
+            if (seekImageBrightness != null) {
+                seekImageBrightness.setProgress(b - ImageAdjustmentConfig.MIN_BRIGHTNESS_PERCENT);
+                seekImageBrightness.setEnabled(enabled);
+            }
+            if (tvImageBrightnessValue != null) tvImageBrightnessValue.setText(formatPercent(b));
+
+            if (seekImageContrast != null) {
+                seekImageContrast.setProgress(c - ImageAdjustmentConfig.MIN_CONTRAST_PERCENT);
+                seekImageContrast.setEnabled(enabled);
+            }
+            if (tvImageContrastValue != null) tvImageContrastValue.setText(formatPercent(c));
+
+            if (seekImageSaturation != null) {
+                seekImageSaturation.setProgress(s);
+                seekImageSaturation.setEnabled(enabled);
+            }
+            if (tvImageSaturationValue != null) tvImageSaturationValue.setText(formatPercent(s));
+
+            if (layoutImageGlobalAdjust != null) {
+                layoutImageGlobalAdjust.setAlpha(enabled ? 1.0f : 0.55f);
+            }
+            refreshPerCameraImageUi();
+        } finally {
+            isUpdatingImageUi = false;
+        }
+    }
+
+    private void refreshPerCameraImageUi() {
+        if (appConfig == null) return;
+        boolean prevFlag = isUpdatingImageUi;
+        isUpdatingImageUi = true;
+        try {
+            boolean adjustEnabled = appConfig.isVideoImageAdjustEnabled();
+            int crop = appConfig.getVideoImageCropPercent(selectedImageCameraPos);
+            if (seekImageCrop != null) {
+                seekImageCrop.setProgress(crop);
+                seekImageCrop.setEnabled(adjustEnabled);
+            }
+            if (tvImageCropValue != null) tvImageCropValue.setText(formatPercent(crop));
+            if (switchImageMirror != null) {
+                switchImageMirror.setChecked(appConfig.isPhysicalMirrorH(selectedImageCameraPos));
+            }
+        } finally {
+            isUpdatingImageUi = prevFlag;
+        }
+    }
+
+    private void initDisplayWatermarkExtensions(View view) {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+
+        switchWatermarkCustomText = view.findViewById(R.id.switch_watermark_custom_text);
+        etWatermarkCustomText = view.findViewById(R.id.et_watermark_custom_text);
+        layoutWatermarkVehicleSuboptions = view.findViewById(R.id.layout_watermark_vehicle_suboptions);
+        cbWatermarkSpeed = view.findViewById(R.id.cb_watermark_speed);
+        cbWatermarkGearTurn = view.findViewById(R.id.cb_watermark_gear_turn);
+        Spinner posSpinner = view.findViewById(R.id.spinner_watermark_position);
+        Spinner styleSpinner = view.findViewById(R.id.spinner_watermark_style);
+
+        isUpdatingDisplayUi = true;
+        try {
+            if (switchWatermarkCustomText != null) {
+                switchWatermarkCustomText.setChecked(appConfig.isWatermarkCustomTextEnabled());
+                switchWatermarkCustomText.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    if (isUpdatingDisplayUi) return;
+                    appConfig.setWatermarkCustomTextEnabled(isChecked);
+                    if (etWatermarkCustomText != null) {
+                        etWatermarkCustomText.setEnabled(isChecked);
+                    }
+                    notifyActiveRecorders();
+                });
+            }
+            if (etWatermarkCustomText != null) {
+                etWatermarkCustomText.setText(appConfig.getWatermarkCustomText());
+                etWatermarkCustomText.setEnabled(appConfig.isWatermarkCustomTextEnabled());
+                etWatermarkCustomText.addTextChangedListener(new TextWatcher() {
+                    @Override public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+                    @Override public void onTextChanged(CharSequence s, int start, int before, int count) {}
+                    @Override public void afterTextChanged(Editable s) {
+                        if (isUpdatingDisplayUi) return;
+                        appConfig.setWatermarkCustomText(s != null ? s.toString() : "");
+                        notifyActiveRecorders();
+                    }
+                });
+            }
+            updateWatermarkVehicleSuboptionsVisibility(appConfig.isVehicleStatusWatermarkEnabled());
+            if (cbWatermarkSpeed != null) {
+                cbWatermarkSpeed.setChecked(appConfig.isWatermarkSpeedEnabled());
+                cbWatermarkSpeed.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    if (isUpdatingDisplayUi) return;
+                    appConfig.setWatermarkSpeedEnabled(isChecked);
+                    notifyActiveRecorders();
+                });
+            }
+            if (cbWatermarkGearTurn != null) {
+                cbWatermarkGearTurn.setChecked(appConfig.isWatermarkGearTurnEnabled());
+                cbWatermarkGearTurn.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    if (isUpdatingDisplayUi) return;
+                    appConfig.setWatermarkGearTurnEnabled(isChecked);
+                    notifyActiveRecorders();
+                });
+            }
+
+            if (posSpinner != null) {
+                final String[] posKeys = {"BOTTOM_RIGHT", "BOTTOM_LEFT", "TOP_RIGHT", "TOP_LEFT"};
+                final String[] posLabels = {"右下角", "左下角", "右上角", "左上角"};
+                ArrayAdapter<String> posAdapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, posLabels);
+                posAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                posSpinner.setAdapter(posAdapter);
+                String savedPos = appConfig.getWatermarkPosition();
+                int posIdx = 0;
+                for (int i = 0; i < posKeys.length; i++) {
+                    if (posKeys[i].equals(savedPos)) {
+                        posIdx = i;
+                        break;
+                    }
+                }
+                posSpinner.setSelection(posIdx);
+                final boolean[] init = {true};
+                posSpinner.post(() -> init[0] = false);
+                posSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                        if (init[0]) return;
+                        appConfig.setWatermarkPosition(posKeys[position]);
+                        notifyActiveRecorders();
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {}
+                });
+            }
+
+            if (styleSpinner != null) {
+                final String[] styleKeys = {"CARD", "TEXT"};
+                final String[] styleLabels = {"半透明圆角卡片", "纯文字阴影"};
+                ArrayAdapter<String> styleAdapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, styleLabels);
+                styleAdapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+                styleSpinner.setAdapter(styleAdapter);
+                String savedStyle = appConfig.getWatermarkStyle();
+                int styleIdx = "TEXT".equals(savedStyle) ? 1 : 0;
+                styleSpinner.setSelection(styleIdx);
+                final boolean[] init = {true};
+                styleSpinner.post(() -> init[0] = false);
+                styleSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                    @Override
+                    public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                        if (init[0]) return;
+                        appConfig.setWatermarkStyle(styleKeys[position]);
+                        notifyActiveRecorders();
+                    }
+
+                    @Override
+                    public void onNothingSelected(AdapterView<?> parent) {}
+                });
+            }
+        } finally {
+            isUpdatingDisplayUi = false;
+        }
+    }
+
+    private void updateWatermarkVehicleSuboptionsVisibility(boolean visible) {
+        if (layoutWatermarkVehicleSuboptions != null) {
+            layoutWatermarkVehicleSuboptions.setVisibility(visible ? View.VISIBLE : View.GONE);
+        }
+    }
+
+    private void initSoundSection(View view) {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+
+        spinnerStartSoundMode = view.findViewById(R.id.spinner_start_sound_mode);
+        spinnerStopSoundMode = view.findViewById(R.id.spinner_stop_sound_mode);
+        tvStartSoundStatus = view.findViewById(R.id.tv_start_sound_status);
+        tvStopSoundStatus = view.findViewById(R.id.tv_stop_sound_status);
+        btnPickStartSound = view.findViewById(R.id.btn_pick_start_sound);
+        btnPickStopSound = view.findViewById(R.id.btn_pick_stop_sound);
+        Button btnTestStart = view.findViewById(R.id.btn_test_start_sound);
+        Button btnTestStop = view.findViewById(R.id.btn_test_stop_sound);
+
+        bindSoundModeSpinner(spinnerStartSoundMode, true);
+        bindSoundModeSpinner(spinnerStopSoundMode, false);
+
+        if (btnPickStartSound != null) {
+            btnPickStartSound.setOnClickListener(v -> showPickSoundDialog(true));
+        }
+        if (btnPickStopSound != null) {
+            btnPickStopSound.setOnClickListener(v -> showPickSoundDialog(false));
+        }
+        if (btnTestStart != null) {
+            btnTestStart.setOnClickListener(v -> {
+                if (RecordingSoundPlayer.MODE_NONE.equals(appConfig.getRecordStartSoundMode())) {
+                    Toast.makeText(ctx, "请先选择系统提示音或自定义音频", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                RecordingSoundPlayer.playStartSound(ctx, appConfig);
+            });
+        }
+        if (btnTestStop != null) {
+            btnTestStop.setOnClickListener(v -> {
+                if (RecordingSoundPlayer.MODE_NONE.equals(appConfig.getRecordStopSoundMode())) {
+                    Toast.makeText(ctx, "请先选择系统提示音或自定义音频", Toast.LENGTH_SHORT).show();
+                    return;
+                }
+                RecordingSoundPlayer.playStopSound(ctx, appConfig);
+            });
+        }
+
+        refreshSoundSectionUi();
+    }
+
+    private void bindSoundModeSpinner(@Nullable Spinner spinner, boolean isStartSound) {
+        Context ctx = getContext();
+        if (spinner == null || ctx == null) return;
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, SOUND_MODE_LABELS);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        spinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View itemView, int position, long id) {
+                if (isUpdatingSoundUi) return;
+                String newMode = SOUND_MODE_KEYS[position];
+                if (isStartSound) {
+                    appConfig.setRecordStartSoundMode(newMode);
+                } else {
+                    appConfig.setRecordStopSoundMode(newMode);
+                }
+                refreshSoundSectionUi();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {}
+        });
+    }
+
+    private void refreshSoundSectionUi() {
+        if (appConfig == null) return;
+        isUpdatingSoundUi = true;
+        try {
+            String startMode = appConfig.getRecordStartSoundMode();
+            String stopMode = appConfig.getRecordStopSoundMode();
+            if (spinnerStartSoundMode != null) spinnerStartSoundMode.setSelection(soundModeIndex(startMode));
+            if (spinnerStopSoundMode != null) spinnerStopSoundMode.setSelection(soundModeIndex(stopMode));
+            if (tvStartSoundStatus != null) {
+                tvStartSoundStatus.setText(formatSoundStatus(startMode, appConfig.getRecordStartSoundPath()));
+            }
+            if (tvStopSoundStatus != null) {
+                tvStopSoundStatus.setText(formatSoundStatus(stopMode, appConfig.getRecordStopSoundPath()));
+            }
+            if (btnPickStartSound != null) {
+                btnPickStartSound.setEnabled(RecordingSoundPlayer.MODE_CUSTOM.equals(startMode));
+            }
+            if (btnPickStopSound != null) {
+                btnPickStopSound.setEnabled(RecordingSoundPlayer.MODE_CUSTOM.equals(stopMode));
+            }
+        } finally {
+            isUpdatingSoundUi = false;
+        }
+    }
+
+    private int soundModeIndex(String mode) {
+        for (int i = 0; i < SOUND_MODE_KEYS.length; i++) {
+            if (SOUND_MODE_KEYS[i].equals(mode)) return i;
+        }
+        return 0;
+    }
+
+    private String formatSoundStatus(String mode, String path) {
+        if (RecordingSoundPlayer.MODE_SYSTEM.equals(mode)) {
+            return "当前：系统提示音";
+        }
+        if (RecordingSoundPlayer.MODE_CUSTOM.equals(mode)) {
+            if (path == null || path.isEmpty()) {
+                return "当前：自定义音频（未选择文件，将回退系统提示音）";
+            }
+            File file = new File(path);
+            if (!file.exists()) {
+                return "当前：文件已失效（" + file.getName() + "）";
+            }
+            return "当前：自定义音频 · " + file.getName();
+        }
+        return "当前：不播放";
+    }
+
+    private void showPickSoundDialog(boolean isStartSound) {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+        List<File> files = RecordingSoundPlayer.listDownloadAudioFiles();
+        if (files.isEmpty()) {
+            pendingPickForStartSound = isStartSound;
+            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle(isStartSound ? "选择开始录制音频" : "选择结束录制音频")
+                    .setMessage("Download 目录未找到 20MB 以内的音频文件（mp3 / wav / ogg / m4a / aac / flac），是否打开系统文件选择器？")
+                    .setPositiveButton("打开文件选择器", (d, w) -> audioPickerLauncher.launch(new String[]{"audio/*"}))
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+
+        String[] labels = new String[files.size() + 1];
+        for (int i = 0; i < files.size(); i++) {
+            File f = files.get(i);
+            long kb = Math.max(1L, f.length() / 1024L);
+            labels[i] = f.getName() + " (" + kb + " KB)";
+        }
+        labels[files.size()] = "从系统文件选择器浏览...";
+
+        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle(isStartSound ? "选择开始录制音频（<=20MB）" : "选择结束录制音频（<=20MB）")
+                .setItems(labels, (dialog, which) -> {
+                    if (which == files.size()) {
+                        pendingPickForStartSound = isStartSound;
+                        audioPickerLauncher.launch(new String[]{"audio/*"});
+                        return;
+                    }
+                    File chosen = files.get(which);
+                    try {
+                        File imported = RecordingSoundPlayer.importCustomSoundFile(ctx, chosen, isStartSound);
+                        if (isStartSound) {
+                            appConfig.setRecordStartSoundPath(imported.getAbsolutePath());
+                            appConfig.setRecordStartSoundMode(RecordingSoundPlayer.MODE_CUSTOM);
+                        } else {
+                            appConfig.setRecordStopSoundPath(imported.getAbsolutePath());
+                            appConfig.setRecordStopSoundMode(RecordingSoundPlayer.MODE_CUSTOM);
+                        }
+                        refreshSoundSectionUi();
+                        Toast.makeText(ctx, "已导入音频：" + imported.getName(), Toast.LENGTH_SHORT).show();
+                    } catch (Exception e) {
+                        Toast.makeText(ctx, "导入音频失败：" + e.getMessage(), Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void notifyActiveRecorders() {
+        MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+        if (manager != null) {
+            manager.refreshActiveRecorderSettings();
+        }
+    }
+
+    private void notifyAllMirrorAndRecorderConsumers() {
+        if (getContext() != null) {
+            BlindSpotService.update(requireContext());
+        }
+        MainActivity main = MainActivity.getInstance();
+        if (main != null) {
+            main.refreshMainPreviewTransforms();
+        }
+        MjpegStreamManager streamManager = MjpegStreamManager.getInstance();
+        if (streamManager != null) {
+            streamManager.applyParams();
+        }
+        notifyActiveRecorders();
+    }
+
+    private String formatPercent(int value) {
+        return java.util.Locale.getDefault() != null
+                ? String.format(java.util.Locale.getDefault(), "%d%%", value)
+                : value + "%";
+    }
 }

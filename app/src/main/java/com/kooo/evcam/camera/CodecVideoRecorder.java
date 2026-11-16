@@ -74,6 +74,8 @@ public class CodecVideoRecorder {
     private final String cameraId;
     private final int width;
     private final int height;
+    private int sourceWidth;
+    private int sourceHeight;
 
     // MediaCodec 相关
     private MediaCodec encoder;
@@ -176,20 +178,71 @@ public class CodecVideoRecorder {
     // 时间水印设置
     private boolean watermarkEnabled = false;
     private volatile boolean vehicleStatusWatermarkEnabled;
+    private volatile ImageAdjustmentConfig imageAdjustmentConfig = ImageAdjustmentConfig.disabled();
+    private volatile VehicleStatusWatermark.WatermarkOptions watermarkOptions;
+
+    /** 设置源 Camera SurfaceTexture 缓冲尺寸（确保画质缩放时 Camera2 仍使用硬件原生预览尺寸）。 */
+    public void setSourceSize(int srcWidth, int srcHeight) {
+        if (srcWidth > 0 && srcHeight > 0) {
+            this.sourceWidth = srcWidth;
+            this.sourceHeight = srcHeight;
+        }
+    }
+
+    public void setImageAdjustmentConfig(ImageAdjustmentConfig config) {
+        this.imageAdjustmentConfig = config != null ? config : ImageAdjustmentConfig.disabled();
+        Handler handler = encoderHandler;
+        if (handler != null) {
+            final ImageAdjustmentConfig snapshot = this.imageAdjustmentConfig;
+            handler.post(() -> {
+                if (eglEncoder != null) {
+                    eglEncoder.setImageAdjustmentConfig(snapshot);
+                }
+            });
+        }
+    }
+
+    public void setWatermarkOptions(VehicleStatusWatermark.WatermarkOptions options) {
+        this.watermarkOptions = options;
+        this.watermarkEnabled = options != null && options.showDateTime;
+        this.vehicleStatusWatermarkEnabled = options != null && options.needsVehicleSource();
+        updateWatermarkOnEncoder();
+    }
 
     public void setVehicleStatusWatermarkEnabled(boolean enabled) {
         vehicleStatusWatermarkEnabled = enabled;
-        updateVehicleStatusWatermark();
+        VehicleStatusWatermark.WatermarkOptions current = watermarkOptions;
+        if (current != null) {
+            watermarkOptions = new VehicleStatusWatermark.WatermarkOptions(
+                    current.showDateTime,
+                    current.showCustomText,
+                    current.customText,
+                    enabled,
+                    enabled,
+                    current.position,
+                    current.style);
+        }
+        updateWatermarkOnEncoder();
     }
 
     private void updateVehicleStatusWatermark() {
+        updateWatermarkOnEncoder();
+    }
+
+    private void updateWatermarkOnEncoder() {
         Handler handler = encoderHandler;
-        if (handler != null) handler.post(() -> {
-            if (eglEncoder != null) {
-                eglEncoder.setVehicleStatusWatermarkEnabled(
-                        vehicleStatusWatermarkEnabled && isRecording.get() && !isReleased && !stopRequested);
-            }
-        });
+        if (handler != null) {
+            handler.post(() -> {
+                if (eglEncoder == null) return;
+                boolean active = isRecording.get() && !isReleased && !stopRequested;
+                VehicleStatusWatermark.WatermarkOptions opts = watermarkOptions;
+                if (opts != null) {
+                    eglEncoder.setWatermarkOptions(active ? opts : VehicleStatusWatermark.WatermarkOptions.disabled());
+                } else {
+                    eglEncoder.setVehicleStatusWatermarkEnabled(vehicleStatusWatermarkEnabled && active);
+                }
+            });
+        }
     }
 
     // 注意：帧同步变量已移除，帧处理现在直接在 onFrameAvailable 回调中完成
@@ -198,6 +251,8 @@ public class CodecVideoRecorder {
         this.cameraId = cameraId;
         this.width = width;
         this.height = height;
+        this.sourceWidth = width;
+        this.sourceHeight = height;
         // 创建独立的后台线程用于分段处理和文件 I/O 操作
         segmentThread = new HandlerThread("CodecRecorder-Segment-" + cameraId) {
             @Override
@@ -422,7 +477,7 @@ public class CodecVideoRecorder {
 
                     // 创建 SurfaceTexture 供 Camera 输出（在编码线程上，绑定到 EGL context）
                     inputSurfaceTexture = new SurfaceTexture(textureId);
-                    inputSurfaceTexture.setDefaultBufferSize(width, height);
+                    inputSurfaceTexture.setDefaultBufferSize(sourceWidth, sourceHeight);
 
                     // 设置帧可用回调（在编码线程上）
                     // 直接在回调中处理帧，避免 Handler 死锁
@@ -450,9 +505,15 @@ public class CodecVideoRecorder {
 
                     // 设置 EGL 渲染器的输入
                     eglEncoder.setInputSurfaceTexture(inputSurfaceTexture);
+                    eglEncoder.setImageAdjustmentConfig(imageAdjustmentConfig);
 
-                    // 设置时间水印（如果启用）
-                    if (watermarkEnabled) {
+                    // 设置水印（优先使用统一四模块水印配置，兼容旧接口）
+                    VehicleStatusWatermark.WatermarkOptions opts = watermarkOptions;
+                    if (opts != null) {
+                        if (opts.hasAnyEnabled() && isRecording.get()) {
+                            eglEncoder.setWatermarkOptions(opts);
+                        }
+                    } else if (watermarkEnabled) {
                         eglEncoder.setWatermarkEnabled(true);
                     }
 

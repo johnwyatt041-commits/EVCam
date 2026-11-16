@@ -5,6 +5,9 @@ import android.content.SharedPreferences;
 
 import com.kooo.evcam.blindspot.CameraMirrorPolicy;
 import com.kooo.evcam.blindspot.MirrorTarget;
+import com.kooo.evcam.camera.ImageAdjustmentConfig;
+import com.kooo.evcam.camera.RecordingSoundPlayer;
+import com.kooo.evcam.camera.VehicleStatusWatermark;
 import com.kooo.evcam.config.BlindSpotConfig;
 import com.kooo.evcam.config.RecordingConfig;
 import com.kooo.evcam.ui.PreviewPresentation;
@@ -164,6 +167,32 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     // 时间角标配置
     private static final String KEY_TIMESTAMP_WATERMARK_ENABLED = "timestamp_watermark_enabled";  // 时间角标开关
     private static final String KEY_VEHICLE_STATUS_WATERMARK = "vehicle_status_watermark";
+
+    // T05: 3.1 方案 A 帧率与预览限帧
+    private static final String KEY_TARGET_RECORDING_FPS = "target_recording_fps";
+    private static final String KEY_PREVIEW_FPS_LIMIT = "preview_fps_limit";
+
+    // T05: 3.2 画面调节（独立总开关直通旁路）
+    private static final String KEY_VIDEO_IMAGE_ADJUST_ENABLED = "video_image_adjust_enabled";
+    private static final String KEY_VIDEO_IMAGE_QUALITY_PERCENT = "video_image_quality_percent";
+    private static final String KEY_VIDEO_IMAGE_BRIGHTNESS_PERCENT = "video_image_brightness_percent";
+    private static final String KEY_VIDEO_IMAGE_CONTRAST_PERCENT = "video_image_contrast_percent";
+    private static final String KEY_VIDEO_IMAGE_SATURATION_PERCENT = "video_image_saturation_percent";
+    private static final String KEY_VIDEO_IMAGE_CROP_PREFIX = "video_image_crop_percent_";
+
+    // T05: 3.3 显示（4模块水印 + 位置 + 样式）
+    private static final String KEY_WATERMARK_CUSTOM_TEXT_ENABLED = "watermark_custom_text_enabled";
+    private static final String KEY_WATERMARK_CUSTOM_TEXT = "watermark_custom_text";
+    private static final String KEY_WATERMARK_SPEED_ENABLED = "watermark_speed_enabled";
+    private static final String KEY_WATERMARK_GEAR_TURN_ENABLED = "watermark_gear_turn_enabled";
+    private static final String KEY_VIDEO_WATERMARK_POSITION = "video_watermark_position";
+    private static final String KEY_VIDEO_WATERMARK_STYLE = "video_watermark_style";
+
+    // T05: 3.4 提示音（开始/结束录制音效）
+    private static final String KEY_RECORD_START_SOUND_MODE = "recording_start_sound_mode";
+    private static final String KEY_RECORD_STOP_SOUND_MODE = "recording_stop_sound_mode";
+    private static final String KEY_RECORD_START_SOUND_PATH = "recording_start_sound_path";
+    private static final String KEY_RECORD_STOP_SOUND_PATH = "recording_stop_sound_path";
 
     // 视频编码器配置
     private static final String KEY_FORCE_H264_ENCODING = "force_h264_encoding";  // 强制使用 H.264 编码器（关闭默认使用 H.265/HEVC）
@@ -760,14 +789,18 @@ public class AppConfig implements CameraMirrorPolicy.Store {
      * @return 实际使用的帧率
      */
     public int getActualFrameRate(int hardwareMaxFps) {
+        int explicitTargetFps = getTargetRecordingFps();
+        if (explicitTargetFps > 0) {
+            return Math.max(10, Math.min(30, explicitTargetFps));
+        }
         int standardFps = getStandardFrameRate(hardwareMaxFps);
         String level = getFramerateLevel();
-        
+
         if (FRAMERATE_LOW.equals(level)) {
             // 低帧率：标准值除以2，最低10fps
             return Math.max(10, standardFps / 2);
         }
-        
+
         // 标准帧率
         return standardFps;
     }
@@ -3715,6 +3748,229 @@ public class AppConfig implements CameraMirrorPolicy.Store {
             editor.remove("blind_spot_correction_" + pos + "_mirror_v");
         }
         editor.apply();
+    }
+
+    // ==================== T05: 3.1 方案 A（录像目标帧率 + 预览限帧） ====================
+
+    /** 0 表示自动（E5 默认 25fps），其余合法档位为 15 / 20 / 25 / 30。 */
+    public int getTargetRecordingFps() {
+        return prefs.getInt(KEY_TARGET_RECORDING_FPS, 0);
+    }
+
+    public void setTargetRecordingFps(int fps) {
+        int normalized = (fps <= 0) ? 0 : Math.max(10, Math.min(30, fps));
+        prefs.edit().putInt(KEY_TARGET_RECORDING_FPS, normalized).apply();
+    }
+
+    /** 0 表示不限帧/流畅，其余档位 25 / 15。 */
+    public int getPreviewFpsLimit() {
+        return prefs.getInt(KEY_PREVIEW_FPS_LIMIT, 0);
+    }
+
+    public void setPreviewFpsLimit(int fpsLimit) {
+        int normalized = (fpsLimit <= 0) ? 0 : Math.max(10, Math.min(30, fpsLimit));
+        prefs.edit().putInt(KEY_PREVIEW_FPS_LIMIT, normalized).apply();
+    }
+
+    // ==================== T05: 3.2 画面（独立总开关直通旁路 + 调色/镜像/裁剪） ====================
+
+    public boolean isVideoImageAdjustEnabled() {
+        return prefs.getBoolean(KEY_VIDEO_IMAGE_ADJUST_ENABLED, false);
+    }
+
+    public void setVideoImageAdjustEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_VIDEO_IMAGE_ADJUST_ENABLED, enabled).apply();
+    }
+
+    public int getVideoImageQualityPercent() {
+        int raw = prefs.getInt(KEY_VIDEO_IMAGE_QUALITY_PERCENT, ImageAdjustmentConfig.DEFAULT_QUALITY_PERCENT);
+        return ImageAdjustmentConfig.clamp(raw, ImageAdjustmentConfig.MIN_QUALITY_PERCENT, ImageAdjustmentConfig.MAX_QUALITY_PERCENT);
+    }
+
+    public void setVideoImageQualityPercent(int percent) {
+        int clamped = ImageAdjustmentConfig.clamp(percent, ImageAdjustmentConfig.MIN_QUALITY_PERCENT, ImageAdjustmentConfig.MAX_QUALITY_PERCENT);
+        prefs.edit().putInt(KEY_VIDEO_IMAGE_QUALITY_PERCENT, clamped).apply();
+    }
+
+    public int getVideoImageBrightnessPercent() {
+        int raw = prefs.getInt(KEY_VIDEO_IMAGE_BRIGHTNESS_PERCENT, ImageAdjustmentConfig.DEFAULT_BRIGHTNESS_PERCENT);
+        return ImageAdjustmentConfig.clamp(raw, ImageAdjustmentConfig.MIN_BRIGHTNESS_PERCENT, ImageAdjustmentConfig.MAX_BRIGHTNESS_PERCENT);
+    }
+
+    public void setVideoImageBrightnessPercent(int percent) {
+        int clamped = ImageAdjustmentConfig.clamp(percent, ImageAdjustmentConfig.MIN_BRIGHTNESS_PERCENT, ImageAdjustmentConfig.MAX_BRIGHTNESS_PERCENT);
+        prefs.edit().putInt(KEY_VIDEO_IMAGE_BRIGHTNESS_PERCENT, clamped).apply();
+    }
+
+    public int getVideoImageContrastPercent() {
+        int raw = prefs.getInt(KEY_VIDEO_IMAGE_CONTRAST_PERCENT, ImageAdjustmentConfig.DEFAULT_CONTRAST_PERCENT);
+        return ImageAdjustmentConfig.clamp(raw, ImageAdjustmentConfig.MIN_CONTRAST_PERCENT, ImageAdjustmentConfig.MAX_CONTRAST_PERCENT);
+    }
+
+    public void setVideoImageContrastPercent(int percent) {
+        int clamped = ImageAdjustmentConfig.clamp(percent, ImageAdjustmentConfig.MIN_CONTRAST_PERCENT, ImageAdjustmentConfig.MAX_CONTRAST_PERCENT);
+        prefs.edit().putInt(KEY_VIDEO_IMAGE_CONTRAST_PERCENT, clamped).apply();
+    }
+
+    public int getVideoImageSaturationPercent() {
+        int raw = prefs.getInt(KEY_VIDEO_IMAGE_SATURATION_PERCENT, ImageAdjustmentConfig.DEFAULT_SATURATION_PERCENT);
+        return ImageAdjustmentConfig.clamp(raw, ImageAdjustmentConfig.MIN_SATURATION_PERCENT, ImageAdjustmentConfig.MAX_SATURATION_PERCENT);
+    }
+
+    public void setVideoImageSaturationPercent(int percent) {
+        int clamped = ImageAdjustmentConfig.clamp(percent, ImageAdjustmentConfig.MIN_SATURATION_PERCENT, ImageAdjustmentConfig.MAX_SATURATION_PERCENT);
+        prefs.edit().putInt(KEY_VIDEO_IMAGE_SATURATION_PERCENT, clamped).apply();
+    }
+
+    public int getVideoImageCropPercent(String cameraPosition) {
+        String key = KEY_VIDEO_IMAGE_CROP_PREFIX + normalizeCameraPos(cameraPosition);
+        int raw = prefs.getInt(key, ImageAdjustmentConfig.DEFAULT_CROP_PERCENT);
+        return ImageAdjustmentConfig.clamp(raw, ImageAdjustmentConfig.MIN_CROP_PERCENT, ImageAdjustmentConfig.MAX_CROP_PERCENT);
+    }
+
+    public void setVideoImageCropPercent(String cameraPosition, int percent) {
+        String key = KEY_VIDEO_IMAGE_CROP_PREFIX + normalizeCameraPos(cameraPosition);
+        int clamped = ImageAdjustmentConfig.clamp(percent, ImageAdjustmentConfig.MIN_CROP_PERCENT, ImageAdjustmentConfig.MAX_CROP_PERCENT);
+        prefs.edit().putInt(key, clamped).apply();
+    }
+
+    public ImageAdjustmentConfig getImageAdjustmentConfig(String cameraPosition) {
+        boolean enabled = isVideoImageAdjustEnabled();
+        if (!enabled) {
+            return ImageAdjustmentConfig.disabled();
+        }
+        return new ImageAdjustmentConfig(
+                true,
+                getVideoImageQualityPercent(),
+                getVideoImageBrightnessPercent(),
+                getVideoImageContrastPercent(),
+                getVideoImageSaturationPercent(),
+                getVideoImageCropPercent(cameraPosition),
+                isPhysicalMirrorH(cameraPosition)
+        );
+    }
+
+    public void resetVideoImageAdjustments() {
+        SharedPreferences.Editor editor = prefs.edit();
+        editor.putInt(KEY_VIDEO_IMAGE_QUALITY_PERCENT, ImageAdjustmentConfig.DEFAULT_QUALITY_PERCENT);
+        editor.putInt(KEY_VIDEO_IMAGE_BRIGHTNESS_PERCENT, ImageAdjustmentConfig.DEFAULT_BRIGHTNESS_PERCENT);
+        editor.putInt(KEY_VIDEO_IMAGE_CONTRAST_PERCENT, ImageAdjustmentConfig.DEFAULT_CONTRAST_PERCENT);
+        editor.putInt(KEY_VIDEO_IMAGE_SATURATION_PERCENT, ImageAdjustmentConfig.DEFAULT_SATURATION_PERCENT);
+        for (String pos : new String[]{"front", "back", "left", "right"}) {
+            editor.putInt(KEY_VIDEO_IMAGE_CROP_PREFIX + pos, ImageAdjustmentConfig.DEFAULT_CROP_PERCENT);
+        }
+        editor.apply();
+    }
+
+    // ==================== T05: 3.3 显示（4模块水印 + 位置 + 样式） ====================
+
+    public boolean isWatermarkCustomTextEnabled() {
+        return prefs.getBoolean(KEY_WATERMARK_CUSTOM_TEXT_ENABLED, false);
+    }
+
+    public void setWatermarkCustomTextEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_WATERMARK_CUSTOM_TEXT_ENABLED, enabled).apply();
+    }
+
+    public String getWatermarkCustomText() {
+        return VehicleStatusWatermark.normalizeCustomText(prefs.getString(KEY_WATERMARK_CUSTOM_TEXT, ""));
+    }
+
+    public void setWatermarkCustomText(String text) {
+        prefs.edit().putString(KEY_WATERMARK_CUSTOM_TEXT, VehicleStatusWatermark.normalizeCustomText(text)).apply();
+    }
+
+    public boolean isWatermarkSpeedEnabled() {
+        return prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, true);
+    }
+
+    public void setWatermarkSpeedEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_WATERMARK_SPEED_ENABLED, enabled).apply();
+    }
+
+    public boolean isWatermarkGearTurnEnabled() {
+        return prefs.getBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, true);
+    }
+
+    public void setWatermarkGearTurnEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, enabled).apply();
+    }
+
+    public String getWatermarkPosition() {
+        return prefs.getString(KEY_VIDEO_WATERMARK_POSITION, VehicleStatusWatermark.Position.BOTTOM_RIGHT.name());
+    }
+
+    public void setWatermarkPosition(String positionKey) {
+        VehicleStatusWatermark.Position pos = VehicleStatusWatermark.Position.fromKey(positionKey);
+        prefs.edit().putString(KEY_VIDEO_WATERMARK_POSITION, pos.name()).apply();
+    }
+
+    public String getWatermarkStyle() {
+        return prefs.getString(KEY_VIDEO_WATERMARK_STYLE, VehicleStatusWatermark.Style.CARD.name());
+    }
+
+    public void setWatermarkStyle(String styleKey) {
+        VehicleStatusWatermark.Style style = VehicleStatusWatermark.Style.fromKey(styleKey);
+        prefs.edit().putString(KEY_VIDEO_WATERMARK_STYLE, style.name()).apply();
+    }
+
+    public VehicleStatusWatermark.WatermarkOptions getWatermarkOptions() {
+        boolean vehicleEnabled = isVehicleStatusWatermarkEnabled();
+        return new VehicleStatusWatermark.WatermarkOptions(
+                isTimestampWatermarkEnabled(),
+                isWatermarkCustomTextEnabled(),
+                getWatermarkCustomText(),
+                vehicleEnabled && isWatermarkSpeedEnabled(),
+                vehicleEnabled && isWatermarkGearTurnEnabled(),
+                VehicleStatusWatermark.Position.fromKey(getWatermarkPosition()),
+                VehicleStatusWatermark.Style.fromKey(getWatermarkStyle())
+        );
+    }
+
+    // ==================== T05: 3.4 提示音 ====================
+
+    public String getRecordStartSoundMode() {
+        return prefs.getString(KEY_RECORD_START_SOUND_MODE, RecordingSoundPlayer.MODE_NONE);
+    }
+
+    public void setRecordStartSoundMode(String mode) {
+        prefs.edit().putString(KEY_RECORD_START_SOUND_MODE, normalizeSoundMode(mode)).apply();
+    }
+
+    public String getRecordStopSoundMode() {
+        return prefs.getString(KEY_RECORD_STOP_SOUND_MODE, RecordingSoundPlayer.MODE_NONE);
+    }
+
+    public void setRecordStopSoundMode(String mode) {
+        prefs.edit().putString(KEY_RECORD_STOP_SOUND_MODE, normalizeSoundMode(mode)).apply();
+    }
+
+    public String getRecordStartSoundPath() {
+        String p = prefs.getString(KEY_RECORD_START_SOUND_PATH, "");
+        return p != null ? p : "";
+    }
+
+    public void setRecordStartSoundPath(String path) {
+        prefs.edit().putString(KEY_RECORD_START_SOUND_PATH, path != null ? path : "").apply();
+    }
+
+    public String getRecordStopSoundPath() {
+        String p = prefs.getString(KEY_RECORD_STOP_SOUND_PATH, "");
+        return p != null ? p : "";
+    }
+
+    public void setRecordStopSoundPath(String path) {
+        prefs.edit().putString(KEY_RECORD_STOP_SOUND_PATH, path != null ? path : "").apply();
+    }
+
+    private static String normalizeSoundMode(String mode) {
+        if (RecordingSoundPlayer.MODE_SYSTEM.equals(mode)) {
+            return RecordingSoundPlayer.MODE_SYSTEM;
+        }
+        if (RecordingSoundPlayer.MODE_CUSTOM.equals(mode)) {
+            return RecordingSoundPlayer.MODE_CUSTOM;
+        }
+        return RecordingSoundPlayer.MODE_NONE;
     }
 
 }
