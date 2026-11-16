@@ -1,144 +1,145 @@
 package com.kooo.evcam.playback;
 
-import android.content.ClipData;
-import android.content.Intent;
-import android.content.pm.PackageManager;
-import android.content.pm.ResolveInfo;
-import android.net.Uri;
+import android.content.Context;
 import android.content.res.Configuration;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
+import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
-import android.widget.VideoView;
 import android.widget.Toast;
+import android.widget.VideoView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.FileProvider;
+import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
-import android.widget.PopupMenu;
-
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.kooo.evcam.MainActivity;
 import com.kooo.evcam.R;
 import com.kooo.evcam.StorageHelper;
-import com.kooo.evcam.transfer.QrTransferDialog;
+import com.kooo.evcam.ui.UiThemeController;
 
 import java.io.File;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
-import java.util.Date;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
- * 视频回看Fragment（新版）
- * 支持左右分栏、四宫格预览、单路/多路切换、倍速播放
+ * 视频回看页：支持按日期与小时分组、.lock 锁定保护、A 版四路同步播放、
+ * B 版合成视频 TextureView 象限放大、以及修复后的 A/B 全路径扫码与系统分享。
  */
-public class PlaybackFragmentNew extends Fragment {
+public class PlaybackFragmentNew extends Fragment implements UiThemeController.ThemeAware {
     private static final String TAG = "PlaybackFragmentNew";
+    private static final List<String> COMPOSITE_CYCLE_ORDER = Arrays.asList(
+            VideoGroup.POSITION_COMBINED,
+            VideoGroup.POSITION_FRONT,
+            VideoGroup.POSITION_BACK,
+            VideoGroup.POSITION_LEFT,
+            VideoGroup.POSITION_RIGHT);
 
-    // UI 组件
+    private View rootView;
     private RecyclerView videoList;
     private TextView emptyText;
     private TextView currentDatetime;
     private View noSelectionHint;
     private Button btnMenu, btnRefresh, btnMultiSelect, btnHome;
     private Button btnSelectAll, btnDeleteSelected, btnCancelSelect, btnShareSelected;
+    private Button btnFilterAll, btnFilterToday, btnFilterLocked;
     private TextView selectedCount;
-    private View toolbar, multiSelectToolbar;
+    private View toolbar, multiSelectToolbar, filterBar, listContainer, controlsLayout, previewContainer;
 
-    // 预览区组件
     private View multiViewLayout, singleViewLayout;
     private VideoView videoFront, videoBack, videoLeft, videoRight, videoSingle;
+    private TextureView textureSingle;
     private FrameLayout frameFront, frameBack, frameLeft, frameRight;
     private TextView labelFront, labelBack, labelLeft, labelRight, labelSingle;
     private TextView placeholderFront, placeholderBack, placeholderLeft, placeholderRight;
 
-    // 播放控制组件
-    private Button btnPlayPause, btnViewMode, btnSpeed;
+    private Button btnPlayPause, btnViewMode, btnSpeed, btnLockToggle;
     private SeekBar seekBar;
     private TextView currentTime, totalTime;
 
-    // 数据
-    private List<DateSection<VideoGroup>> dateSections = new ArrayList<>();
+    private final List<DateSection<VideoGroup>> dateSections = new ArrayList<>();
     private VideoGroup currentGroup;
     private ExpandableVideoGroupAdapter adapter;
     private MultiVideoPlayerManager playerManager;
+    private CompositeQuadrantTextureController compositeController;
 
-    // 状态
+    private int filterMode = PlaybackTimelineBuilder.FILTER_ALL;
     private boolean isMultiSelectMode = false;
     private boolean isSingleMode = false;
+    private boolean isCompositeActive = false;
     private String currentSinglePosition = VideoGroup.POSITION_FRONT;
+    private String compositeQuadrant = VideoGroup.POSITION_COMBINED;
+    private float currentSpeed = 1.0f;
     private boolean isDraggingSeekBar = false;
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
-        View view = inflater.inflate(R.layout.fragment_playback_new, container, false);
-        
-        initViews(view);
-        initPlayerManager();
+    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
+        rootView = inflater.inflate(R.layout.fragment_playback_new, container, false);
+        initViews(rootView);
+        initPlayers();
         setupListeners();
         setupDoubleTapListeners();
+        applyFilterChipsTheme(requireContext());
         updateVideoList();
-        
-        // 应用状态栏适配
-        applyStatusBarInsets(view);
-        
-        return view;
+        applyStatusBarInsets(rootView);
+        return rootView;
     }
 
     private void initViews(View view) {
-        // 工具栏
         toolbar = view.findViewById(R.id.toolbar);
         multiSelectToolbar = view.findViewById(R.id.multi_select_toolbar);
+        filterBar = view.findViewById(R.id.filter_bar);
+        listContainer = view.findViewById(R.id.list_container);
+        controlsLayout = view.findViewById(R.id.controls_layout);
+        previewContainer = view.findViewById(R.id.preview_container);
+
         btnMenu = view.findViewById(R.id.btn_menu);
         btnRefresh = view.findViewById(R.id.btn_refresh);
         btnMultiSelect = view.findViewById(R.id.btn_multi_select);
         btnHome = view.findViewById(R.id.btn_home);
         currentDatetime = view.findViewById(R.id.current_datetime);
 
-        // 多选工具栏
+        btnFilterAll = view.findViewById(R.id.btn_filter_all);
+        btnFilterToday = view.findViewById(R.id.btn_filter_today);
+        btnFilterLocked = view.findViewById(R.id.btn_filter_locked);
+
         btnSelectAll = view.findViewById(R.id.btn_select_all);
         btnDeleteSelected = view.findViewById(R.id.btn_delete_selected);
         btnCancelSelect = view.findViewById(R.id.btn_cancel_select);
         btnShareSelected = view.findViewById(R.id.btn_share_selected);
         selectedCount = view.findViewById(R.id.selected_count);
 
-        // 列表
         videoList = view.findViewById(R.id.video_list);
         emptyText = view.findViewById(R.id.empty_text);
         noSelectionHint = view.findViewById(R.id.no_selection_hint);
 
-        // 四宫格预览
         multiViewLayout = view.findViewById(R.id.multi_view_layout);
         singleViewLayout = view.findViewById(R.id.single_view_layout);
-        
+
         videoFront = view.findViewById(R.id.video_front);
         videoBack = view.findViewById(R.id.video_back);
         videoLeft = view.findViewById(R.id.video_left);
         videoRight = view.findViewById(R.id.video_right);
         videoSingle = view.findViewById(R.id.video_single);
+        textureSingle = view.findViewById(R.id.texture_single);
 
         frameFront = view.findViewById(R.id.frame_front);
         frameBack = view.findViewById(R.id.frame_back);
@@ -156,15 +157,14 @@ public class PlaybackFragmentNew extends Fragment {
         placeholderLeft = view.findViewById(R.id.placeholder_left);
         placeholderRight = view.findViewById(R.id.placeholder_right);
 
-        // 播放控制
         btnPlayPause = view.findViewById(R.id.btn_play_pause);
         btnViewMode = view.findViewById(R.id.btn_view_mode);
         btnSpeed = view.findViewById(R.id.btn_speed);
+        btnLockToggle = view.findViewById(R.id.btn_lock_toggle);
         seekBar = view.findViewById(R.id.seek_bar);
         currentTime = view.findViewById(R.id.current_time);
         totalTime = view.findViewById(R.id.total_time);
 
-        // 设置列表（竖屏2列，横屏1列，日期头部跨越所有列）
         adapter = new ExpandableVideoGroupAdapter(getContext(), dateSections);
         int orientation = getResources().getConfiguration().orientation;
         if (orientation == Configuration.ORIENTATION_PORTRAIT) {
@@ -172,8 +172,7 @@ public class PlaybackFragmentNew extends Fragment {
             gridLayoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
                 @Override
                 public int getSpanSize(int position) {
-                    // 日期头部占满2列，视频项占1列
-                    return adapter.getItemViewType(position) == 0 ? 2 : 1;
+                    return adapter.isFullSpanPosition(position) ? 2 : 1;
                 }
             });
             videoList.setLayoutManager(gridLayoutManager);
@@ -182,37 +181,24 @@ public class PlaybackFragmentNew extends Fragment {
         }
         videoList.setAdapter(adapter);
 
-        // 初始状态：隐藏四宫格，显示提示
         multiViewLayout.setVisibility(View.GONE);
         singleViewLayout.setVisibility(View.GONE);
         noSelectionHint.setVisibility(View.VISIBLE);
     }
 
-    private void initPlayerManager() {
+    private void initPlayers() {
         playerManager = new MultiVideoPlayerManager(getContext());
         playerManager.setVideoViews(videoFront, videoBack, videoLeft, videoRight, videoSingle);
-        
         playerManager.setPlaybackListener(new MultiVideoPlayerManager.OnPlaybackListener() {
             @Override
             public void onPrepared(int duration) {
-                if (getActivity() == null) return;
-                Log.d(TAG, "onPrepared: duration=" + duration);
-                getActivity().runOnUiThread(() -> {
-                    if (duration > 0) {
-                        seekBar.setMax(duration);
-                        totalTime.setText(formatTime(duration));
-                        currentTime.setText(formatTime(0));
-                    } else {
-                        Log.w(TAG, "Invalid duration: " + duration);
-                        totalTime.setText("--:--");
-                        currentTime.setText("00:00");
-                    }
-                });
+                if (isCompositeActive || getActivity() == null) return;
+                getActivity().runOnUiThread(() -> applyPreparedDuration(duration));
             }
 
             @Override
             public void onProgressUpdate(int currentPosition) {
-                if (getActivity() == null || isDraggingSeekBar) return;
+                if (isCompositeActive || getActivity() == null || isDraggingSeekBar) return;
                 getActivity().runOnUiThread(() -> {
                     seekBar.setProgress(currentPosition);
                     currentTime.setText(formatTime(currentPosition));
@@ -221,15 +207,13 @@ public class PlaybackFragmentNew extends Fragment {
 
             @Override
             public void onPlaybackStateChanged(boolean isPlaying) {
-                if (getActivity() == null) return;
-                getActivity().runOnUiThread(() -> {
-                    btnPlayPause.setText(isPlaying ? "暂停" : "播放");
-                });
+                if (isCompositeActive || getActivity() == null) return;
+                getActivity().runOnUiThread(() -> btnPlayPause.setText(isPlaying ? "暂停" : "播放"));
             }
 
             @Override
             public void onCompletion() {
-                if (getActivity() == null) return;
+                if (isCompositeActive || getActivity() == null) return;
                 getActivity().runOnUiThread(() -> {
                     seekBar.setProgress(0);
                     currentTime.setText(formatTime(0));
@@ -238,13 +222,12 @@ public class PlaybackFragmentNew extends Fragment {
 
             @Override
             public void onError(String message) {
-                // 错误处理
+                Log.w(TAG, "Player warning: " + message);
             }
 
             @Override
             public void onSingleVideoPrepared() {
-                // 单路视频准备好后显示画面（防止闪烁旧画面）
-                if (getActivity() == null) return;
+                if (isCompositeActive || getActivity() == null) return;
                 getActivity().runOnUiThread(() -> {
                     if (videoSingle != null) {
                         videoSingle.setVisibility(View.VISIBLE);
@@ -252,63 +235,116 @@ public class PlaybackFragmentNew extends Fragment {
                 });
             }
         });
+
+        compositeController = new CompositeQuadrantTextureController(requireContext(), textureSingle);
+        compositeController.setCallback(new CompositeQuadrantTextureController.Callback() {
+            @Override
+            public void onPrepared(int durationMs) {
+                if (!isCompositeActive || getActivity() == null) return;
+                getActivity().runOnUiThread(() -> applyPreparedDuration(durationMs));
+            }
+
+            @Override
+            public void onProgressUpdate(int positionMs) {
+                if (!isCompositeActive || getActivity() == null || isDraggingSeekBar) return;
+                getActivity().runOnUiThread(() -> {
+                    seekBar.setProgress(positionMs);
+                    currentTime.setText(formatTime(positionMs));
+                });
+            }
+
+            @Override
+            public void onPlaybackStateChanged(boolean playing) {
+                if (!isCompositeActive || getActivity() == null) return;
+                getActivity().runOnUiThread(() -> btnPlayPause.setText(playing ? "暂停" : "播放"));
+            }
+
+            @Override
+            public void onCompletion() {
+                if (!isCompositeActive || getActivity() == null) return;
+                getActivity().runOnUiThread(() -> {
+                    seekBar.setProgress(0);
+                    currentTime.setText(formatTime(0));
+                });
+            }
+
+            @Override
+            public void onError(String message) {
+                if (!isCompositeActive || getContext() == null) return;
+                Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private void applyPreparedDuration(int duration) {
+        if (duration > 0) {
+            seekBar.setMax(duration);
+            totalTime.setText(formatTime(duration));
+            currentTime.setText(formatTime(0));
+        } else {
+            totalTime.setText("--:--");
+            currentTime.setText("00:00");
+        }
     }
 
     private void setupListeners() {
-        if (btnMenu != null) {
-            btnMenu.setVisibility(View.GONE);
+        if (btnMenu != null) btnMenu.setVisibility(View.GONE);
+        if (btnHome != null) {
+            btnHome.setOnClickListener(v -> {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).goToRecordingInterface();
+                }
+            });
         }
-
-        // 返回主界面
-        btnHome.setOnClickListener(v -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).goToRecordingInterface();
-            }
-        });
-
-        // 刷新
         btnRefresh.setOnClickListener(v -> updateVideoList());
-
-        // 多选模式
         btnMultiSelect.setOnClickListener(v -> toggleMultiSelectMode());
         btnSelectAll.setOnClickListener(v -> selectAll());
         btnCancelSelect.setOnClickListener(v -> exitMultiSelectMode());
         btnDeleteSelected.setOnClickListener(v -> deleteSelected());
         btnShareSelected.setOnClickListener(v -> shareSelected());
 
-        // 列表项点击
-        adapter.setOnItemClickListener((group, position) -> {
-            loadVideoGroup(group);
-        });
+        btnFilterAll.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_ALL));
+        btnFilterToday.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_TODAY));
+        btnFilterLocked.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_LOCKED));
 
-        adapter.setOnItemSelectedListener(group -> {
-            updateSelectedCount();
-        });
-
-        // 列表项长按 - 分享视频
+        adapter.setOnItemClickListener((group, position) -> loadVideoGroup(group));
+        adapter.setOnItemSelectedListener(group -> updateSelectedCount());
         adapter.setOnItemLongClickListener((group, position) -> {
             if (adapter.isMultiSelectMode()) {
-                // 多选模式下，分享所有已选中的视频
                 shareSelected();
             } else {
-                // 单选模式下，分享当前长按的视频
-                showShareDialog(group);
+                showSingleGroupActionsDialog(group);
             }
         });
 
-        // 播放控制
-        btnPlayPause.setOnClickListener(v -> playerManager.togglePlayPause());
-
-        // 摄像头切换按钮（循环切换）
-        btnViewMode.setOnClickListener(v -> cycleViewMode());
-
-        // 倍速
-        btnSpeed.setOnClickListener(v -> {
-            float newSpeed = playerManager.cycleSpeed();
-            btnSpeed.setText(String.format(Locale.getDefault(), "%.1fx", newSpeed));
+        btnPlayPause.setOnClickListener(v -> {
+            if (isCompositeActive) {
+                compositeController.togglePlayPause();
+            } else {
+                playerManager.togglePlayPause();
+            }
         });
 
-        // 进度条
+        btnViewMode.setOnClickListener(v -> cycleViewMode());
+
+        btnSpeed.setOnClickListener(v -> {
+            if (isCompositeActive) {
+                currentSpeed = nextSpeed(currentSpeed);
+                compositeController.setSpeed(currentSpeed);
+            } else {
+                currentSpeed = playerManager.cycleSpeed();
+            }
+            btnSpeed.setText(String.format(Locale.getDefault(), "%.1fx", currentSpeed));
+        });
+
+        if (btnLockToggle != null) {
+            btnLockToggle.setOnClickListener(v -> {
+                if (currentGroup != null) {
+                    toggleLockForGroup(currentGroup);
+                }
+            });
+        }
+
         seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -325,25 +361,44 @@ public class PlaybackFragmentNew extends Fragment {
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
                 isDraggingSeekBar = false;
-                playerManager.seekTo(seekBar.getProgress());
+                if (isCompositeActive) {
+                    compositeController.seekTo(seekBar.getProgress());
+                } else {
+                    playerManager.seekTo(seekBar.getProgress());
+                }
             }
         });
     }
 
-    /**
-     * 设置四宫格双击监听（双击放大到单路）
-     */
+    private void switchFilterMode(int newMode) {
+        if (filterMode == newMode) {
+            return;
+        }
+        filterMode = newMode;
+        if (getContext() != null) {
+            applyFilterChipsTheme(getContext());
+        }
+        updateVideoList();
+    }
+
     private void setupDoubleTapListeners() {
         setupDoubleTap(frameFront, VideoGroup.POSITION_FRONT, "前");
         setupDoubleTap(frameBack, VideoGroup.POSITION_BACK, "后");
         setupDoubleTap(frameLeft, VideoGroup.POSITION_LEFT, "左");
         setupDoubleTap(frameRight, VideoGroup.POSITION_RIGHT, "右");
 
-        // 单路模式双击返回多路
         if (singleViewLayout != null) {
             GestureDetector detector = new GestureDetector(getContext(), new GestureDetector.SimpleOnGestureListener() {
                 @Override
                 public boolean onDoubleTap(MotionEvent e) {
+                    if (isCompositeActive) {
+                        String nextQuad = compositeController.handleDoubleTap(e.getX(), e.getY());
+                        if (nextQuad != null) {
+                            compositeQuadrant = nextQuad;
+                            updateCompositeModeLabels();
+                        }
+                        return true;
+                    }
                     if (isSingleMode) {
                         switchToMultiMode();
                     }
@@ -359,47 +414,38 @@ public class PlaybackFragmentNew extends Fragment {
 
     private void setupDoubleTap(View view, String position, String label) {
         if (view == null) return;
-        
         GestureDetector detector = new GestureDetector(getContext(), new GestureDetector.SimpleOnGestureListener() {
             @Override
             public boolean onDoubleTap(MotionEvent e) {
-                if (!isSingleMode && playerManager.hasVideo(position)) {
+                if (!isCompositeActive && !isSingleMode && playerManager.hasVideo(position)) {
                     switchToSingleMode(position, label);
                 }
                 return true;
             }
         });
-        
         view.setOnTouchListener((v, event) -> {
             detector.onTouchEvent(event);
             return true;
         });
     }
 
-    /**
-     * 切换到单路模式
-     */
     private void switchToSingleMode(String position, String label) {
         isSingleMode = true;
         currentSinglePosition = position;
-        
-        // 先在后台加载视频，延迟后再切换界面显示（防止闪烁旧画面或黑屏）
         labelSingle.setText(label);
         btnViewMode.setText(VideoGroup.POSITION_COMBINED.equals(position) ? label : label + "摄");
-        
-        // 确保 videoSingle 可见（在切换布局之前）
+
         if (videoSingle != null) {
             videoSingle.setVisibility(View.VISIBLE);
         }
-        
-        // 先加载视频（此时 singleViewLayout 还是 GONE，用户看不到）
+        if (textureSingle != null) {
+            textureSingle.setVisibility(View.GONE);
+        }
+
         playerManager.setSingleMode(true, position);
-        
-        // 延迟切换界面，等视频加载完成后再显示（无动画，直接切换）
         if (multiViewLayout != null) {
             multiViewLayout.postDelayed(() -> {
-                if (isSingleMode) {
-                    // 直接切换，不做动画（避免透明过渡时看到十字背景）
+                if (isSingleMode && !isCompositeActive) {
                     multiViewLayout.setVisibility(View.GONE);
                     singleViewLayout.setVisibility(View.VISIBLE);
                 }
@@ -407,58 +453,62 @@ public class PlaybackFragmentNew extends Fragment {
         }
     }
 
-    /**
-     * 切换到多路模式
-     */
     private void switchToMultiMode() {
-        if (currentGroup != null && currentGroup.hasVideo(VideoGroup.POSITION_COMBINED)
-                && currentGroup.getVideoCount() == 1) return;
+        if (isCompositeActive) {
+            compositeQuadrant = VideoGroup.POSITION_COMBINED;
+            compositeController.setQuadrant(compositeQuadrant);
+            updateCompositeModeLabels();
+            return;
+        }
         isSingleMode = false;
         btnViewMode.setText("多路");
-        
         playerManager.setSingleMode(false, null);
-        
-        // 直接切换，不做动画（避免透明过渡时看到十字背景）
         singleViewLayout.setVisibility(View.GONE);
         multiViewLayout.setVisibility(View.VISIBLE);
     }
 
-    /**
-     * 循环切换视图模式：多路 → 前摄 → 后摄 → 左摄 → 右摄 → 多路...
-     * 只切换到有视频的摄像头
-     */
     private void cycleViewMode() {
         if (currentGroup == null) return;
-        
-        // 构建可用位置列表
-        java.util.List<String> availablePositions = new java.util.ArrayList<>();
-        availablePositions.add("multi"); // 多路始终可用
+
+        if (isCompositeActive) {
+            int idx = COMPOSITE_CYCLE_ORDER.indexOf(compositeQuadrant);
+            int nextIdx = (idx < 0) ? 0 : (idx + 1) % COMPOSITE_CYCLE_ORDER.size();
+            compositeQuadrant = COMPOSITE_CYCLE_ORDER.get(nextIdx);
+            compositeController.setQuadrant(compositeQuadrant);
+            updateCompositeModeLabels();
+            return;
+        }
+
+        List<String> availablePositions = new ArrayList<>();
+        availablePositions.add("multi");
         if (currentGroup.hasVideo(VideoGroup.POSITION_FRONT)) availablePositions.add(VideoGroup.POSITION_FRONT);
         if (currentGroup.hasVideo(VideoGroup.POSITION_BACK)) availablePositions.add(VideoGroup.POSITION_BACK);
         if (currentGroup.hasVideo(VideoGroup.POSITION_LEFT)) availablePositions.add(VideoGroup.POSITION_LEFT);
         if (currentGroup.hasVideo(VideoGroup.POSITION_RIGHT)) availablePositions.add(VideoGroup.POSITION_RIGHT);
-        if (currentGroup.hasVideo(VideoGroup.POSITION_COMBINED)) availablePositions.add(VideoGroup.POSITION_COMBINED);
-        
-        // 找到当前位置的索引
+
         String currentPos = isSingleMode ? currentSinglePosition : "multi";
         int currentIndex = availablePositions.indexOf(currentPos);
         if (currentIndex < 0) currentIndex = 0;
-        
-        // 切换到下一个位置
-        int nextIndex = (currentIndex + 1) % availablePositions.size();
-        String nextPos = availablePositions.get(nextIndex);
-        
+
+        String nextPos = availablePositions.get((currentIndex + 1) % availablePositions.size());
         if ("multi".equals(nextPos)) {
             switchToMultiMode();
         } else {
-            String label = getPositionLabel(nextPos);
-            switchToSingleMode(nextPos, label);
+            switchToSingleMode(nextPos, getPositionLabel(nextPos));
         }
     }
-    
-    /**
-     * 获取位置对应的标签
-     */
+
+    private void updateCompositeModeLabels() {
+        if (VideoGroup.POSITION_COMBINED.equals(compositeQuadrant)) {
+            btnViewMode.setText("合成");
+            labelSingle.setText("合成全览（双击象限可放大单视角）");
+        } else {
+            String label = getPositionLabel(compositeQuadrant);
+            btnViewMode.setText(label + "摄");
+            labelSingle.setText(label + " · 双击画面还原全览");
+        }
+    }
+
     private String getPositionLabel(String position) {
         switch (position) {
             case VideoGroup.POSITION_FRONT: return "前";
@@ -470,109 +520,58 @@ public class PlaybackFragmentNew extends Fragment {
         }
     }
 
-    /**
-     * 切换单路/多路模式
-     */
-    private void toggleViewMode() {
-        if (isSingleMode) {
-            // 当前是单路模式，切换回多路
-            switchToMultiMode();
-        } else {
-            // 当前是多路模式，弹出选项菜单选择单路
-            showCameraSelectPopup();
-        }
-    }
-
-    /**
-     * 显示摄像头选择弹出菜单
-     */
-    private void showCameraSelectPopup() {
-        // 构建可选摄像头列表
-        List<String> positions = new ArrayList<>();
-        List<String> labels = new ArrayList<>();
-        
-        if (playerManager.hasVideo(VideoGroup.POSITION_FRONT)) {
-            positions.add(VideoGroup.POSITION_FRONT);
-            labels.add("前摄");
-        }
-        if (playerManager.hasVideo(VideoGroup.POSITION_BACK)) {
-            positions.add(VideoGroup.POSITION_BACK);
-            labels.add("后摄");
-        }
-        if (playerManager.hasVideo(VideoGroup.POSITION_LEFT)) {
-            positions.add(VideoGroup.POSITION_LEFT);
-            labels.add("左摄");
-        }
-        if (playerManager.hasVideo(VideoGroup.POSITION_RIGHT)) {
-            positions.add(VideoGroup.POSITION_RIGHT);
-            labels.add("右摄");
-        }
-
-        if (positions.isEmpty()) {
-            return; // 没有可选项
-        }
-
-        String[] items = labels.toArray(new String[0]);
-        
-        new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
-                .setTitle("选择摄像头")
-                .setItems(items, (dialog, which) -> {
-                    String position = positions.get(which);
-                    String label = labels.get(which).replace("摄", "");
-                    switchToSingleMode(position, label);
-                })
-                .show();
-    }
-
-    /**
-     * 加载视频组进行播放
-     */
     private void loadVideoGroup(VideoGroup group) {
         this.currentGroup = group;
-        boolean combined = group.hasVideo(VideoGroup.POSITION_COMBINED);
-        btnViewMode.setEnabled(!combined || group.getVideoCount() > 1);
-        if (combined) {
-            isSingleMode = true;
-            currentSinglePosition = VideoGroup.POSITION_COMBINED;
-            labelSingle.setText("合成：左 / 后 / 右");
-            btnViewMode.setText("合成");
-        }
         noSelectionHint.setVisibility(View.GONE);
-        
-        // 如果在单路模式下，检查当前选择的摄像头是否有视频
-        if (isSingleMode) {
-            if (!group.hasVideo(currentSinglePosition)) {
-                // 当前摄像头在新视频组中没有视频，切回多路模式
-                isSingleMode = false;
-            }
+        currentDatetime.setText(group.getFormattedDateTime() + (group.isLocked() ? " · 已锁定" : ""));
+        updateLockButtonState();
+
+        File combinedFile = group.getVideoFile(VideoGroup.POSITION_COMBINED);
+        boolean combined = combinedFile != null && combinedFile.isFile() && combinedFile.length() > 0L;
+
+        if (combined) {
+            isCompositeActive = true;
+            isSingleMode = true;
+            compositeQuadrant = VideoGroup.POSITION_COMBINED;
+            playerManager.stopAll();
+
+            multiViewLayout.setVisibility(View.GONE);
+            singleViewLayout.setVisibility(View.VISIBLE);
+            if (videoSingle != null) videoSingle.setVisibility(View.GONE);
+            if (textureSingle != null) textureSingle.setVisibility(View.VISIBLE);
+            btnViewMode.setEnabled(true);
+            updateCompositeModeLabels();
+
+            compositeController.loadFile(combinedFile, compositeQuadrant, 0, true, currentSpeed);
+            return;
         }
-        
-        // 显示四宫格（根据当前模式）
+
+        isCompositeActive = false;
+        compositeController.stop();
+        if (textureSingle != null) textureSingle.setVisibility(View.GONE);
+        if (videoSingle != null) videoSingle.setVisibility(View.VISIBLE);
+        btnViewMode.setEnabled(true);
+
+        if (isSingleMode && !group.hasVideo(currentSinglePosition)) {
+            isSingleMode = false;
+        }
         if (isSingleMode) {
             multiViewLayout.setVisibility(View.GONE);
             singleViewLayout.setVisibility(View.VISIBLE);
+            btnViewMode.setText(getPositionLabel(currentSinglePosition) + "摄");
+            labelSingle.setText(getPositionLabel(currentSinglePosition));
         } else {
             multiViewLayout.setVisibility(View.VISIBLE);
             singleViewLayout.setVisibility(View.GONE);
             btnViewMode.setText("多路");
         }
-        
-        // 更新标题栏日期时间
-        currentDatetime.setText(group.getFormattedDateTime());
-        
-        // 更新四宫格的占位符显示
+
         updatePlaceholders(group);
-        
-        // 同步播放器的模式设置（确保 singleModePosition 是最新的）
+        playerManager.setSpeed(currentSpeed);
         playerManager.updateSingleModePosition(isSingleMode, currentSinglePosition);
-        
-        // 加载视频
         playerManager.loadVideoGroup(group);
     }
-    
-    /**
-     * 更新占位符显示（无视频时显示）
-     */
+
     private void updatePlaceholders(VideoGroup group) {
         boolean hasFront = group.hasVideo(VideoGroup.POSITION_FRONT);
         boolean hasBack = group.hasVideo(VideoGroup.POSITION_BACK);
@@ -581,83 +580,122 @@ public class PlaybackFragmentNew extends Fragment {
 
         videoFront.setVisibility(hasFront ? View.VISIBLE : View.GONE);
         placeholderFront.setVisibility(hasFront ? View.GONE : View.VISIBLE);
-
         videoBack.setVisibility(hasBack ? View.VISIBLE : View.GONE);
         placeholderBack.setVisibility(hasBack ? View.GONE : View.VISIBLE);
-
         videoLeft.setVisibility(hasLeft ? View.VISIBLE : View.GONE);
         placeholderLeft.setVisibility(hasLeft ? View.GONE : View.VISIBLE);
-
         videoRight.setVisibility(hasRight ? View.VISIBLE : View.GONE);
         placeholderRight.setVisibility(hasRight ? View.GONE : View.VISIBLE);
     }
 
-    /**
-     * 更新视频列表（按日期分组，然后按时间戳分组）
-     */
     private void updateVideoList() {
         dateSections.clear();
-
         File saveDir = StorageHelper.getVideoDir(getContext());
-        if (!saveDir.exists() || !saveDir.isDirectory()) {
-            showEmptyState();
-            return;
-        }
+        PlaybackTimelineBuilder.VideoScanResult scan = PlaybackTimelineBuilder.scanVideoDirectory(
+                saveDir, filterMode, System.currentTimeMillis());
 
-        File[] files = saveDir.listFiles((dir, name) -> name.toLowerCase().endsWith(".mp4"));
-        if (files == null || files.length == 0) {
-            showEmptyState();
-            return;
-        }
+        dateSections.addAll(scan.dateSections);
+        adapter.setActiveRecordingBanner(scan.activeRecording);
+        adapter.buildFlattenedList();
+        adapter.syncSelectionByGroup(currentGroup);
+        adapter.notifyDataSetChanged();
 
-        // 第一步：按时间戳分组（同一秒录制的多路视频）
-        Map<String, VideoGroup> groupMap = new HashMap<>();
-        for (File file : files) {
-            String timestamp = VideoGroup.extractTimestampPrefix(file.getName());
-            VideoGroup group = groupMap.get(timestamp);
-            if (group == null) {
-                group = new VideoGroup(timestamp);
-                groupMap.put(timestamp, group);
-            }
-            group.addFile(file);
-        }
-
-        // 转为列表并排序（最新的在前）
-        List<VideoGroup> allGroups = new ArrayList<>(groupMap.values());
-        Collections.sort(allGroups, (g1, g2) -> g2.getRecordTime().compareTo(g1.getRecordTime()));
-
-        // 第二步：按日期分组
-        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyy-MM-dd", Locale.getDefault());
-        Map<String, DateSection<VideoGroup>> dateSectionMap = new LinkedHashMap<>();
-        
-        for (VideoGroup group : allGroups) {
-            String dateString = dateFormat.format(group.getRecordTime());
-            DateSection<VideoGroup> section = dateSectionMap.get(dateString);
-            if (section == null) {
-                section = new DateSection<>(dateString, group.getRecordTime());
-                dateSectionMap.put(dateString, section);
-            }
-            section.addItem(group);
-        }
-
-        // 日期分组已按日期排序（LinkedHashMap 保持插入顺序，而 allGroups 已排序）
-        dateSections.addAll(dateSectionMap.values());
-
-        // 更新UI
-        if (dateSections.isEmpty()) {
+        if (dateSections.isEmpty() && scan.activeRecording == null) {
             showEmptyState();
         } else {
             videoList.setVisibility(View.VISIBLE);
             emptyText.setVisibility(View.GONE);
         }
-
-        adapter.buildFlattenedList();
-        adapter.notifyDataSetChanged();
     }
 
     private void showEmptyState() {
         videoList.setVisibility(View.GONE);
         emptyText.setVisibility(View.VISIBLE);
+        if (filterMode == PlaybackTimelineBuilder.FILTER_LOCKED) {
+            emptyText.setText("暂无已锁定录像");
+        } else if (filterMode == PlaybackTimelineBuilder.FILTER_TODAY) {
+            emptyText.setText("今日暂无录像文件");
+        } else {
+            emptyText.setText("暂无录制文件");
+        }
+    }
+
+    private void toggleLockForGroup(@NonNull VideoGroup group) {
+        boolean targetLock = !group.isLocked();
+        boolean ok = VideoLockStore.setGroupLocked(group, targetLock);
+        if (!ok) {
+            Toast.makeText(getContext(), "锁定状态更新失败，请检查存储权限", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        Toast.makeText(getContext(),
+                targetLock ? "已锁定该组录像（循环清理时将保留）" : "已解除锁定",
+                Toast.LENGTH_SHORT).show();
+        if (group == currentGroup) {
+            currentDatetime.setText(group.getFormattedDateTime() + (group.isLocked() ? " · 已锁定" : ""));
+            updateLockButtonState();
+        }
+        if (filterMode == PlaybackTimelineBuilder.FILTER_LOCKED && !targetLock) {
+            updateVideoList();
+        } else {
+            adapter.notifyDataSetChanged();
+        }
+    }
+
+    private void updateLockButtonState() {
+        if (btnLockToggle == null) return;
+        if (currentGroup == null) {
+            btnLockToggle.setVisibility(View.GONE);
+            return;
+        }
+        btnLockToggle.setVisibility(View.VISIBLE);
+        boolean locked = currentGroup.isLocked();
+        btnLockToggle.setText(locked ? "已锁定" : "锁定");
+        if (getContext() != null) {
+            PlaybackThemeAndShareHelper.styleToolbarButton(getContext(), btnLockToggle, locked);
+        }
+    }
+
+    private void showSingleGroupActionsDialog(@NonNull VideoGroup group) {
+        if (getContext() == null) return;
+        String lockAction = group.isLocked() ? "解除锁定（允许循环清理）" : "锁定录像（防循环覆盖与误删）";
+        String[] items = {lockAction, "分享此组录像（扫码 / 系统）", "删除此组录像"};
+        new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle(group.getFormattedDateTime())
+                .setItems(items, (dialog, which) -> {
+                    if (which == 0) {
+                        toggleLockForGroup(group);
+                    } else if (which == 1) {
+                        showShareDialog(group);
+                    } else if (which == 2) {
+                        confirmDeleteSingleGroup(group);
+                    }
+                })
+                .show();
+    }
+
+    private void confirmDeleteSingleGroup(@NonNull VideoGroup group) {
+        if (getContext() == null) return;
+        if (group.isLocked()) {
+            new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle("录像已锁定保护")
+                    .setMessage("该组录像已锁定（防循环覆盖与误删）。请先解除锁定后再删除。")
+                    .setPositiveButton("知道了", null)
+                    .show();
+            return;
+        }
+        new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("确认删除")
+                .setMessage("确定要删除 " + group.getFormattedDateTime() + " 的全部视角录像吗？")
+                .setPositiveButton("删除", (d, w) -> {
+                    if (group == currentGroup) {
+                        stopAllPlaybackAndResetPreview();
+                    }
+                    int deleted = group.deleteAll();
+                    Toast.makeText(getContext(), "已删除 " + deleted + " 个视频文件", Toast.LENGTH_SHORT).show();
+                    updateVideoList();
+                })
+                .setNegativeButton("取消", null)
+                .show();
     }
 
     private void toggleMultiSelectMode() {
@@ -697,98 +735,112 @@ public class PlaybackFragmentNew extends Fragment {
 
     private void deleteSelected() {
         Set<VideoGroup> selectedGroups = adapter.getSelectedGroups();
-        if (selectedGroups.isEmpty()) {
+        if (selectedGroups.isEmpty() || getContext() == null) {
+            return;
+        }
+        List<VideoGroup> unlockedTargets = new ArrayList<>();
+        int lockedCount = 0;
+        for (VideoGroup group : selectedGroups) {
+            if (group.isLocked()) {
+                lockedCount++;
+            } else {
+                unlockedTargets.add(group);
+            }
+        }
+
+        if (unlockedTargets.isEmpty()) {
+            new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle("无法直接删除")
+                    .setMessage("所选 " + lockedCount + " 组录像均已锁定保护。请先解除锁定后再删除。")
+                    .setPositiveButton("知道了", null)
+                    .show();
             return;
         }
 
+        String msg = lockedCount > 0
+                ? "已选中 " + selectedGroups.size() + " 组，其中 " + lockedCount
+                + " 组已锁定将被跳过，仅删除其余 " + unlockedTargets.size() + " 组未锁定录像。"
+                : "确定要删除选中的 " + unlockedTargets.size() + " 组视频吗？（包含该组全部摄像头录像）";
+        String positiveLabel = lockedCount > 0 ? "仅删未锁定项" : "删除";
+
         new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
                 .setTitle("确认删除")
-                .setMessage("确定要删除选中的 " + selectedGroups.size() + " 组视频吗？（包含所有摄像头录像）")
-                .setPositiveButton("删除", (dialog, which) -> {
+                .setMessage(msg)
+                .setPositiveButton(positiveLabel, (dialog, which) -> {
                     int deletedCount = 0;
-                    
-                    // 删除选中的视频组
-                    for (VideoGroup group : selectedGroups) {
+                    for (VideoGroup group : unlockedTargets) {
+                        if (group == currentGroup) {
+                            stopAllPlaybackAndResetPreview();
+                        }
                         deletedCount += group.deleteAll();
                     }
-                    
-                    // 从日期分组中移除已删除的组
-                    for (DateSection<VideoGroup> section : dateSections) {
-                        section.getItems().removeAll(selectedGroups);
-                    }
-                    
-                    // 移除空的日期分组
-                    dateSections.removeIf(section -> section.getItemCount() == 0);
-
                     adapter.clearSelection();
-                    adapter.buildFlattenedList();
-                    adapter.notifyDataSetChanged();
-                    updateSelectedCount();
-
+                    exitMultiSelectMode();
+                    updateVideoList();
                     if (getContext() != null) {
-                        android.widget.Toast.makeText(getContext(),
-                                "已删除 " + deletedCount + " 个视频文件",
-                                android.widget.Toast.LENGTH_SHORT).show();
-                    }
-
-                    if (dateSections.isEmpty()) {
-                        exitMultiSelectMode();
-                        showEmptyState();
+                        Toast.makeText(getContext(), "已删除 " + deletedCount + " 个视频文件", Toast.LENGTH_SHORT).show();
                     }
                 })
                 .setNegativeButton("取消", null)
                 .show();
     }
 
-    /**
-     * 分享选中的视频
-     */
+    private void stopAllPlaybackAndResetPreview() {
+        isCompositeActive = false;
+        currentGroup = null;
+        if (playerManager != null) playerManager.stopAll();
+        if (compositeController != null) compositeController.stop();
+        multiViewLayout.setVisibility(View.GONE);
+        singleViewLayout.setVisibility(View.GONE);
+        noSelectionHint.setVisibility(View.VISIBLE);
+        currentDatetime.setText("");
+        updateLockButtonState();
+    }
+
     private void shareSelected() {
         Set<VideoGroup> selectedGroups = adapter.getSelectedGroups();
         if (selectedGroups.isEmpty()) {
             Toast.makeText(getContext(), "请先选择要分享的视频", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        // 收集所有选中的视频文件
         List<File> allVideoFiles = new ArrayList<>();
-        String[] positions = {VideoGroup.POSITION_FRONT, VideoGroup.POSITION_BACK, 
-                              VideoGroup.POSITION_LEFT, VideoGroup.POSITION_RIGHT};
-        
         for (VideoGroup group : selectedGroups) {
-            for (String position : positions) {
-                File videoFile = group.getVideoFile(position);
-                if (videoFile != null && videoFile.exists() && videoFile.length() > 0) {
-                    allVideoFiles.add(videoFile);
-                }
-            }
+            allVideoFiles.addAll(group.getShareableFiles());
         }
-
-        if (allVideoFiles.isEmpty()) {
-            Toast.makeText(getContext(), "没有可分享的视频文件", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        Log.d(TAG, "准备分享: " + selectedGroups.size() + " 组, " + allVideoFiles.size() + " 个文件");
-        for (int i = 0; i < Math.min(allVideoFiles.size(), 5); i++) {
-            Log.d(TAG, "文件 " + i + ": " + allVideoFiles.get(i).getAbsolutePath());
-        }
-
-        // 显示分享选项对话框
-        String[] options = {
-            "📱 扫码互传（推荐）",
-            "📤 系统分享（" + allVideoFiles.size() + "个文件）"
-        };
-
-        Log.d(TAG, "创建分享对话框");
-        showShareOptionsDialog("分享选中的视频", 
-            "已选择 " + selectedGroups.size() + " 组视频，共 " + allVideoFiles.size() + " 个文件",
-            allVideoFiles);
+        PlaybackThemeAndShareHelper.showShareOptionsDialog(
+                this,
+                "分享选中的视频",
+                "已选择 " + selectedGroups.size() + " 组视频，共 " + allVideoFiles.size() + " 个文件",
+                allVideoFiles,
+                "video/mp4",
+                "分享视频",
+                "来自 EVCam 的视频分享",
+                "分享视频到");
     }
 
-    /**
-     * 格式化时间（毫秒 -> mm:ss）
-     */
+    private void showShareDialog(VideoGroup group) {
+        List<File> videoFiles = group.getShareableFiles();
+        PlaybackThemeAndShareHelper.showShareOptionsDialog(
+                this,
+                "分享视频",
+                "共 " + videoFiles.size() + " 个视频文件",
+                videoFiles,
+                "video/mp4",
+                "分享视频",
+                "来自 EVCam 的视频分享",
+                "分享视频到");
+    }
+
+    private static float nextSpeed(float current) {
+        float[] opts = MultiVideoPlayerManager.SPEED_OPTIONS;
+        for (int i = 0; i < opts.length; i++) {
+            if (Math.abs(opts[i] - current) < 0.05f) {
+                return opts[(i + 1) % opts.length];
+            }
+        }
+        return 1.0f;
+    }
+
     private String formatTime(int milliseconds) {
         int seconds = milliseconds / 1000;
         int minutes = seconds / 60;
@@ -809,9 +861,41 @@ public class PlaybackFragmentNew extends Fragment {
         }
     }
 
+    private void applyFilterChipsTheme(@NonNull Context context) {
+        PlaybackThemeAndShareHelper.styleFilterButton(context, btnFilterAll, filterMode == PlaybackTimelineBuilder.FILTER_ALL);
+        PlaybackThemeAndShareHelper.styleFilterButton(context, btnFilterToday, filterMode == PlaybackTimelineBuilder.FILTER_TODAY);
+        PlaybackThemeAndShareHelper.styleFilterButton(context, btnFilterLocked, filterMode == PlaybackTimelineBuilder.FILTER_LOCKED);
+        updateLockButtonState();
+    }
+
+    @Override
+    public void onThemeApplied(Context themedContext, boolean isNight) {
+        if (rootView == null || themedContext == null) return;
+        rootView.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.page_background));
+        if (toolbar != null) toolbar.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.menu_background));
+        if (multiSelectToolbar != null) multiSelectToolbar.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.menu_background));
+        if (listContainer != null) listContainer.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.page_background));
+        if (filterBar != null) filterBar.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.page_background));
+        if (previewContainer != null) previewContainer.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_background));
+        if (controlsLayout != null) controlsLayout.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_controls_background));
+        if (currentDatetime != null) currentDatetime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
+        if (currentTime != null) currentTime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
+        if (totalTime != null) totalTime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
+        PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnRefresh, false);
+        PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnMultiSelect, false);
+        PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnPlayPause, false);
+        PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnViewMode, false);
+        PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnSpeed, false);
+        applyFilterChipsTheme(themedContext);
+        if (adapter != null) adapter.notifyDataSetChanged();
+    }
+
     @Override
     public void onPause() {
         super.onPause();
+        if (compositeController != null && compositeController.isPlaying()) {
+            compositeController.pause();
+        }
         if (playerManager != null && playerManager.isPlaying()) {
             playerManager.pause();
         }
@@ -824,215 +908,20 @@ public class PlaybackFragmentNew extends Fragment {
             videoList.setAdapter(null);
             videoList.getRecycledViewPool().clear();
         }
+        if (adapter != null) {
+            adapter.release();
+            adapter = null;
+        }
+        if (compositeController != null) {
+            compositeController.release();
+            compositeController = null;
+        }
         if (playerManager != null) {
             playerManager.release();
             playerManager = null;
         }
         PlaybackImageMemory.clear(requireContext());
-        adapter = null;
+        rootView = null;
         super.onDestroyView();
-    }
-
-    /**
-     * 显示分享对话框
-     */
-    private void showShareDialog(VideoGroup group) {
-        if (getContext() == null) return;
-
-        // 获取所有可用的视频文件
-        List<File> videoFiles = new ArrayList<>();
-        String[] positions = {VideoGroup.POSITION_FRONT, VideoGroup.POSITION_BACK, 
-                              VideoGroup.POSITION_LEFT, VideoGroup.POSITION_RIGHT};
-        String[] positionNames = {"前视", "后视", "左视", "右视"};
-        
-        for (int i = 0; i < positions.length; i++) {
-            File videoFile = group.getVideoFile(positions[i]);
-            if (videoFile != null && videoFile.exists() && videoFile.length() > 0) {
-                videoFiles.add(videoFile);
-            }
-        }
-
-        if (videoFiles.isEmpty()) {
-            Toast.makeText(getContext(), "没有可分享的视频文件", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
-        // 构建选项
-        String[] options = new String[videoFiles.size() + 2];
-        options[0] = "📱 扫码互传（推荐）";
-        options[1] = "📤 分享所有路视频";
-        for (int i = 0; i < videoFiles.size(); i++) {
-            File file = videoFiles.get(i);
-            String positionName = getPositionName(file.getName());
-            options[i + 2] = "📤 仅分享" + positionName + "视频";
-        }
-
-        showShareOptionsDialog("分享视频", 
-            "共 " + videoFiles.size() + " 个视频文件",
-            videoFiles);
-    }
-
-    /**
-     * 显示分享选项对话框（自定义布局）
-     */
-    private void showShareOptionsDialog(String title, String message, List<File> videoFiles) {
-        if (getContext() == null) return;
-
-        android.app.AlertDialog.Builder builder = new android.app.AlertDialog.Builder(getContext());
-        
-        // 加载自定义布局
-        View dialogView = getLayoutInflater().inflate(R.layout.dialog_share_options, null);
-        TextView titleView = dialogView.findViewById(R.id.dialog_title);
-        TextView messageView = dialogView.findViewById(R.id.dialog_message);
-        View btnQr = dialogView.findViewById(R.id.btn_qr);
-        View btnShare = dialogView.findViewById(R.id.btn_share);
-        View btnClose = dialogView.findViewById(R.id.btn_close);
-        
-        titleView.setText(title);
-        messageView.setText(message);
-        
-        builder.setView(dialogView);
-        builder.setCancelable(true);
-        
-        android.app.AlertDialog dialog = builder.create();
-        
-        // 设置按钮点击事件
-        btnQr.setOnClickListener(v -> {
-            Log.d(TAG, "用户选择扫码互传");
-            dialog.dismiss();
-            showQrTransferDialog(videoFiles);
-        });
-        
-        btnShare.setOnClickListener(v -> {
-            Log.d(TAG, "用户选择系统分享");
-            dialog.dismiss();
-            shareVideos(videoFiles);
-        });
-        
-        btnClose.setOnClickListener(v -> {
-            Log.d(TAG, "用户取消分享");
-            dialog.dismiss();
-        });
-        
-        dialog.show();
-        Log.d(TAG, "分享选项对话框已显示");
-    }
-
-    /**
-     * 显示扫码互传对话框
-     */
-    private void showQrTransferDialog(List<File> videoFiles) {
-        // 使用 getActivity() 获取 Activity 上下文，避免 Fragment detached 问题
-        android.app.Activity activity = getActivity();
-        if (activity == null || activity.isFinishing() || activity.isDestroyed()) {
-            Log.e(TAG, "无法显示对话框: activity 不可用");
-            return;
-        }
-        
-        if (!isAdded()) {
-            Log.e(TAG, "无法显示对话框: Fragment 未 attached");
-            return;
-        }
-        
-        Log.d(TAG, "准备显示扫码互传对话框，文件数: " + (videoFiles != null ? videoFiles.size() : 0));
-        
-        try {
-            // 使用 Activity 上下文而不是 Fragment 上下文，确保对话框在 Activity 生命周期内
-            QrTransferDialog dialog = new QrTransferDialog(activity, videoFiles);
-            dialog.show();
-            Log.d(TAG, "扫码互传对话框已显示");
-        } catch (Exception e) {
-            Log.e(TAG, "显示扫码互传对话框失败", e);
-            Toast.makeText(activity, "无法显示分享对话框: " + e.getMessage(), Toast.LENGTH_LONG).show();
-        }
-    }
-
-    /**
-     * 根据文件名获取位置名称
-     */
-    private String getPositionName(String fileName) {
-        if (fileName.contains("front")) return "前视";
-        if (fileName.contains("back")) return "后视";
-        if (fileName.contains("left")) return "左视";
-        if (fileName.contains("right")) return "右视";
-        return "未知";
-    }
-
-    /**
-     * 分享视频文件
-     */
-    private void shareVideos(List<File> videoFiles) {
-        if (getContext() == null || videoFiles.isEmpty()) return;
-
-        try {
-            String authority = getContext().getPackageName() + ".fileprovider";
-            
-            if (videoFiles.size() == 1) {
-                // 分享单个视频
-                File videoFile = videoFiles.get(0);
-                
-                // 检查文件是否存在且可读
-                if (!videoFile.exists() || !videoFile.canRead()) {
-                    Toast.makeText(getContext(), "文件不存在或无法读取", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                Uri videoUri = FileProvider.getUriForFile(getContext(), authority, videoFile);
-                
-                Intent shareIntent = new Intent(Intent.ACTION_SEND);
-                shareIntent.setType("video/mp4");
-                shareIntent.putExtra(Intent.EXTRA_STREAM, videoUri);
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "分享视频");
-                shareIntent.putExtra(Intent.EXTRA_TEXT, "来自 EVCam 的视频分享");
-                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                // 创建选择器
-                Intent chooser = Intent.createChooser(shareIntent, "分享视频到");
-                if (chooser.resolveActivity(getContext().getPackageManager()) != null) {
-                    startActivity(chooser);
-                } else {
-                    Toast.makeText(getContext(), "没有找到可以分享的应用", Toast.LENGTH_SHORT).show();
-                }
-            } else {
-                // 分享多个视频
-                ArrayList<Uri> videoUris = new ArrayList<>();
-                for (File videoFile : videoFiles) {
-                    // 检查文件是否存在且可读
-                    if (!videoFile.exists() || !videoFile.canRead()) {
-                        continue;
-                    }
-                    Uri videoUri = FileProvider.getUriForFile(getContext(), authority, videoFile);
-                    videoUris.add(videoUri);
-                }
-                
-                if (videoUris.isEmpty()) {
-                    Toast.makeText(getContext(), "没有可分享的文件", Toast.LENGTH_SHORT).show();
-                    return;
-                }
-                
-                Intent shareIntent = new Intent(Intent.ACTION_SEND_MULTIPLE);
-                shareIntent.setType("video/mp4");
-                shareIntent.putParcelableArrayListExtra(Intent.EXTRA_STREAM, videoUris);
-                shareIntent.putExtra(Intent.EXTRA_SUBJECT, "分享视频");
-                shareIntent.putExtra(Intent.EXTRA_TEXT, "来自 EVCam 的视频分享 (" + videoUris.size() + "个视频)");
-                shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-                shareIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                
-                // 创建选择器
-                Intent chooser = Intent.createChooser(shareIntent, "分享视频到");
-                if (chooser.resolveActivity(getContext().getPackageManager()) != null) {
-                    startActivity(chooser);
-                } else {
-                    Toast.makeText(getContext(), "没有找到可以分享的应用", Toast.LENGTH_SHORT).show();
-                }
-            }
-        } catch (IllegalArgumentException e) {
-            Log.e(TAG, "分享视频失败: FileProvider 无法处理该文件路径", e);
-            Toast.makeText(getContext(), "分享失败: 文件路径不受支持，请使用扫码互传功能", Toast.LENGTH_LONG).show();
-        } catch (Exception e) {
-            Log.e(TAG, "分享视频失败", e);
-            Toast.makeText(getContext(), "分享失败: " + e.getMessage(), Toast.LENGTH_SHORT).show();
-        }
     }
 }

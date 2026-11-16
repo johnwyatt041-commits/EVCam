@@ -1,5 +1,6 @@
 package com.kooo.evcam.playback;
 
+import android.app.Activity;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.os.Bundle;
@@ -16,11 +17,11 @@ import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
 import com.kooo.evcam.R;
+import com.kooo.evcam.transfer.QrTransferDialog;
 import com.kooo.evcam.ui.UiThemeController;
 
 /**
- * 合并「回看」统一入口：顶部切换视频回看 / 照片回看两个既有列表，
- * 保留多路分组、缩略图缓存清理、扫码互传、批量分享与删除等既有功能。
+ * 合并「回看」统一入口：顶部切换视频回看 / 照片回看两个列表，并集成 Wi-Fi 浏览器全库分享入口。
  */
 public class PlaybackHubFragment extends Fragment implements UiThemeController.ThemeAware {
 
@@ -32,6 +33,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
     private int activeTab = TAB_VIDEO;
     private Button btnTabVideo;
     private Button btnTabPhoto;
+    private Button btnLanShare;
     private View rootView;
 
     public static PlaybackHubFragment newInstance(int initialTab) {
@@ -59,6 +61,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
         rootView = inflater.inflate(R.layout.fragment_playback_hub, container, false);
         btnTabVideo = rootView.findViewById(R.id.btn_tab_video);
         btnTabPhoto = rootView.findViewById(R.id.btn_tab_photo);
+        btnLanShare = rootView.findViewById(R.id.btn_lan_share);
 
         getChildFragmentManager().registerFragmentLifecycleCallbacks(
                 new FragmentManager.FragmentLifecycleCallbacks() {
@@ -73,12 +76,23 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
 
         btnTabVideo.setOnClickListener(v -> switchTab(TAB_VIDEO, true));
         btnTabPhoto.setOnClickListener(v -> switchTab(TAB_PHOTO, true));
+        if (btnLanShare != null) {
+            btnLanShare.setOnClickListener(v -> openLibraryLanShare());
+        }
 
         applyTabButtonTheme(requireContext());
         if (savedInstanceState == null || getChildFragmentManager().findFragmentById(R.id.playback_tab_container) == null) {
             switchTab(activeTab, false);
         }
         return rootView;
+    }
+
+    private void openLibraryLanShare() {
+        Activity activity = getActivity();
+        if (activity == null || activity.isFinishing() || activity.isDestroyed() || !isAdded()) {
+            return;
+        }
+        QrTransferDialog.showLibraryShare(activity);
     }
 
     @Override
@@ -119,6 +133,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
         rootView = null;
         btnTabVideo = null;
         btnTabPhoto = null;
+        btnLanShare = null;
         super.onDestroyView();
     }
 
@@ -144,6 +159,11 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
     private void applyTabButtonTheme(@NonNull Context context) {
         styleTab(btnTabVideo, activeTab == TAB_VIDEO, context);
         styleTab(btnTabPhoto, activeTab == TAB_PHOTO, context);
+        if (btnLanShare != null) {
+            ViewCompat.setBackgroundTintList(btnLanShare,
+                    ColorStateList.valueOf(ContextCompat.getColor(context, R.color.button_background)));
+            btnLanShare.setTextColor(ContextCompat.getColor(context, R.color.button_text));
+        }
     }
 
     private void styleTab(@Nullable Button button, boolean selected, @NonNull Context context) {

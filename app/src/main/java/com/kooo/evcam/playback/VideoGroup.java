@@ -33,6 +33,12 @@ public class VideoGroup {
     
     /** 总文件大小（所有位置之和） */
     private long totalSize;
+
+    /** 是否已通过 .lock 侧车锁定保护 */
+    private boolean locked;
+
+    /** 是否关联进行中的 .pending 分段 */
+    private boolean recordingActive;
     
     public VideoGroup(String timestampPrefix) {
         this.timestampPrefix = timestampPrefix;
@@ -239,22 +245,86 @@ public class VideoGroup {
     public boolean hasVideo(String position) {
         return videoFiles.containsKey(position);
     }
-    
+
+    public boolean isLocked() {
+        return locked;
+    }
+
+    public void setLocked(boolean locked) {
+        this.locked = locked;
+    }
+
+    public boolean isRecordingActive() {
+        return recordingActive;
+    }
+
+    public void setRecordingActive(boolean recordingActive) {
+        this.recordingActive = recordingActive;
+    }
+
+    public String getFormattedSecondTime() {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+        return sdf.format(recordTime);
+    }
+
     /**
-     * 删除所有视频文件
+     * 收集可用于共享/导出的有效视频文件列表（兼容独立四路与合成视频）
+     */
+    public java.util.List<File> getShareableFiles() {
+        java.util.List<File> files = new java.util.ArrayList<>();
+        String[] positions = {
+                POSITION_FRONT, POSITION_BACK, POSITION_LEFT, POSITION_RIGHT, POSITION_COMBINED
+        };
+        for (String pos : positions) {
+            File file = videoFiles.get(pos);
+            if (file != null && file.exists() && file.length() > 0 && !VideoLockStore.isPendingFile(file)) {
+                files.add(file);
+            }
+        }
+        return files;
+    }
+
+    /**
+     * 删除所有视频文件并清理关联 .lock 侧车
      * @return 成功删除的文件数
      */
     public int deleteAll() {
         int deleted = 0;
         for (File file : videoFiles.values()) {
             if (file.delete()) {
+                VideoLockStore.cleanupLockSidecar(file);
                 deleted++;
             }
         }
         if (deleted > 0) {
             videoFiles.clear();
             totalSize = 0;
+            locked = false;
         }
+        return deleted;
+    }
+
+    /**
+     * 仅删除未锁定视频文件
+     */
+    public int deleteUnlockedFiles() {
+        int deleted = 0;
+        java.util.Iterator<Map.Entry<String, File>> it = videoFiles.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, File> entry = it.next();
+            File file = entry.getValue();
+            if (VideoLockStore.isLocked(file)) {
+                continue;
+            }
+            long len = file.length();
+            if (file.delete()) {
+                VideoLockStore.cleanupLockSidecar(file);
+                totalSize = Math.max(0L, totalSize - len);
+                it.remove();
+                deleted++;
+            }
+        }
+        locked = VideoLockStore.isGroupLocked(this);
         return deleted;
     }
 }

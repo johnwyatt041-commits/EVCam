@@ -8,38 +8,31 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 import androidx.recyclerview.widget.RecyclerView;
 
-import com.bumptech.glide.Glide;
-import com.bumptech.glide.load.engine.DiskCacheStrategy;
-import com.bumptech.glide.request.RequestOptions;
-import com.bumptech.glide.signature.ObjectKey;
 import com.kooo.evcam.R;
 
-import java.io.File;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 /**
- * 可展开的图片分组适配器
- * 支持按日期分组显示，点击日期头部可展开/收起
+ * Expandable date + hourly timeline adapter for multi-camera photo groups.
  */
 public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
-    private static final int VIEW_TYPE_DATE_HEADER = 0;
-    private static final int VIEW_TYPE_PHOTO_GROUP = 1;
+    public static final int VIEW_TYPE_DATE_HEADER = 0;
+    public static final int VIEW_TYPE_PHOTO_GROUP = 1;
+    public static final int VIEW_TYPE_HOUR_HEADER = 2;
 
     private final Context context;
     private final List<DateSection<PhotoGroup>> dateSections;
-    
-    /** 扁平化后的列表项（用于 RecyclerView 显示） */
     private final List<Object> flattenedItems = new ArrayList<>();
-    
-    /** 多选模式下选中的 PhotoGroup */
+
     private Set<PhotoGroup> selectedGroups = new HashSet<>();
-    
     private int selectedPosition = -1;
     private boolean isMultiSelectMode = false;
 
@@ -70,18 +63,16 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         buildFlattenedList();
     }
 
-    /**
-     * 构建扁平化列表
-     * 根据展开状态将日期头部和图片项转换为扁平列表
-     */
     public void buildFlattenedList() {
         flattenedItems.clear();
-        for (DateSection<PhotoGroup> section : dateSections) {
-            flattenedItems.add(section);
-            if (section.isExpanded()) {
-                flattenedItems.addAll(section.getItems());
-            }
+        flattenedItems.addAll(PlaybackTimelineBuilder.flattenPhotoSections(dateSections));
+    }
+
+    public boolean isFullSpanPosition(int position) {
+        if (position < 0 || position >= flattenedItems.size()) {
+            return true;
         }
+        return getItemViewType(position) != VIEW_TYPE_PHOTO_GROUP;
     }
 
     public void setOnItemClickListener(OnItemClickListener listener) {
@@ -127,9 +118,6 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         selectedGroups.clear();
     }
 
-    /**
-     * 全选所有图片组
-     */
     public void selectAll() {
         selectedGroups.clear();
         for (DateSection<PhotoGroup> section : dateSections) {
@@ -137,9 +125,6 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         }
     }
 
-    /**
-     * 获取所有 PhotoGroup 的总数
-     */
     public int getTotalGroupCount() {
         int count = 0;
         for (DateSection<PhotoGroup> section : dateSections) {
@@ -148,11 +133,17 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         return count;
     }
 
+    public void syncSelectionByGroup(@Nullable PhotoGroup activeGroup) {
+        selectedPosition = activeGroup == null ? -1 : flattenedItems.indexOf(activeGroup);
+    }
+
     @Override
     public int getItemViewType(int position) {
         Object item = flattenedItems.get(position);
         if (item instanceof DateSection) {
             return VIEW_TYPE_DATE_HEADER;
+        } else if (item instanceof PlaybackTimelineBuilder.HourHeader) {
+            return VIEW_TYPE_HOUR_HEADER;
         } else {
             return VIEW_TYPE_PHOTO_GROUP;
         }
@@ -161,78 +152,70 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     @NonNull
     @Override
     public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+        LayoutInflater inflater = LayoutInflater.from(context);
         if (viewType == VIEW_TYPE_DATE_HEADER) {
-            View view = LayoutInflater.from(context).inflate(R.layout.item_date_header, parent, false);
-            return new DateHeaderViewHolder(view);
+            return new PlaybackListViewHolders.DateHeaderViewHolder(
+                    inflater.inflate(R.layout.item_date_header, parent, false));
+        } else if (viewType == VIEW_TYPE_HOUR_HEADER) {
+            return new PlaybackListViewHolders.HourHeaderViewHolder(
+                    inflater.inflate(R.layout.item_hour_header, parent, false));
         } else {
-            View view = LayoutInflater.from(context).inflate(R.layout.item_video_group, parent, false);
-            return new PhotoGroupViewHolder(view);
+            return new PhotoGroupViewHolder(
+                    inflater.inflate(R.layout.item_video_group, parent, false));
         }
     }
 
     @Override
     public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
         Object item = flattenedItems.get(position);
-
-        if (holder instanceof DateHeaderViewHolder) {
+        if (holder instanceof PlaybackListViewHolders.DateHeaderViewHolder) {
             @SuppressWarnings("unchecked")
             DateSection<PhotoGroup> section = (DateSection<PhotoGroup>) item;
-            bindDateHeader((DateHeaderViewHolder) holder, section, position);
+            PlaybackListViewHolders.bindDateHeader(
+                    (PlaybackListViewHolders.DateHeaderViewHolder) holder,
+                    context,
+                    section,
+                    "组",
+                    v -> {
+                        section.toggleExpanded();
+                        buildFlattenedList();
+                        notifyDataSetChanged();
+                        if (dateHeaderClickListener != null) {
+                            dateHeaderClickListener.onDateHeaderClick(section, holder.getBindingAdapterPosition());
+                        }
+                    });
+        } else if (holder instanceof PlaybackListViewHolders.HourHeaderViewHolder) {
+            PlaybackListViewHolders.bindHourHeader(
+                    (PlaybackListViewHolders.HourHeaderViewHolder) holder,
+                    context,
+                    (PlaybackTimelineBuilder.HourHeader) item);
         } else if (holder instanceof PhotoGroupViewHolder) {
-            PhotoGroup group = (PhotoGroup) item;
-            bindPhotoGroup((PhotoGroupViewHolder) holder, group, position);
+            bindPhotoGroup((PhotoGroupViewHolder) holder, (PhotoGroup) item, position);
         }
-    }
-
-    private void bindDateHeader(DateHeaderViewHolder holder, DateSection<PhotoGroup> section, int position) {
-        // 设置日期文字
-        holder.dateText.setText(section.getFullDateDisplay());
-        
-        // 设置组数量
-        holder.itemCount.setText(section.getItemCount() + "组");
-        
-        // 设置展开/收起图标
-        int iconRes = section.isExpanded() ? R.drawable.ic_expand_less : R.drawable.ic_expand_more;
-        holder.expandIcon.setImageResource(iconRes);
-        
-        // 点击切换展开状态
-        holder.itemView.setOnClickListener(v -> {
-            section.toggleExpanded();
-            buildFlattenedList();
-            notifyDataSetChanged();
-            
-            if (dateHeaderClickListener != null) {
-                dateHeaderClickListener.onDateHeaderClick(section, position);
-            }
-        });
     }
 
     private void bindPhotoGroup(PhotoGroupViewHolder holder, PhotoGroup group, int position) {
-        // 设置日期时间（只显示时间，因为日期已在头部显示）
         holder.videoDate.setVisibility(View.GONE);
-        holder.videoTime.setText(group.getFormattedTime());
+        holder.videoTime.setText(group.getFormattedSecondTime());
+        holder.videoTime.setTextColor(ContextCompat.getColor(context, R.color.text_primary));
         holder.videoSize.setText(group.getFormattedSize());
+        holder.videoSize.setTextColor(ContextCompat.getColor(context, R.color.text_secondary));
+        holder.videoCountBadge.setText(group.getPhotoCount() + "张");
 
-        // 图片数量标签
-        int count = group.getPhotoCount();
-        holder.videoCountBadge.setText(count + "张");
-
-        // 加载四个位置的缩略图
-        loadThumbnail(group.getFrontPhoto(), holder.thumbFront);
-        loadThumbnail(group.getBackPhoto(), holder.thumbBack);
-        loadThumbnail(group.getLeftPhoto(), holder.thumbLeft);
-        loadThumbnail(group.getRightPhoto(), holder.thumbRight);
-
-        // 选中状态样式
-        boolean isSelected;
-        if (isMultiSelectMode) {
-            isSelected = selectedGroups.contains(group);
-        } else {
-            isSelected = (position == selectedPosition);
+        if (holder.lockBadge != null) {
+            holder.lockBadge.setVisibility(group.isLocked() ? View.VISIBLE : View.GONE);
         }
+
+        PlaybackListViewHolders.loadThumbnail(context, group.getFrontPhoto(), holder.thumbFront, false);
+        PlaybackListViewHolders.loadThumbnail(context, group.getBackPhoto(), holder.thumbBack, false);
+        PlaybackListViewHolders.loadThumbnail(context, group.getLeftPhoto(), holder.thumbLeft, false);
+        PlaybackListViewHolders.loadThumbnail(context, group.getRightPhoto(), holder.thumbRight, false);
+
+        boolean isSelected = isMultiSelectMode
+                ? selectedGroups.contains(group)
+                : (position == selectedPosition);
         updateSelectionStyle(holder, isSelected);
 
-        // 多选模式的选中指示器
         if (isMultiSelectMode) {
             holder.checkIndicator.setVisibility(View.VISIBLE);
             holder.checkIndicator.setChecked(selectedGroups.contains(group));
@@ -240,38 +223,36 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
             holder.checkIndicator.setVisibility(View.GONE);
         }
 
-        // 点击事件
         holder.itemView.setOnClickListener(v -> {
+            int adapterPos = holder.getBindingAdapterPosition();
+            if (adapterPos == RecyclerView.NO_POSITION) return;
             if (isMultiSelectMode) {
-                // 多选模式：切换选中状态
                 if (selectedGroups.contains(group)) {
                     selectedGroups.remove(group);
                 } else {
                     selectedGroups.add(group);
                 }
-                notifyItemChanged(position);
+                notifyItemChanged(adapterPos);
                 if (itemSelectedListener != null) {
                     itemSelectedListener.onItemSelected(group);
                 }
             } else {
-                // 单选模式：更新选中位置并显示
                 int oldPosition = selectedPosition;
-                selectedPosition = position;
-                // 刷新旧选中项和新选中项
-                if (oldPosition != -1 && oldPosition != position) {
+                selectedPosition = adapterPos;
+                if (oldPosition != -1 && oldPosition != adapterPos) {
                     notifyItemChanged(oldPosition);
                 }
-                notifyItemChanged(position);
+                notifyItemChanged(adapterPos);
                 if (itemClickListener != null) {
-                    itemClickListener.onItemClick(group, position);
+                    itemClickListener.onItemClick(group, adapterPos);
                 }
             }
         });
 
-        // 长按事件 - 分享图片
         holder.itemView.setOnLongClickListener(v -> {
-            if (itemLongClickListener != null) {
-                itemLongClickListener.onItemLongClick(group, position);
+            int adapterPos = holder.getBindingAdapterPosition();
+            if (itemLongClickListener != null && adapterPos != RecyclerView.NO_POSITION) {
+                itemLongClickListener.onItemLongClick(group, adapterPos);
                 return true;
             }
             return false;
@@ -279,31 +260,15 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     private void updateSelectionStyle(PhotoGroupViewHolder holder, boolean isSelected) {
-        if (isSelected) {
-            holder.itemView.setBackgroundColor(context.getResources().getColor(R.color.item_selected_background));
+        if (holder.itemView instanceof androidx.cardview.widget.CardView) {
+            int bgColor = ContextCompat.getColor(
+                    context, isSelected ? R.color.item_selected_background : R.color.card_background);
+            ((androidx.cardview.widget.CardView) holder.itemView).setCardBackgroundColor(bgColor);
         } else {
-            holder.itemView.setBackgroundColor(context.getResources().getColor(android.R.color.transparent));
+            int bgColor = ContextCompat.getColor(
+                    context, isSelected ? R.color.item_selected_background : android.R.color.transparent);
+            holder.itemView.setBackgroundColor(bgColor);
         }
-    }
-
-    private void loadThumbnail(File photoFile, ImageView imageView) {
-        if (photoFile == null || !photoFile.exists()) {
-            imageView.setImageDrawable(null);
-            imageView.setBackgroundColor(0xFF1A1A1A);
-            return;
-        }
-
-        RequestOptions options = new RequestOptions()
-                .centerCrop()
-                .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
-                .signature(new ObjectKey(photoFile.lastModified()))
-                .placeholder(android.R.color.black)
-                .error(android.R.color.black);
-
-        Glide.with(context)
-                .load(photoFile)
-                .apply(options)
-                .into(imageView);
     }
 
     @Override
@@ -317,29 +282,11 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         return flattenedItems.size();
     }
 
-    /**
-     * 日期头部 ViewHolder
-     */
-    static class DateHeaderViewHolder extends RecyclerView.ViewHolder {
-        ImageView expandIcon;
-        TextView dateText;
-        TextView itemCount;
-
-        DateHeaderViewHolder(@NonNull View itemView) {
-            super(itemView);
-            expandIcon = itemView.findViewById(R.id.expand_icon);
-            dateText = itemView.findViewById(R.id.date_text);
-            itemCount = itemView.findViewById(R.id.item_count);
-        }
-    }
-
-    /**
-     * 图片组 ViewHolder
-     */
     static class PhotoGroupViewHolder extends RecyclerView.ViewHolder {
-        ImageView thumbFront, thumbBack, thumbLeft, thumbRight;
-        TextView videoDate, videoTime, videoSize, videoCountBadge;
-        android.widget.CheckBox checkIndicator;
+        final ImageView thumbFront, thumbBack, thumbLeft, thumbRight;
+        final TextView videoDate, videoTime, videoSize, videoCountBadge;
+        @Nullable final TextView lockBadge;
+        final android.widget.CheckBox checkIndicator;
 
         PhotoGroupViewHolder(@NonNull View itemView) {
             super(itemView);
@@ -351,6 +298,7 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
             videoTime = itemView.findViewById(R.id.video_time);
             videoSize = itemView.findViewById(R.id.video_size);
             videoCountBadge = itemView.findViewById(R.id.video_count_badge);
+            lockBadge = itemView.findViewById(R.id.video_lock_badge);
             checkIndicator = itemView.findViewById(R.id.check_indicator);
         }
     }

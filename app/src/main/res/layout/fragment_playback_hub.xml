@@ -26,7 +26,9 @@
             android:layout_marginEnd="12dp"
             android:text="视频回看"
             android:textSize="18sp"
-            android:fontFamily="sans-serif-medium" />
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false"
+            android:elevation="0dp" />
 
         <Button
             android:id="@+id/btn_tab_photo"
@@ -35,7 +37,27 @@
             android:minWidth="120dp"
             android:text="照片回看"
             android:textSize="18sp"
-            android:fontFamily="sans-serif-medium" />
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false"
+            android:elevation="0dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btn_lan_share"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:minWidth="148dp"
+            android:text="Wi-Fi 分享到手机"
+            android:textSize="15sp"
+            android:backgroundTint="@color/button_background"
+            android:textColor="@color/button_text"
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false"
+            android:elevation="0dp" />
     </LinearLayout>
 
     <View

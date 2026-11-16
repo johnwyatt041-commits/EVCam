@@ -5,11 +5,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.widget.Toast;
 
+import com.kooo.evcam.playback.VideoLockStore;
+
 import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
@@ -214,32 +217,18 @@ public class StorageCleanupManager {
         AppLog.d(TAG, typeName + "强制清理：当前占用 " + StorageHelper.formatSize(totalSize) + 
                 "，将删除 " + StorageHelper.formatSize(needToDelete) + " (20%)");
         
-        // 按修改时间排序（最旧的在前）
-        List<File> sortedFiles = new ArrayList<>(Arrays.asList(files));
-        sortedFiles.sort(Comparator.comparingLong(File::lastModified));
-        
-        // 删除最旧的文件直到达到目标大小
-        long deletedSize = 0;
-        int deletedCount = 0;
-        
-        for (File file : sortedFiles) {
-            if (totalSize - deletedSize <= targetSize) {
-                break;
-            }
-            
-            long fileSize = file.length();
-            if (file.delete()) {
-                deletedSize += fileSize;
-                deletedCount++;
-                AppLog.d(TAG, "强制删除旧文件: " + file.getName() + " (" + StorageHelper.formatSize(fileSize) + ")");
-            }
+        // 排序并删除最旧的未锁定文件直到达到目标大小
+        DeleteStats stats = deleteOldestUnprotectedFiles(files, totalSize, targetSize, "强制删除旧文件");
+        int protectedSkipped = stats.skippedLockedCount;
+        if (protectedSkipped > 0) {
+            AppLog.d(TAG, typeName + "强制清理保留了 " + protectedSkipped + " 个已锁定/录制中文件");
         }
         
-        result.deletedSize = deletedSize;
-        result.deletedCount = deletedCount;
-        result.finalSize = totalSize - deletedSize;
+        result.deletedSize = stats.deletedSize;
+        result.deletedCount = stats.deletedCount;
+        result.finalSize = totalSize - stats.deletedSize;
         
-        AppLog.d(TAG, typeName + "强制清理完成：删除 " + deletedCount + " 个文件，释放 " + StorageHelper.formatSize(deletedSize));
+        AppLog.d(TAG, typeName + "强制清理完成：删除 " + stats.deletedCount + " 个文件，释放 " + StorageHelper.formatSize(stats.deletedSize));
         
         return result;
     }
@@ -302,39 +291,55 @@ public class StorageCleanupManager {
         AppLog.d(TAG, typeName + "超过限制，需要删除: " + StorageHelper.formatSize(needToDelete) + 
                 "，目标大小: " + StorageHelper.formatSize(targetSize));
         
-        // 按修改时间排序（最旧的在前）
-        List<File> sortedFiles = new ArrayList<>(Arrays.asList(files));
-        sortedFiles.sort(Comparator.comparingLong(File::lastModified));
-        
-        // 删除最旧的文件直到达到目标大小
-        long deletedSize = 0;
-        int deletedCount = 0;
-        
-        for (File file : sortedFiles) {
-            if (totalSize - deletedSize <= targetSize) {
-                break;
-            }
-            
-            long fileSize = file.length();
-            String fileName = file.getName();
-            
-            if (file.delete()) {
-                deletedSize += fileSize;
-                deletedCount++;
-                AppLog.d(TAG, "已删除" + typeName + ": " + fileName + " (" + StorageHelper.formatSize(fileSize) + ")");
-            } else {
-                AppLog.w(TAG, "删除" + typeName + "失败: " + fileName);
-            }
+        DeleteStats stats = deleteOldestUnprotectedFiles(files, totalSize, targetSize, "已删除" + typeName);
+        if (stats.skippedLockedCount > 0) {
+            AppLog.d(TAG, typeName + "容量清理保留了 " + stats.skippedLockedCount + " 个已锁定/录制中文件");
         }
         
-        result.deletedCount = deletedCount;
-        result.deletedSize = deletedSize;
-        result.finalSize = totalSize - deletedSize;
+        result.deletedCount = stats.deletedCount;
+        result.deletedSize = stats.deletedSize;
+        result.finalSize = totalSize - stats.deletedSize;
         
-        AppLog.d(TAG, typeName + "清理完成：删除 " + deletedCount + " 个文件，释放 " + 
-                StorageHelper.formatSize(deletedSize) + "，剩余 " + StorageHelper.formatSize(result.finalSize));
+        AppLog.d(TAG, typeName + "清理完成：删除 " + stats.deletedCount + " 个文件，释放 " + 
+                StorageHelper.formatSize(stats.deletedSize) + "，剩余 " + StorageHelper.formatSize(result.finalSize));
         
         return result;
+    }
+
+    static DeleteStats deleteOldestUnprotectedFiles(File[] files,
+                                                    long totalSize,
+                                                    long targetSize,
+                                                    String deleteActionLabel) {
+        DeleteStats stats = new DeleteStats();
+        Set<String> directoryFileNames = VideoLockStore.collectFileNames(files);
+        List<File> sortedFiles = new ArrayList<>(Arrays.asList(files));
+        sortedFiles.sort(Comparator.comparingLong(File::lastModified));
+
+        for (File file : sortedFiles) {
+            if (totalSize - stats.deletedSize <= targetSize) {
+                break;
+            }
+            if (VideoLockStore.shouldPreserveDuringCleanup(file, directoryFileNames)) {
+                stats.skippedLockedCount++;
+                continue;
+            }
+            long fileSize = file.length();
+            String fileName = file.getName();
+            if (file.delete()) {
+                stats.deletedSize += fileSize;
+                stats.deletedCount++;
+                AppLog.d(TAG, deleteActionLabel + ": " + fileName + " (" + StorageHelper.formatSize(fileSize) + ")");
+            } else {
+                AppLog.w(TAG, deleteActionLabel + "失败: " + fileName);
+            }
+        }
+        return stats;
+    }
+
+    static final class DeleteStats {
+        long deletedSize = 0;
+        int deletedCount = 0;
+        int skippedLockedCount = 0;
     }
     
     /**

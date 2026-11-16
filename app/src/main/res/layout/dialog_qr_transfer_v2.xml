@@ -1,165 +1,236 @@
 <?xml version="1.0" encoding="utf-8"?>
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
-    android:orientation="vertical"
-    android:padding="16dp"
-    android:background="#FFFFFF">
+    android:background="@color/card_background">
 
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="扫码互传"
-        android:textSize="20sp"
-        android:textStyle="bold"
-        android:textColor="#1A1A1A"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="8dp" />
-
-    <!-- IP 地址选择 -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="选择网络地址："
-        android:textSize="14sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="4dp" />
-
-    <Spinner
-        android:id="@+id/ip_spinner"
+    <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="48dp"
-        android:layout_marginBottom="12dp"
-        android:background="@android:drawable/btn_dropdown" />
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="20dp">
 
-    <!-- 二维码区域 -->
-    <FrameLayout
-        android:layout_width="200dp"
-        android:layout_height="200dp"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="12dp"
-        android:background="#FFFFFF"
-        android:padding="8dp">
+        <TextView
+            android:id="@+id/dialog_title"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_gravity="center_horizontal"
+            android:layout_marginBottom="4dp"
+            android:text="Wi-Fi 浏览器与扫码分享"
+            android:textColor="@color/text_primary"
+            android:textSize="20sp"
+            android:textStyle="bold" />
 
-        <ImageView
-            android:id="@+id/qr_code_image"
+        <TextView
+            android:id="@+id/lan_hint_text"
             android:layout_width="match_parent"
-            android:layout_height="match_parent"
-            android:scaleType="fitCenter"
-            android:contentDescription="二维码" />
-
-        <ProgressBar
-            android:id="@+id/qr_loading"
-            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_gravity="center"
-            android:visibility="visible" />
-    </FrameLayout>
+            android:layout_marginBottom="12dp"
+            android:gravity="center_horizontal"
+            android:text="离开此窗口仍可继续下载或播放；60 秒无人访问后自动关闭，播放和下载期间保持开启。"
+            android:textColor="@color/text_secondary"
+            android:textSize="13sp" />
 
-    <!-- URL 显示区域（方便测试复制） -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="#F5F5F5"
-        android:padding="8dp"
-        android:layout_marginBottom="8dp">
-
-        <TextView
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="URL:"
-            android:textSize="12sp"
-            android:textColor="#666666"
-            android:layout_marginEnd="8dp" />
+            android:orientation="horizontal"
+            android:gravity="top"
+            android:baselineAligned="false">
 
-        <TextView
-            android:id="@+id/url_text"
-            android:layout_width="0dp"
+            <!-- Left column: QR code + URL -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="0.95"
+                android:orientation="vertical"
+                android:gravity="center_horizontal"
+                android:paddingEnd="14dp">
+
+                <FrameLayout
+                    android:layout_width="210dp"
+                    android:layout_height="210dp"
+                    android:layout_marginBottom="10dp"
+                    android:background="@color/white"
+                    android:padding="10dp">
+
+                    <ImageView
+                        android:id="@+id/qr_code_image"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:contentDescription="二维码"
+                        android:scaleType="fitCenter" />
+
+                    <ProgressBar
+                        android:id="@+id/qr_loading"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center"
+                        android:visibility="visible" />
+                </FrameLayout>
+
+                <TextView
+                    android:id="@+id/server_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:gravity="center"
+                    android:text="正在启动局域网服务..."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/transfer_status"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="6dp"
+                    android:gravity="center"
+                    android:text="等待连接..."
+                    android:textColor="@color/button_accent"
+                    android:textSize="14sp"
+                    android:visibility="visible" />
+            </LinearLayout>
+
+            <!-- Right column: NIC picker + URL + file list -->
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1.15"
+                android:orientation="vertical">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:text="选择局域网网卡（切换后会重新生成地址，请重新扫码）："
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <Spinner
+                    android:id="@+id/ip_spinner"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginBottom="10dp"
+                    android:background="@color/input_background" />
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:background="@color/page_background"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal"
+                    android:padding="10dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginEnd="8dp"
+                        android:text="地址"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp" />
+
+                    <TextView
+                        android:id="@+id/url_text"
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:ellipsize="middle"
+                        android:maxLines="1"
+                        android:text="http://..."
+                        android:textColor="@color/button_accent"
+                        android:textIsSelectable="true"
+                        android:textSize="13sp" />
+
+                    <Button
+                        android:id="@+id/btn_copy_url"
+                        android:layout_width="wrap_content"
+                        android:layout_height="40dp"
+                        android:layout_marginStart="8dp"
+                        android:backgroundTint="@color/button_background"
+                        android:elevation="0dp"
+                        android:text="复制"
+                        android:textAllCaps="false"
+                        android:textColor="@color/button_text"
+                        android:textSize="13sp" />
+                </LinearLayout>
+
+                <TextView
+                    android:id="@+id/file_list_header"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="4dp"
+                    android:text="本次共享文件："
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/library_mode_notice"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginBottom="10dp"
+                    android:background="@color/page_background"
+                    android:padding="12dp"
+                    android:text="手机扫码或浏览器打开上方网址，即可按日期与“已锁定”筛选，支持在线拖动进度条回看与原片下载。"
+                    android:textColor="@color/text_primary"
+                    android:textSize="13sp"
+                    android:visibility="gone" />
+
+                <ListView
+                    android:id="@+id/file_list_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="135dp"
+                    android:layout_marginBottom="12dp"
+                    android:background="@color/page_background"
+                    android:divider="@color/ui_border"
+                    android:dividerHeight="1dp" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="http://..."
-            android:textSize="12sp"
-            android:textColor="#1976D2"
-            android:textIsSelectable="true"
-            android:maxLines="1"
-            android:ellipsize="middle" />
+            android:layout_marginTop="8dp"
+            android:gravity="center"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btn_copy_url"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="复制"
-            android:textSize="12sp"
-            android:layout_marginStart="8dp" />
+            <Button
+                android:id="@+id/btn_refresh_ip"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/button_background"
+                android:elevation="0dp"
+                android:text="刷新网卡"
+                android:textAllCaps="false"
+                android:textColor="@color/button_text"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btn_keep_background"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1.15"
+                android:backgroundTint="@color/button_accent"
+                android:elevation="0dp"
+                android:text="后台继续下载"
+                android:textAllCaps="false"
+                android:textColor="@color/ui_on_accent"
+                android:textSize="14sp" />
+
+            <Button
+                android:id="@+id/btn_stop_server"
+                android:layout_width="0dp"
+                android:layout_height="48dp"
+                android:layout_weight="1"
+                android:backgroundTint="@color/ui_danger"
+                android:elevation="0dp"
+                android:text="停止分享"
+                android:textAllCaps="false"
+                android:textColor="@color/ui_on_accent"
+                android:textSize="14sp" />
+        </LinearLayout>
     </LinearLayout>
-
-    <!-- 状态信息 -->
-    <TextView
-        android:id="@+id/server_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="正在启动服务器..."
-        android:textSize="12sp"
-        android:textColor="#666666"
-        android:layout_gravity="center_horizontal"
-        android:layout_marginBottom="4dp" />
-
-    <TextView
-        android:id="@+id/transfer_status"
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="等待连接..."
-        android:textSize="14sp"
-        android:textColor="#1976D2"
-        android:layout_gravity="center_horizontal"
-        android:visibility="gone"
-        android:layout_marginBottom="8dp" />
-
-    <!-- 文件列表 -->
-    <TextView
-        android:layout_width="wrap_content"
-        android:layout_height="wrap_content"
-        android:text="待传输文件："
-        android:textSize="14sp"
-        android:textColor="#666666"
-        android:layout_marginBottom="4dp" />
-
-    <ListView
-        android:id="@+id/file_list_view"
-        android:layout_width="match_parent"
-        android:layout_height="120dp"
-        android:layout_marginBottom="12dp"
-        android:background="#F5F5F5"
-        android:divider="#DDDDDD"
-        android:dividerHeight="1dp" />
-
-    <!-- 操作按钮 -->
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:orientation="horizontal"
-        android:gravity="center">
-
-        <Button
-            android:id="@+id/btn_refresh_ip"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="刷新"
-            android:textSize="14sp"
-            android:layout_marginEnd="8dp" />
-
-        <Button
-            android:id="@+id/btn_stop_server"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="1"
-            android:text="停止"
-            android:textSize="14sp"
-            android:backgroundTint="#D32F2F"
-            android:textColor="#FFFFFF" />
-    </LinearLayout>
-
-</LinearLayout>
+</ScrollView>

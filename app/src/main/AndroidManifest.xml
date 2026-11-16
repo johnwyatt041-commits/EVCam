@@ -154,6 +154,13 @@
             android:enabled="true"
             android:exported="false" />
 
+        <!-- 局域网扫码/浏览器回看分享前台服务 -->
+        <service
+            android:name=".transfer.LanShareService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
+
         <activity
             android:name=".LogcatViewerActivity"
             android:theme="@android:style/Theme.DeviceDefault.NoActionBar"

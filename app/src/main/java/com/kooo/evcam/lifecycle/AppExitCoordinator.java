@@ -213,6 +213,7 @@ public final class AppExitCoordinator {
                 FloatingWindowService.stop(appContext);
                 safeStopService(appContext, BlindSpotService.class);
                 safeStopService(appContext, RecordingFloatingService.class);
+                safeStopService(appContext, com.kooo.evcam.transfer.LanShareService.class);
             }
 
             @Override

@@ -33,6 +33,9 @@ public class PhotoGroup {
     /** 总文件大小（所有位置之和） */
     private long totalSize;
 
+    /** 是否已通过 .lock 侧车锁定保护 */
+    private boolean locked;
+
     public PhotoGroup(String timestampPrefix) {
         this.timestampPrefix = timestampPrefix;
         this.photoFiles = new HashMap<>();
@@ -180,16 +183,43 @@ public class PhotoGroup {
         return photoFiles.containsKey(position);
     }
 
+    public boolean isLocked() {
+        return locked;
+    }
+
+    public void setLocked(boolean locked) {
+        this.locked = locked;
+    }
+
+    public String getFormattedSecondTime() {
+        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss", Locale.getDefault());
+        return sdf.format(captureTime);
+    }
+
+    public java.util.List<File> getShareableFiles() {
+        java.util.List<File> files = new java.util.ArrayList<>();
+        String[] positions = {POSITION_FRONT, POSITION_BACK, POSITION_LEFT, POSITION_RIGHT};
+        for (String pos : positions) {
+            File file = photoFiles.get(pos);
+            if (file != null && file.exists() && file.length() > 0) {
+                files.add(file);
+            }
+        }
+        return files;
+    }
+
     public int deleteAll() {
         int deleted = 0;
         for (File file : photoFiles.values()) {
             if (file.delete()) {
+                VideoLockStore.cleanupLockSidecar(file);
                 deleted++;
             }
         }
         if (deleted > 0) {
             photoFiles.clear();
             totalSize = 0;
+            locked = false;
         }
         return deleted;
     }

@@ -35,3 +35,6 @@
 # WorkManager 2.9 / Room 2.5 creates this implementation reflectively at cold startup.
 # Its consumer rule retains the class name but full-mode R8 removes the no-arg constructor.
 -keepclassmembers class androidx.work.impl.WorkDatabase_Impl { public <init>(); }
+
+# Preserve NanoHTTPD entrypoints used by FileTransferServer.
+-keepnames class fi.iki.elonen.NanoHTTPD** { *; }

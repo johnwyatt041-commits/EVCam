@@ -1,11 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
     android:orientation="vertical"
     android:padding="24dp"
     android:gravity="center_horizontal"
-    android:background="#FFFFFF">
+    android:background="@color/card_background">
 
     <TextView
         android:id="@+id/dialog_title"
@@ -14,16 +15,16 @@
         android:text="分享视频"
         android:textSize="22sp"
         android:textStyle="bold"
-        android:textColor="#1A1A1A"
+        android:textColor="@color/text_primary"
         android:layout_marginBottom="8dp" />
 
     <TextView
         android:id="@+id/dialog_message"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="共 0 个视频文件"
+        android:text="共 0 个文件"
         android:textSize="16sp"
-        android:textColor="#666666"
+        android:textColor="@color/text_secondary"
         android:layout_marginBottom="24dp" />
 
     <LinearLayout
@@ -31,7 +32,7 @@
         android:layout_height="wrap_content"
         android:orientation="horizontal"
         android:gravity="center"
-        android:layout_marginBottom="16dp">
+        android:layout_marginBottom="8dp">
 
         <LinearLayout
             android:id="@+id/btn_qr"
@@ -49,14 +50,15 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:src="@drawable/ic_qr_code"
+                app:tint="@color/button_accent"
                 android:layout_marginBottom="8dp" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="二维码"
+                android:text="二维码互传"
                 android:textSize="14sp"
-                android:textColor="#1976D2" />
+                android:textColor="@color/button_accent" />
         </LinearLayout>
 
         <LinearLayout
@@ -75,14 +77,15 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:src="@drawable/ic_share"
+                app:tint="@color/text_primary"
                 android:layout_marginBottom="8dp" />
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="分享"
+                android:text="系统分享"
                 android:textSize="14sp"
-                android:textColor="#1976D2" />
+                android:textColor="@color/text_primary" />
         </LinearLayout>
 
         <LinearLayout
@@ -101,6 +104,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:src="@drawable/ic_close"
+                app:tint="@color/ui_danger"
                 android:layout_marginBottom="8dp" />
 
             <TextView
@@ -108,9 +112,7 @@
                 android:layout_height="wrap_content"
                 android:text="关闭"
                 android:textSize="14sp"
-                android:textColor="#D32F2F" />
+                android:textColor="@color/ui_danger" />
         </LinearLayout>
-
     </LinearLayout>
-
 </LinearLayout>
