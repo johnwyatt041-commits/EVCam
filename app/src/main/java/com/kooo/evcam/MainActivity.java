@@ -3769,6 +3769,9 @@ public class MainActivity extends AppCompatActivity implements
     private void updateFeishuFragmentUI() {
         FragmentManager fragmentManager = getSupportFragmentManager();
         Fragment fragment = fragmentManager.findFragmentById(R.id.fragment_container);
+        if (fragment instanceof SettingsFragment) {
+            fragment = ((SettingsFragment) fragment).getActiveDetailFragment();
+        }
         if (fragment instanceof FeishuFragment) {
             ((FeishuFragment) fragment).updateServiceStatus();
         }

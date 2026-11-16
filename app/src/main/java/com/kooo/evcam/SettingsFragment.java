@@ -112,6 +112,13 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
         }
     }
 
+    /** 返回当前右侧详情容器正在显示的设置页或其二级子页（若已附加）。 */
+    @Nullable
+    public Fragment getActiveDetailFragment() {
+        if (!isAdded()) return null;
+        return getChildFragmentManager().findFragmentById(R.id.settings_detail_container);
+    }
+
     /** 处理硬件返回键：若右侧详情区存在二级子页返回栈，优先回退一级。 */
     public boolean handleBackPressed() {
         if (isAdded() && getChildFragmentManager().getBackStackEntryCount() > 0) {
