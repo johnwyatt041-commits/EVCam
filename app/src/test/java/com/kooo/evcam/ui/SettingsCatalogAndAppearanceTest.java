@@ -70,7 +70,7 @@ public class SettingsCatalogAndAppearanceTest {
     @Test
     public void catalogShowsOnlyImplementedEntriesWithoutShellsOrExcludedCategories() {
         List<SettingsCatalog.Entry> entries = SettingsCatalog.getImplementedEntries();
-        assertEquals(9, entries.size());
+        assertEquals(10, entries.size());
 
         List<String> actualTitles = new ArrayList<>();
         List<String> actualDisplayTitles = new ArrayList<>();
@@ -93,6 +93,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "5. 补盲",
                 "10. 信号预设与匹配",
                 "11. 飞书远程",
+                "12. 配置广场",
                 "13. 系统与权限",
                 "14. 软件更新",
                 "15. Debug 日志"
@@ -105,6 +106,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "补盲",
                 "信号预设与匹配",
                 "飞书远程",
+                "配置广场",
                 "系统与权限",
                 "软件更新",
                 "Debug 日志"

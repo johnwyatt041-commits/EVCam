@@ -31,7 +31,7 @@ import java.util.Map;
 
 /**
  * SC 风格双栏设置页（Master-Detail）：
- * 左侧分类栏固定展示 7 个已实装分类，右侧容器原地呈现当前选中分类的详情页与二级子页。
+ * 左侧分类栏固定展示已实装分类，右侧容器原地呈现当前选中分类的详情页与二级子页。
  */
 public class SettingsFragment extends Fragment implements UiThemeController.ThemeAware {
     private static final String ARG_INITIAL_CATEGORY = "initial_category";
@@ -367,6 +367,8 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
                 return new com.kooo.evcam.ui.VehicleSignalPresetFragment();
             case SettingsCatalog.ID_FEISHU:
                 return new FeishuFragment();
+            case SettingsCatalog.ID_CONFIG_PLAZA:
+                return new com.kooo.evcam.ui.ConfigPlazaFragment();
             case SettingsCatalog.ID_SYSTEM_PERMISSIONS:
                 return new PermissionSettingsFragment();
             case SettingsCatalog.ID_UPDATE:

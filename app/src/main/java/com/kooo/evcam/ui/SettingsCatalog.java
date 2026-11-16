@@ -19,6 +19,7 @@ public final class SettingsCatalog {
     public static final String ID_BLIND_SPOT = "blind_spot";
     public static final String ID_SIGNAL_PRESET = "signal_preset";
     public static final String ID_FEISHU = "feishu";
+    public static final String ID_CONFIG_PLAZA = "config_plaza";
     public static final String ID_SYSTEM_PERMISSIONS = "system_permissions";
     public static final String ID_UPDATE = "update";
     public static final String ID_DEBUG_LOG = "debug_log";
@@ -66,8 +67,10 @@ public final class SettingsCatalog {
                     "银河 E5 四类信号源预设、实时快照诊断与 VHAL 属性映射", R.drawable.ic_vehicle_outline),
             new Entry(ID_FEISHU, "11", "11. 飞书远程", "飞书远程",
                     "飞书机器人凭据、自启动连接与远程查看控制", R.drawable.ic_nav_feishu_mono),
+            new Entry(ID_CONFIG_PLAZA, "12", "12. 配置广场", "配置广场",
+                    "银河 E5 离线预设、本地配置快照导出导入与一键回滚", R.drawable.ic_nav_config_plaza),
             new Entry(ID_SYSTEM_PERMISSIONS, "13", "13. 系统与权限", "系统与权限",
-                    "开机自启动、使用提示、权限授予与系统后台白名单", R.drawable.ic_nav_permissions),
+                    "权限分级诊断、开机自启动、ADB 一键授权与系统后台白名单", R.drawable.ic_nav_permissions),
             new Entry(ID_UPDATE, "14", "14. 软件更新", "软件更新",
                     "当前版本信息、自定义更新服务器与手动检查更新", R.drawable.ic_nav_update),
             new Entry(ID_DEBUG_LOG, "15", "15. Debug 日志", "Debug 日志",

@@ -1,0 +1,125 @@
+{
+  "schemaVersion": 1,
+  "vehicleModel": "galaxy_e5",
+  "id": "builtin_e5_surround_reverse_enhanced",
+  "name": "银河 E5 360 倒车联动增强版",
+  "description": "泊车与盲区协同：默认模式 A（360 + 动态引导线）、R 档 200ms 自动弹出与 P 档 3s / 20km/h 自动返桌、R/D 换挡提示、360 暂停补盲互斥。",
+  "authorNote": "EVCam E5 官方离线基线",
+  "createdAt": "2026-11-16 00:00:00",
+  "sourceType": "builtin",
+  "sections": {
+    "appearance": {
+      "version": 1,
+      "values": {
+        "theme_mode": "follow_system",
+        "default_start_page": "recording",
+        "preview_mode": "mode_a",
+        "preview_presentation": "sidebar",
+        "corner_nav_mode": "auto",
+        "view_shortcuts_enabled": true,
+        "accessibility_overlay_enabled": true,
+        "confirm_door_exit": true,
+        "door_exit_delay_seconds": 5,
+        "auto_start_on_boot": true
+      }
+    },
+    "camera_mapping": {
+      "version": 1,
+      "values": {
+        "car_model": "galaxy_e5",
+        "camera_front_id": "2",
+        "camera_back_id": "1",
+        "camera_left_id": "3",
+        "camera_right_id": "0",
+        "recording_camera_front_enabled": false,
+        "recording_camera_back_enabled": true,
+        "recording_camera_left_enabled": true,
+        "recording_camera_right_enabled": true,
+        "camera_front_visible": true,
+        "camera_back_visible": true,
+        "camera_left_visible": true,
+        "camera_right_visible": true,
+        "mode_b_visible": [true, true, true, true],
+        "mode_c_show_left": true,
+        "mode_c_show_right": true
+      }
+    },
+    "recording": {
+      "version": 1,
+      "values": {
+        "recording_mode": "auto",
+        "force_h264_encoding": false,
+        "target_resolution": "default",
+        "bitrate_level": "medium",
+        "framerate_level": "standard",
+        "target_recording_fps": 25,
+        "preview_fps_limit": 0,
+        "segment_duration_minutes": 1,
+        "auto_start_recording": false,
+        "screen_off_recording": false,
+        "recording_stats_enabled": true,
+        "keep_camera_connected": false,
+        "camera_recovery_page_enabled": false,
+        "rd_shift_auto_popup_enabled": true,
+        "rd_shift_popup_seconds": 5,
+        "storage_location": "internal",
+        "relay_write_enabled": true,
+        "video_storage_limit_gb": 10,
+        "photo_storage_limit_gb": 10,
+        "video_image_adjust_enabled": false,
+        "timestamp_watermark_enabled": true,
+        "vehicle_status_watermark": true,
+        "watermark_speed_enabled": true,
+        "watermark_gear_turn_enabled": true,
+        "watermark_custom_text_enabled": false,
+        "video_watermark_position": "BOTTOM_RIGHT",
+        "video_watermark_style": "CARD",
+        "recording_start_sound_mode": "NONE",
+        "recording_stop_sound_mode": "NONE",
+        "recording_floating_enabled": true
+      }
+    },
+    "vehicle_rules_signals": {
+      "version": 1,
+      "values": {
+        "turn_signal_trigger_mode": "vhal_grpc",
+        "t06_vhal_prop_gear_selection": 0,
+        "t06_vhal_prop_current_gear": 0,
+        "t06_vhal_prop_speed": 0,
+        "t06_vhal_prop_door_pos": 0,
+        "t06_vhal_prop_turn_signal": 0
+      }
+    },
+    "blind_spot_hud": {
+      "version": 1,
+      "values": {
+        "blind_spot_global_enabled": true,
+        "turn_signal_linkage_enabled": true,
+        "turn_signal_timeout": 10,
+        "turn_signal_reuse_main_floating": true,
+        "t04_blind_spot_suppress_on_360": true,
+        "out_mirror_main_back_h": true
+      }
+    },
+    "surround_360": {
+      "version": 1,
+      "values": {
+        "surround_top_view": "DRIVE",
+        "surround_bottom_view": "FRONT_WHEELS",
+        "surround_wheels_collapsed": false,
+        "surround_stretch_road_views": false,
+        "surround_overlay_buttons_visible": true,
+        "reverse_preview_enabled": true,
+        "reverse_preview_delay_ms": 200,
+        "preview_speed_close_enabled": true,
+        "preview_speed_threshold_kmh": 20,
+        "park_preview_close_enabled": true,
+        "park_preview_close_delay_seconds": 3,
+        "surround_ground_width_cm": 206,
+        "surround_ground_length_cm": 530,
+        "surround_ground_front_ext_cm": 0,
+        "preview_guidance_enabled": true
+      }
+    }
+  }
+}

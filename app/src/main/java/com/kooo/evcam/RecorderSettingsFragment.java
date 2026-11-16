@@ -1584,7 +1584,7 @@ public class RecorderSettingsFragment extends Fragment {
             } else {
                 sb.append("未授权 ✗\n");
                 sb.append("⚠️ 提示: 访问U盘需要此权限！\n");
-                sb.append("   请前往「权限设置」授予「所有文件访问权限」\n");
+                sb.append("   请前往「13. 系统与权限」授予「所有文件访问权限」\n");
             }
         } else {
             sb.append("Android 版本低于 11，无需「所有文件访问权限」\n");
