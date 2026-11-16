@@ -15,6 +15,7 @@ public final class SettingsCatalog {
 
     public static final String ID_APPEARANCE = "appearance";
     public static final String ID_RECORDER = "recorder";
+    public static final String ID_SURROUND_360 = "surround_360";
     public static final String ID_BLIND_SPOT = "blind_spot";
     public static final String ID_SIGNAL_PRESET = "signal_preset";
     public static final String ID_FEISHU = "feishu";
@@ -57,6 +58,8 @@ public final class SettingsCatalog {
                     "主题外观（跟随系统/深色/浅色）、默认启动页、开门退出二次确认", R.drawable.ic_nav_settings),
             new Entry(ID_RECORDER, "3", "3. 记录仪", "记录仪",
                     "车型布局、录制模式、分段时长、摄像头选择、画质分辨率、存储与水印", R.drawable.ic_nav_recording),
+            new Entry(ID_SURROUND_360, "4", "4. 360 画面", "360 画面",
+                    "360 全景模式 A、分视角、R 档自动预览返桌、E5 校准与离线车模", R.drawable.ic_nav_recording),
             new Entry(ID_BLIND_SPOT, "5", "5. 补盲", "补盲",
                     "转向补盲联动、悬浮窗口、副屏显示/流输出与位置校准", R.drawable.ic_nav_blind_spot),
             new Entry(ID_SIGNAL_PRESET, "10", "10. 信号预设与匹配", "信号预设与匹配",

@@ -151,6 +151,10 @@ public final class AppShellController {
                                         Runnable onToggleFullscreen,
                                         @Nullable Consumer<Boolean> onFullscreenChanged) {
         this.fullscreenListener = onFullscreenChanged;
+        View btnA = shell.findViewById(R.id.ui_mode_a);
+        if (btnA != null) {
+            btnA.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_A));
+        }
         View btnB = shell.findViewById(R.id.ui_mode_b);
         if (btnB != null) {
             btnB.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_B));
@@ -320,6 +324,7 @@ public final class AppShellController {
     public void setPreviewModeUi(PreviewMode mode) {
         this.activePreviewMode = (mode != null) ? mode : PreviewMode.MODE_B;
         applyPreviewModeColors(activity);
+        updateHeader();
     }
 
     public void setRecordingState(String text, @ColorRes int color) {
@@ -471,6 +476,8 @@ public final class AppShellController {
     }
 
     private void applyPreviewModeColors(Context themedContext) {
+        styleShellToggle(shell.findViewById(R.id.ui_mode_a), themedContext,
+                activePreviewMode == PreviewMode.MODE_A);
         styleShellToggle(shell.findViewById(R.id.ui_mode_b), themedContext,
                 activePreviewMode == PreviewMode.MODE_B);
         styleShellToggle(shell.findViewById(R.id.ui_mode_c), themedContext,
@@ -516,7 +523,8 @@ public final class AppShellController {
         boolean hasEditablePreview = currentRoot == R.id.nav_recording
                 && activity.findViewById(R.id.ui_preview_layout) != null;
         preview.setVisibility(currentRoot == R.id.nav_recording ? View.VISIBLE : View.GONE);
-        shell.findViewById(R.id.ui_edit_layout).setVisibility(hasEditablePreview ? View.VISIBLE : View.GONE);
+        shell.findViewById(R.id.ui_edit_layout).setVisibility(
+                (hasEditablePreview && activePreviewMode != PreviewMode.MODE_A) ? View.VISIBLE : View.GONE);
         View modeControls = shell.findViewById(R.id.ui_preview_mode_controls);
         if (modeControls != null) {
             modeControls.setVisibility(hasEditablePreview ? View.VISIBLE : View.GONE);

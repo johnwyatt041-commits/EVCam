@@ -44,6 +44,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private Button btnStartRecording;
     private Button btnStartPlayback;
     private Button btnStartSettings;
+    private Button btnDefaultModeA;
     private Button btnDefaultModeB;
     private Button btnDefaultModeC;
     private Button btnPresentationSidebar;
@@ -83,6 +84,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         btnStartRecording = view.findViewById(R.id.btn_start_recording);
         btnStartPlayback = view.findViewById(R.id.btn_start_playback);
         btnStartSettings = view.findViewById(R.id.btn_start_settings);
+        btnDefaultModeA = view.findViewById(R.id.btn_default_mode_a);
         btnDefaultModeB = view.findViewById(R.id.btn_default_mode_b);
         btnDefaultModeC = view.findViewById(R.id.btn_default_mode_c);
         btnPresentationSidebar = view.findViewById(R.id.btn_presentation_sidebar);
@@ -112,6 +114,9 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         btnStartPlayback.setOnClickListener(v -> selectStartPage(AppConfig.START_PAGE_PLAYBACK));
         btnStartSettings.setOnClickListener(v -> selectStartPage(AppConfig.START_PAGE_SETTINGS));
 
+        if (btnDefaultModeA != null) {
+            btnDefaultModeA.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_A));
+        }
         if (btnDefaultModeB != null) {
             btnDefaultModeB.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_B));
         }
@@ -304,6 +309,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         if (previewModeStatusText != null) {
             previewModeStatusText.setText("当前默认模式：" + formatPreviewModeLabel(previewMode));
         }
+        applyOptionButtonState(btnDefaultModeA, context, AppConfig.PREVIEW_MODE_A.equals(previewMode));
         applyOptionButtonState(btnDefaultModeB, context, AppConfig.PREVIEW_MODE_B.equals(previewMode));
         applyOptionButtonState(btnDefaultModeC, context, AppConfig.PREVIEW_MODE_C.equals(previewMode));
 
@@ -337,6 +343,9 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
 
     @NonNull
     public static String formatPreviewModeLabel(@Nullable String previewMode) {
+        if (AppConfig.PREVIEW_MODE_A.equals(previewMode)) {
+            return "全景 A（360 + 分视角）";
+        }
         return AppConfig.PREVIEW_MODE_C.equals(previewMode)
                 ? "三路 C（档位联动大屏）" : "分栏 B（三列分屏）";
     }

@@ -242,6 +242,18 @@
                         android:gravity="center_vertical"
                         android:background="@drawable/preview_shortcut_pill">
                         <TextView
+                            android:id="@+id/btn_shortcut_mode_a"
+                            android:layout_width="wrap_content"
+                            android:layout_height="30dp"
+                            android:gravity="center"
+                            android:paddingHorizontal="10dp"
+                            android:text="A"
+                            android:textColor="#FFFFFF"
+                            android:textSize="13sp"
+                            android:fontFamily="sans-serif-medium"
+                            android:clickable="true"
+                            android:focusable="true" />
+                        <TextView
                             android:id="@+id/btn_shortcut_mode_b"
                             android:layout_width="wrap_content"
                             android:layout_height="30dp"

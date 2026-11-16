@@ -3445,7 +3445,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     public static final String PREVIEW_MODE_B = "mode_b";
     public static final String PREVIEW_MODE_C = "mode_c";
-    public static final String PREVIEW_MODE_A = "mode_a"; // 预留给 T07（360 拼接模式）
+    public static final String PREVIEW_MODE_A = "mode_a"; // T07：360 全景 + 分视角模式
 
     public static final String CORNER_NAV_AUTO = "auto";     // 仅沉浸全屏显示
     public static final String CORNER_NAV_ALWAYS = "always"; // 始终显示
@@ -3455,8 +3455,11 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String KEY_CORNER_NAV_MODE = "t03_corner_nav_mode";
     private static final String KEY_VIEW_SHORTCUTS_ENABLED = "t03_view_shortcuts_enabled";
 
-    /** 规范化主预览模式；T03 阶段支持 B（三栏分屏）与 C（三路大屏），A 留待 T07 激活。 */
+    /** 规范化主预览模式；T07 激活模式 A（360 全景），与模式 B/C 并列可选。 */
     public static String normalizePreviewMode(String mode) {
+        if (PREVIEW_MODE_A.equals(mode)) {
+            return PREVIEW_MODE_A;
+        }
         if (PREVIEW_MODE_C.equals(mode)) {
             return PREVIEW_MODE_C;
         }
@@ -4108,6 +4111,297 @@ public class AppConfig implements CameraMirrorPolicy.Store {
                 getCustomDoorPosPropId(),
                 getCustomTurnSignalPropId()
         );
+    }
+
+    // ==================== T07: 360 全景模式 A 与 4.1–4.3 设置 ====================
+
+    public static final String SURROUND_CALIBRATION_E5_BUILTIN = "E5_BUILTIN";
+    public static final String SURROUND_CALIBRATION_E5_CUSTOM = "E5_CUSTOM";
+    public static final String SURROUND_CAR_MODEL_E5_BUILTIN = "E5_BUILTIN";
+    public static final String SURROUND_CAR_MODEL_CUSTOM_PNG = "CUSTOM_PNG";
+
+    public static final int MIN_REVERSE_PREVIEW_DELAY_MS = 0;
+    public static final int MAX_REVERSE_PREVIEW_DELAY_MS = 5000;
+    public static final int STEP_REVERSE_PREVIEW_DELAY_MS = 50;
+    public static final int DEFAULT_REVERSE_PREVIEW_DELAY_MS = 200;
+
+    public static final int MIN_SPEED_CLOSE_KMH = 15;
+    public static final int MAX_SPEED_CLOSE_KMH = 50;
+    public static final int DEFAULT_SPEED_CLOSE_KMH = 20;
+
+    public static final int MIN_PARK_CLOSE_SECONDS = 1;
+    public static final int MAX_PARK_CLOSE_SECONDS = 60;
+    public static final int DEFAULT_PARK_CLOSE_SECONDS = 3;
+
+    public static final int MIN_SURROUND_GROUND_WIDTH_CM = 160;
+    public static final int MAX_SURROUND_GROUND_WIDTH_CM = 260;
+    public static final int DEFAULT_SURROUND_GROUND_WIDTH_CM = 206;
+
+    public static final int MIN_SURROUND_GROUND_LENGTH_CM = 420;
+    public static final int MAX_SURROUND_GROUND_LENGTH_CM = 600;
+    public static final int DEFAULT_SURROUND_GROUND_LENGTH_CM = 530;
+
+    public static final int MIN_SURROUND_GROUND_FRONT_EXT_CM = 0;
+    public static final int MAX_SURROUND_GROUND_FRONT_EXT_CM = 100;
+    public static final int DEFAULT_SURROUND_GROUND_FRONT_EXT_CM = 0;
+
+    private static final String KEY_SURROUND_TOP_VIEW = "surround_top_view";
+    private static final String KEY_SURROUND_BOTTOM_VIEW = "surround_bottom_view";
+    private static final String KEY_SURROUND_WHEELS_COLLAPSED = "surround_wheels_collapsed";
+    private static final String KEY_SURROUND_STRETCH_ROAD_VIEWS = "surround_stretch_road_views";
+    private static final String KEY_SURROUND_OVERLAY_BUTTONS_VISIBLE = "surround_overlay_buttons_visible";
+
+    private static final String KEY_REVERSE_PREVIEW_ENABLED = "reverse_preview_enabled";
+    private static final String KEY_REVERSE_PREVIEW_DELAY_MS = "reverse_preview_delay_ms";
+    private static final String KEY_PREVIEW_SPEED_CLOSE_ENABLED = "preview_speed_close_enabled";
+    private static final String KEY_PREVIEW_SPEED_THRESHOLD_KMH = "preview_speed_threshold_kmh";
+    private static final String KEY_PARK_PREVIEW_CLOSE_ENABLED = "park_preview_close_enabled";
+    private static final String KEY_PARK_PREVIEW_CLOSE_DELAY_SECONDS = "park_preview_close_delay_seconds";
+
+    private static final String KEY_SURROUND_CALIBRATION_SOURCE = "surround_calibration_source";
+    private static final String KEY_SURROUND_CUSTOM_CALIBRATION_PATH = "surround_custom_calibration_path";
+    private static final String KEY_SURROUND_GROUND_WIDTH_CM = "surround_ground_width_cm";
+    private static final String KEY_SURROUND_GROUND_LENGTH_CM = "surround_ground_length_cm";
+    private static final String KEY_SURROUND_GROUND_FRONT_EXT_CM = "surround_ground_front_ext_cm";
+    private static final String KEY_PREVIEW_GUIDANCE_ENABLED = "preview_guidance_enabled";
+    private static final String KEY_PREVIEW_GUIDANCE_LAST_ANGLE = "preview_guidance_last_valid_angle";
+    private static final String KEY_SURROUND_CAR_MODEL_SOURCE = "surround_car_model_source";
+    private static final String KEY_SURROUND_CUSTOM_CAR_MODEL_PATH = "surround_custom_car_model_path";
+
+    public com.kooo.evcam.surround.SurroundViewMode getSurroundTopView() {
+        com.kooo.evcam.surround.SurroundViewMode top =
+                com.kooo.evcam.surround.SurroundViewMode.fromKey(prefs.getString(KEY_SURROUND_TOP_VIEW, "DRIVE"));
+        com.kooo.evcam.surround.SurroundViewMode bottom =
+                com.kooo.evcam.surround.SurroundViewMode.fromKey(prefs.getString(KEY_SURROUND_BOTTOM_VIEW, "FRONT_WHEELS"));
+        return com.kooo.evcam.surround.SurroundViewMode.normalizeDetailViews(top, bottom)[0];
+    }
+
+    public com.kooo.evcam.surround.SurroundViewMode getSurroundBottomView() {
+        com.kooo.evcam.surround.SurroundViewMode top =
+                com.kooo.evcam.surround.SurroundViewMode.fromKey(prefs.getString(KEY_SURROUND_TOP_VIEW, "DRIVE"));
+        com.kooo.evcam.surround.SurroundViewMode bottom =
+                com.kooo.evcam.surround.SurroundViewMode.fromKey(prefs.getString(KEY_SURROUND_BOTTOM_VIEW, "FRONT_WHEELS"));
+        return com.kooo.evcam.surround.SurroundViewMode.normalizeDetailViews(top, bottom)[1];
+    }
+
+    public void setSurroundDetailViews(com.kooo.evcam.surround.SurroundViewMode top,
+                                       com.kooo.evcam.surround.SurroundViewMode bottom) {
+        com.kooo.evcam.surround.SurroundViewMode[] normalized =
+                com.kooo.evcam.surround.SurroundViewMode.normalizeDetailViews(top, bottom);
+        prefs.edit()
+                .putString(KEY_SURROUND_TOP_VIEW, normalized[0].name())
+                .putString(KEY_SURROUND_BOTTOM_VIEW, normalized[1].name())
+                .apply();
+    }
+
+    public boolean isSurroundWheelsCollapsed() {
+        return prefs.getBoolean(KEY_SURROUND_WHEELS_COLLAPSED, false);
+    }
+
+    public void setSurroundWheelsCollapsed(boolean collapsed) {
+        prefs.edit().putBoolean(KEY_SURROUND_WHEELS_COLLAPSED, collapsed).apply();
+    }
+
+    public boolean isSurroundStretchRoadViews() {
+        return prefs.getBoolean(KEY_SURROUND_STRETCH_ROAD_VIEWS, false);
+    }
+
+    public void setSurroundStretchRoadViews(boolean stretch) {
+        prefs.edit().putBoolean(KEY_SURROUND_STRETCH_ROAD_VIEWS, stretch).apply();
+    }
+
+    /** 控制右上角「前视 / 后视 / 随档位」等画面内操作按键的显隐。 */
+    public boolean isSurroundOverlayButtonsVisible() {
+        return prefs.getBoolean(KEY_SURROUND_OVERLAY_BUTTONS_VISIBLE, true);
+    }
+
+    public void setSurroundOverlayButtonsVisible(boolean visible) {
+        prefs.edit().putBoolean(KEY_SURROUND_OVERLAY_BUTTONS_VISIBLE, visible).apply();
+    }
+
+    public boolean isReversePreviewEnabled() {
+        return prefs.getBoolean(KEY_REVERSE_PREVIEW_ENABLED, false);
+    }
+
+    public void setReversePreviewEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_REVERSE_PREVIEW_ENABLED, enabled).apply();
+    }
+
+    public static int normalizeReversePreviewDelayMs(int delayMs) {
+        int clamped = Math.max(MIN_REVERSE_PREVIEW_DELAY_MS, Math.min(MAX_REVERSE_PREVIEW_DELAY_MS, delayMs));
+        return Math.round(clamped / (float) STEP_REVERSE_PREVIEW_DELAY_MS) * STEP_REVERSE_PREVIEW_DELAY_MS;
+    }
+
+    public int getReversePreviewDelayMs() {
+        return normalizeReversePreviewDelayMs(
+                prefs.getInt(KEY_REVERSE_PREVIEW_DELAY_MS, DEFAULT_REVERSE_PREVIEW_DELAY_MS));
+    }
+
+    public void setReversePreviewDelayMs(int delayMs) {
+        prefs.edit().putInt(KEY_REVERSE_PREVIEW_DELAY_MS, normalizeReversePreviewDelayMs(delayMs)).apply();
+    }
+
+    public boolean isPreviewSpeedCloseEnabled() {
+        return prefs.getBoolean(KEY_PREVIEW_SPEED_CLOSE_ENABLED, false);
+    }
+
+    public void setPreviewSpeedCloseEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_PREVIEW_SPEED_CLOSE_ENABLED, enabled).apply();
+    }
+
+    public static int normalizePreviewSpeedThresholdKmh(int kmh) {
+        return Math.max(MIN_SPEED_CLOSE_KMH, Math.min(MAX_SPEED_CLOSE_KMH, kmh));
+    }
+
+    public int getPreviewSpeedThresholdKmh() {
+        return normalizePreviewSpeedThresholdKmh(
+                prefs.getInt(KEY_PREVIEW_SPEED_THRESHOLD_KMH, DEFAULT_SPEED_CLOSE_KMH));
+    }
+
+    public void setPreviewSpeedThresholdKmh(int kmh) {
+        prefs.edit().putInt(KEY_PREVIEW_SPEED_THRESHOLD_KMH, normalizePreviewSpeedThresholdKmh(kmh)).apply();
+    }
+
+    public boolean isParkPreviewCloseEnabled() {
+        return prefs.getBoolean(KEY_PARK_PREVIEW_CLOSE_ENABLED, false);
+    }
+
+    public void setParkPreviewCloseEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_PARK_PREVIEW_CLOSE_ENABLED, enabled).apply();
+    }
+
+    public static int normalizeParkPreviewCloseDelaySeconds(int seconds) {
+        return Math.max(MIN_PARK_CLOSE_SECONDS, Math.min(MAX_PARK_CLOSE_SECONDS, seconds));
+    }
+
+    public int getParkPreviewCloseDelaySeconds() {
+        return normalizeParkPreviewCloseDelaySeconds(
+                prefs.getInt(KEY_PARK_PREVIEW_CLOSE_DELAY_SECONDS, DEFAULT_PARK_CLOSE_SECONDS));
+    }
+
+    public void setParkPreviewCloseDelaySeconds(int seconds) {
+        prefs.edit().putInt(KEY_PARK_PREVIEW_CLOSE_DELAY_SECONDS,
+                normalizeParkPreviewCloseDelaySeconds(seconds)).apply();
+    }
+
+    public static String normalizeSurroundCalibrationSource(String source) {
+        return SURROUND_CALIBRATION_E5_CUSTOM.equals(source)
+                ? SURROUND_CALIBRATION_E5_CUSTOM
+                : SURROUND_CALIBRATION_E5_BUILTIN;
+    }
+
+    public String getSurroundCalibrationSource() {
+        return normalizeSurroundCalibrationSource(
+                prefs.getString(KEY_SURROUND_CALIBRATION_SOURCE, SURROUND_CALIBRATION_E5_BUILTIN));
+    }
+
+    public void setSurroundCalibrationSource(String source) {
+        prefs.edit().putString(KEY_SURROUND_CALIBRATION_SOURCE,
+                normalizeSurroundCalibrationSource(source)).apply();
+    }
+
+    public String getSurroundCustomCalibrationPath() {
+        String p = prefs.getString(KEY_SURROUND_CUSTOM_CALIBRATION_PATH, "");
+        return p != null ? p : "";
+    }
+
+    public void setSurroundCustomCalibrationPath(String path) {
+        prefs.edit().putString(KEY_SURROUND_CUSTOM_CALIBRATION_PATH, path != null ? path : "").apply();
+    }
+
+    public static int normalizeSurroundGroundWidthCm(int widthCm) {
+        return Math.max(MIN_SURROUND_GROUND_WIDTH_CM, Math.min(MAX_SURROUND_GROUND_WIDTH_CM, widthCm));
+    }
+
+    public int getSurroundGroundWidthCm() {
+        return normalizeSurroundGroundWidthCm(
+                prefs.getInt(KEY_SURROUND_GROUND_WIDTH_CM, DEFAULT_SURROUND_GROUND_WIDTH_CM));
+    }
+
+    public void setSurroundGroundWidthCm(int widthCm) {
+        prefs.edit().putInt(KEY_SURROUND_GROUND_WIDTH_CM, normalizeSurroundGroundWidthCm(widthCm)).apply();
+    }
+
+    public static int normalizeSurroundGroundLengthCm(int lengthCm) {
+        return Math.max(MIN_SURROUND_GROUND_LENGTH_CM, Math.min(MAX_SURROUND_GROUND_LENGTH_CM, lengthCm));
+    }
+
+    public int getSurroundGroundLengthCm() {
+        return normalizeSurroundGroundLengthCm(
+                prefs.getInt(KEY_SURROUND_GROUND_LENGTH_CM, DEFAULT_SURROUND_GROUND_LENGTH_CM));
+    }
+
+    public void setSurroundGroundLengthCm(int lengthCm) {
+        prefs.edit().putInt(KEY_SURROUND_GROUND_LENGTH_CM, normalizeSurroundGroundLengthCm(lengthCm)).apply();
+    }
+
+    public static int normalizeSurroundGroundFrontExtensionCm(int extCm) {
+        return Math.max(MIN_SURROUND_GROUND_FRONT_EXT_CM, Math.min(MAX_SURROUND_GROUND_FRONT_EXT_CM, extCm));
+    }
+
+    public int getSurroundGroundFrontExtensionCm() {
+        return normalizeSurroundGroundFrontExtensionCm(
+                prefs.getInt(KEY_SURROUND_GROUND_FRONT_EXT_CM, DEFAULT_SURROUND_GROUND_FRONT_EXT_CM));
+    }
+
+    public void setSurroundGroundFrontExtensionCm(int extCm) {
+        prefs.edit().putInt(KEY_SURROUND_GROUND_FRONT_EXT_CM,
+                normalizeSurroundGroundFrontExtensionCm(extCm)).apply();
+    }
+
+    public void resetSurroundGroundDimensions() {
+        prefs.edit()
+                .putInt(KEY_SURROUND_GROUND_WIDTH_CM, DEFAULT_SURROUND_GROUND_WIDTH_CM)
+                .putInt(KEY_SURROUND_GROUND_LENGTH_CM, DEFAULT_SURROUND_GROUND_LENGTH_CM)
+                .putInt(KEY_SURROUND_GROUND_FRONT_EXT_CM, DEFAULT_SURROUND_GROUND_FRONT_EXT_CM)
+                .apply();
+    }
+
+    public boolean isPreviewGuidanceEnabled() {
+        return prefs.getBoolean(KEY_PREVIEW_GUIDANCE_ENABLED, true);
+    }
+
+    public void setPreviewGuidanceEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_PREVIEW_GUIDANCE_ENABLED, enabled).apply();
+    }
+
+    public float getPreviewGuidanceLastAngleDeg() {
+        float raw = prefs.getFloat(KEY_PREVIEW_GUIDANCE_LAST_ANGLE, 0f);
+        if (!Float.isFinite(raw) || raw < -45f || raw > 45f) {
+            return 0f;
+        }
+        return raw;
+    }
+
+    public void setPreviewGuidanceLastAngleDeg(float angleDeg) {
+        if (!Float.isFinite(angleDeg)) return;
+        float clamped = Math.max(-45f, Math.min(45f, angleDeg));
+        prefs.edit().putFloat(KEY_PREVIEW_GUIDANCE_LAST_ANGLE, clamped).apply();
+    }
+
+    public static String normalizeSurroundCarModelSource(String source) {
+        return SURROUND_CAR_MODEL_CUSTOM_PNG.equals(source)
+                ? SURROUND_CAR_MODEL_CUSTOM_PNG
+                : SURROUND_CAR_MODEL_E5_BUILTIN;
+    }
+
+    public String getSurroundCarModelSource() {
+        return normalizeSurroundCarModelSource(
+                prefs.getString(KEY_SURROUND_CAR_MODEL_SOURCE, SURROUND_CAR_MODEL_E5_BUILTIN));
+    }
+
+    public void setSurroundCarModelSource(String source) {
+        prefs.edit().putString(KEY_SURROUND_CAR_MODEL_SOURCE,
+                normalizeSurroundCarModelSource(source)).apply();
+    }
+
+    public String getSurroundCustomCarModelPath() {
+        String p = prefs.getString(KEY_SURROUND_CUSTOM_CAR_MODEL_PATH, "");
+        return p != null ? p : "";
+    }
+
+    public void setSurroundCustomCarModelPath(String path) {
+        prefs.edit().putString(KEY_SURROUND_CUSTOM_CAR_MODEL_PATH, path != null ? path : "").apply();
     }
 
 }

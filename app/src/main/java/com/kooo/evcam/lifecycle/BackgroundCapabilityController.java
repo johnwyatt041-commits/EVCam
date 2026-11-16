@@ -55,6 +55,7 @@ public final class BackgroundCapabilityController {
         com.kooo.evcam.AppConfig appConfig = new com.kooo.evcam.AppConfig(context);
         boolean vehicleAutomationActive = appConfig.isKeepCameraConnectedEnabled()
                 || appConfig.isRdShiftAutoPopupEnabled()
+                || appConfig.isReversePreviewEnabled()
                 || appConfig.hasActiveVehicleTriggerRules();
         return remoteRunning || floatingRunning || blindSpotRunning || vehicleAutomationActive;
     }

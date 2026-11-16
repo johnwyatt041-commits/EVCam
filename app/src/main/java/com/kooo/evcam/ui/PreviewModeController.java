@@ -22,6 +22,7 @@ import com.kooo.evcam.AutoFitTextureView;
 import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
+import com.kooo.evcam.surround.SurroundModeAView;
 import com.kooo.evcam.vehicle.VehicleSignalHub;
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear;
@@ -49,6 +50,8 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         void onToggleFullscreenClicked();
         void onApplyStagingTransform(@NonNull String cameraKey, @NonNull TextureView view,
                                      @Nullable Size previewSize, int width, int height);
+        default void onSurroundSurfacesReady() {}
+        default void onRebindVisibleTextureViews() {}
     }
 
     private static final String TAG = "PreviewModeController";
@@ -73,6 +76,8 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     @Nullable
     private final TextView btnShortcutSettings;
     @Nullable
+    private final TextView btnShortcutModeA;
+    @Nullable
     private final TextView btnShortcutModeB;
     @Nullable
     private final TextView btnShortcutModeC;
@@ -88,7 +93,10 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     @Nullable
     private MultiCameraManager cameraManager;
+    @Nullable
+    private SurroundModeAView surroundModeAView;
     private PreviewMode currentMode;
+    private boolean surroundHostEligible = true;
     private int modeCPrimaryIndex = PreviewLayoutModel.FRONT;
     @Nullable
     private Gear manualOverrideGear;
@@ -133,6 +141,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         this.viewSwitchGroup = rootView.findViewById(R.id.ui_shortcut_view_switch_group);
         this.btnShortcutBack = rootView.findViewById(R.id.btn_shortcut_back);
         this.btnShortcutSettings = rootView.findViewById(R.id.btn_shortcut_settings);
+        this.btnShortcutModeA = rootView.findViewById(R.id.btn_shortcut_mode_a);
         this.btnShortcutModeB = rootView.findViewById(R.id.btn_shortcut_mode_b);
         this.btnShortcutModeC = rootView.findViewById(R.id.btn_shortcut_mode_c);
         this.btnShortcutModeCSwap = rootView.findViewById(R.id.btn_shortcut_mode_c_swap);
@@ -162,6 +171,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (btnShortcutSettings != null) {
             btnShortcutSettings.setOnClickListener(v -> callbacks.onSettingsShortcutClicked());
         }
+        if (btnShortcutModeA != null) {
+            btnShortcutModeA.setOnClickListener(v -> setPreviewMode(PreviewMode.MODE_A));
+        }
         if (btnShortcutModeB != null) {
             btnShortcutModeB.setOnClickListener(v -> setPreviewMode(PreviewMode.MODE_B));
         }
@@ -183,8 +195,39 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         this.cameraManager = manager;
         if (manager != null) {
             manager.setPhotoSurfaceProvider(this);
+            if (surroundModeAView != null) {
+                surroundModeAView.bindCameraManagerIfActive(manager);
+            }
             applyVisibilityMaskToCameras();
         }
+    }
+
+    /** 相机设备表建立完成后调用（确保冷启动处于模式 A 时绑定 4 路 OES Surface）。 */
+    public void onCamerasInitialized() {
+        if (surroundModeAView != null && cameraManager != null) {
+            surroundModeAView.bindCameraManagerIfActive(cameraManager);
+        }
+        applyVisibilityMaskToCameras();
+    }
+
+    /** 控制宿主是否满足前台且位于记录仪页；离开记录仪页或退后台立即销毁模式 A GL 上下文。 */
+    public void setSurroundHostEligible(boolean eligible) {
+        if (this.surroundHostEligible == eligible) {
+            if (eligible) {
+                syncSurroundPreferences();
+            }
+            return;
+        }
+        this.surroundHostEligible = eligible;
+        applyStateToLayoutAndShell();
+        applyVisibilityMaskToCameras();
+    }
+
+    public boolean isReadyForCameraInit() {
+        if (shouldActivateSurroundGl(currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled())) {
+            return surroundModeAView != null && surroundModeAView.isSurfacesReady();
+        }
+        return true;
     }
 
     public void start() {
@@ -192,14 +235,16 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             VehicleSignalHub.getInstance().addListener(signalListener);
             signalListening = true;
         }
+        surroundHostEligible = true;
         VehicleSignalSnapshot current = VehicleSignalHub.getInstance().getSnapshot();
         if (current != null && current.gear != null) {
             latestGear = current.gear;
             if (currentMode == PreviewMode.MODE_C && manualOverridePrimary == null) {
                 modeCPrimaryIndex = resolveDefaultPrimaryForGear(latestGear);
-                applyStateToLayoutAndShell();
             }
         }
+        applyStateToLayoutAndShell();
+        applyVisibilityMaskToCameras();
         refreshShortcutsOverlay();
     }
 
@@ -208,6 +253,8 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             VehicleSignalHub.getInstance().removeListener(signalListener);
             signalListening = false;
         }
+        surroundHostEligible = false;
+        applyStateToLayoutAndShell();
         mainHandler.removeCallbacks(applyDebouncedGearRunnable);
         pendingDebouncedGear = null;
         if (pendingStagingCleanup != null) {
@@ -237,8 +284,10 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     @Override
     public void setPreviewMode(@NonNull PreviewMode mode) {
-        PreviewMode normalized = (mode == PreviewMode.MODE_C) ? PreviewMode.MODE_C : PreviewMode.MODE_B;
+        PreviewMode normalized = normalizeSupportedMode(mode);
+        boolean wasModeA = currentMode == PreviewMode.MODE_A;
         if (currentMode == normalized) {
+            applyStateToLayoutAndShell();
             refreshShortcutsOverlay();
             return;
         }
@@ -255,6 +304,17 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
         applyStateToLayoutAndShell();
         applyVisibilityMaskToCameras();
+        if (wasModeA && normalized != PreviewMode.MODE_A) {
+            mainHandler.post(callbacks::onRebindVisibleTextureViews);
+        }
+    }
+
+    public void syncSurroundPreferences() {
+        applyStateToLayoutAndShell();
+        applyVisibilityMaskToCameras();
+        if (surroundModeAView != null) {
+            surroundModeAView.refreshFromPreferences();
+        }
     }
 
     public void toggleModeCPrimaryManual() {
@@ -297,12 +357,18 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     }
 
     public boolean isCameraVisible(@NonNull String cameraKey) {
+        if (shouldHideOrdinaryTextureViewsForModeA(currentMode, appConfig.isMainPreviewEnabled())) {
+            return false;
+        }
         if (previewLayout == null) return true;
         int idx = cameraKeyToIndex(cameraKey);
         return idx < 0 || previewLayout.isPaneVisibleInMode(idx);
     }
 
     public int countExpectedVisibleTextures(int configuredCameraCount) {
+        if (shouldHideOrdinaryTextureViewsForModeA(currentMode, appConfig.isMainPreviewEnabled())) {
+            return 0;
+        }
         if (previewLayout == null) return configuredCameraCount;
         boolean[] mask = previewLayout.getEffectiveVisibilityMask();
         int count = 0;
@@ -315,6 +381,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     @NonNull
     public Map<String, Boolean> getEffectiveCameraVisibilityMap() {
+        if (shouldHideOrdinaryTextureViewsForModeA(currentMode, appConfig.isMainPreviewEnabled())) {
+            return toCameraVisibilityMap(new boolean[]{false, false, false, false});
+        }
         if (previewLayout == null) {
             return toCameraVisibilityMap(new boolean[]{true, true, true, true});
         }
@@ -357,15 +426,45 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     }
 
     private void applyStateToLayoutAndShell() {
-        boolean internal360Visible = modeAContainer != null && modeAContainer.getVisibility() == View.VISIBLE;
-        if (modeAContainer != null && internal360Visible) {
-            modeAContainer.setVisibility(View.GONE);
-            internal360Visible = false;
+        boolean wantSurroundGl = shouldActivateSurroundGl(
+                currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled());
+
+        if (wantSurroundGl && modeAContainer != null) {
+            if (previewLayout != null) {
+                previewLayout.setVisibility(View.GONE);
+            }
+            modeAContainer.setVisibility(View.VISIBLE);
+            if (surroundModeAView == null) {
+                SurroundModeAView created = new SurroundModeAView(context);
+                created.setHostCallbacks(callbacks::onSurroundSurfacesReady);
+                modeAContainer.addView(created, new FrameLayout.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT));
+                surroundModeAView = created;
+                created.activateModeA(cameraManager);
+            } else {
+                surroundModeAView.refreshFromPreferences();
+            }
+        } else {
+            if (surroundModeAView != null) {
+                surroundModeAView.deactivateModeA(cameraManager);
+                if (modeAContainer != null) {
+                    modeAContainer.removeView(surroundModeAView);
+                }
+                surroundModeAView = null;
+            }
+            if (modeAContainer != null) {
+                modeAContainer.setVisibility(View.GONE);
+            }
+            if (previewLayout != null) {
+                previewLayout.setVisibility(View.VISIBLE);
+                if (currentMode != PreviewMode.MODE_A) {
+                    previewLayout.setPreviewState(currentMode, modeCPrimaryIndex);
+                }
+            }
         }
-        BlindSpotService.setInternal360Active(context, internal360Visible);
-        if (previewLayout != null) {
-            previewLayout.setPreviewState(currentMode, modeCPrimaryIndex);
-        }
+
+        BlindSpotService.setInternal360Active(context, wantSurroundGl);
         if (shellController != null) {
             shellController.setPreviewModeUi(currentMode);
         }
@@ -407,6 +506,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     private void stylePillButtons(@NonNull Context themedContext) {
         boolean fullscreen = shellController != null && shellController.isFullscreenPreview();
+        applyPillItemStyle(btnShortcutModeA, themedContext, currentMode == PreviewMode.MODE_A);
         applyPillItemStyle(btnShortcutModeB, themedContext, currentMode == PreviewMode.MODE_B);
         applyPillItemStyle(btnShortcutModeC, themedContext, currentMode == PreviewMode.MODE_C);
         applyPillItemStyle(btnShortcutModeCSwap, themedContext, false);
@@ -527,6 +627,22 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     }
 
     // ==================== Pure Static Decision Helpers (Testable) ====================
+
+    @NonNull
+    public static PreviewMode normalizeSupportedMode(@Nullable PreviewMode requested) {
+        return requested != null ? requested : PreviewMode.MODE_B;
+    }
+
+    public static boolean shouldActivateSurroundGl(@Nullable PreviewMode mode,
+                                                   boolean hostEligible,
+                                                   boolean mainPreviewEnabled) {
+        return mode == PreviewMode.MODE_A && hostEligible && mainPreviewEnabled;
+    }
+
+    public static boolean shouldHideOrdinaryTextureViewsForModeA(@Nullable PreviewMode mode,
+                                                                 boolean mainPreviewEnabled) {
+        return mode == PreviewMode.MODE_A && mainPreviewEnabled;
+    }
 
     public static int resolveDefaultPrimaryForGear(@Nullable Gear gear) {
         return gear == Gear.REVERSE ? PreviewLayoutModel.BACK : PreviewLayoutModel.FRONT;

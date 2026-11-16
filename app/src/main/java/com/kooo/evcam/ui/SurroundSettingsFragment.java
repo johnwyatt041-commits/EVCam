@@ -1,0 +1,510 @@
+package com.kooo.evcam.ui;
+
+import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.drawable.GradientDrawable;
+import android.os.Bundle;
+import android.os.Environment;
+import android.util.TypedValue;
+import android.view.LayoutInflater;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.Button;
+import android.widget.ImageView;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
+import androidx.core.view.ViewCompat;
+import androidx.fragment.app.Fragment;
+
+import com.google.android.material.dialog.MaterialAlertDialogBuilder;
+import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.kooo.evcam.AppConfig;
+import com.kooo.evcam.BlindSpotService;
+import com.kooo.evcam.R;
+import com.kooo.evcam.SettingsFragment;
+import com.kooo.evcam.surround.SurroundCalibrationManager;
+import com.kooo.evcam.surround.SurroundCarModelRepository;
+import com.kooo.evcam.surround.SurroundViewMode;
+import com.kooo.evcam.vehicle.VehicleAutomationCoordinator;
+
+import java.io.File;
+import java.util.List;
+
+/**
+ * 4. 360 画面设置页（覆盖 T07 4.1–4.3 全部设置）：
+ * - 4.1 预览模式（模式 A vs B/C）、上下分视角、暂停主屏补盲、前后视拉伸铺满、画面内切换按键显隐
+ * - 4.2 R 档自动预览延时（0..5000ms）、车速返桌（15..50km/h）、P 档延时返桌（1..60s）
+ * - 4.3 银河 E5 内置/本地校准导入、地面视野范围微调、动态转向引导线、离线 E5 车模管理
+ */
+public class SurroundSettingsFragment extends Fragment implements UiThemeController.ThemeAware {
+
+    private AppConfig appConfig;
+    private boolean bindingUi;
+
+    private TextView tvModeStatus;
+    private Button btnModeA;
+    private Button btnModeB;
+    private Button btnModeC;
+
+    private Button btnTopDrive;
+    private Button btnTopFront;
+    private Button btnTopRear;
+    private Button btnTopFrontWheels;
+    private Button btnTopRearWheels;
+
+    private Button btnBottomFrontWheels;
+    private Button btnBottomRearWheels;
+    private Button btnBottomSides;
+
+    private SwitchMaterial switchSuppressBlindSpot;
+    private SwitchMaterial switchStretchRoad;
+    private SwitchMaterial switchOverlayButtons;
+
+    private SwitchMaterial switchReversePreviewEnabled;
+    private TextView tvReverseDelayValue;
+    private SwitchMaterial switchSpeedCloseEnabled;
+    private TextView tvSpeedThresholdValue;
+    private SwitchMaterial switchParkCloseEnabled;
+    private TextView tvParkCloseDelayValue;
+
+    private TextView tvCalibrationStatus;
+    private Button btnCalibBuiltin;
+    private Button btnCalibImportLocal;
+    private TextView tvGroundWidthValue;
+    private TextView tvGroundLengthValue;
+    private TextView tvGroundFrontExtValue;
+
+    private SwitchMaterial switchGuidanceEnabled;
+    private ImageView ivCarModelPreview;
+    private TextView tvCarModelStatus;
+    private Button btnCarModelBuiltin;
+    private Button btnCarModelImportPng;
+
+    @Nullable
+    @Override
+    public View onCreateView(@NonNull LayoutInflater inflater,
+                             @Nullable ViewGroup container,
+                             @Nullable Bundle savedInstanceState) {
+        View view = inflater.inflate(R.layout.fragment_surround_settings, container, false);
+        appConfig = new AppConfig(inflater.getContext());
+
+        View btnBack = view.findViewById(R.id.btn_back);
+        if (btnBack != null) {
+            btnBack.setOnClickListener(v -> SettingsFragment.popSubPage(this));
+        }
+
+        bindViews(view);
+        wireListeners();
+        refreshAllUi(inflater.getContext());
+        SettingsFragment.configureEmbeddedToolbar(this, view, "360 画面");
+        return view;
+    }
+
+    @Override
+    public void onThemeApplied(Context themedContext, boolean isNight) {
+        if (themedContext == null || getView() == null) return;
+        refreshAllUi(themedContext);
+    }
+
+    private void bindViews(@NonNull View view) {
+        tvModeStatus = view.findViewById(R.id.tv_surround_mode_status);
+        btnModeA = view.findViewById(R.id.btn_surround_mode_a);
+        btnModeB = view.findViewById(R.id.btn_surround_mode_b);
+        btnModeC = view.findViewById(R.id.btn_surround_mode_c);
+
+        btnTopDrive = view.findViewById(R.id.btn_top_view_drive);
+        btnTopFront = view.findViewById(R.id.btn_top_view_front);
+        btnTopRear = view.findViewById(R.id.btn_top_view_rear);
+        btnTopFrontWheels = view.findViewById(R.id.btn_top_view_front_wheels);
+        btnTopRearWheels = view.findViewById(R.id.btn_top_view_rear_wheels);
+
+        btnBottomFrontWheels = view.findViewById(R.id.btn_bottom_view_front_wheels);
+        btnBottomRearWheels = view.findViewById(R.id.btn_bottom_view_rear_wheels);
+        btnBottomSides = view.findViewById(R.id.btn_bottom_view_sides);
+
+        switchSuppressBlindSpot = view.findViewById(R.id.switch_surround_suppress_blindspot);
+        switchStretchRoad = view.findViewById(R.id.switch_surround_stretch_road);
+        switchOverlayButtons = view.findViewById(R.id.switch_surround_overlay_buttons);
+
+        switchReversePreviewEnabled = view.findViewById(R.id.switch_reverse_preview_enabled);
+        tvReverseDelayValue = view.findViewById(R.id.tv_reverse_delay_value);
+        switchSpeedCloseEnabled = view.findViewById(R.id.switch_speed_close_enabled);
+        tvSpeedThresholdValue = view.findViewById(R.id.tv_speed_threshold_value);
+        switchParkCloseEnabled = view.findViewById(R.id.switch_park_close_enabled);
+        tvParkCloseDelayValue = view.findViewById(R.id.tv_park_close_delay_value);
+
+        tvCalibrationStatus = view.findViewById(R.id.tv_surround_calibration_status);
+        btnCalibBuiltin = view.findViewById(R.id.btn_calibration_e5_builtin);
+        btnCalibImportLocal = view.findViewById(R.id.btn_calibration_import_local);
+        tvGroundWidthValue = view.findViewById(R.id.tv_ground_width_value);
+        tvGroundLengthValue = view.findViewById(R.id.tv_ground_length_value);
+        tvGroundFrontExtValue = view.findViewById(R.id.tv_ground_front_ext_value);
+
+        switchGuidanceEnabled = view.findViewById(R.id.switch_surround_guidance_enabled);
+        ivCarModelPreview = view.findViewById(R.id.iv_car_model_preview);
+        tvCarModelStatus = view.findViewById(R.id.tv_car_model_status);
+        btnCarModelBuiltin = view.findViewById(R.id.btn_car_model_builtin);
+        btnCarModelImportPng = view.findViewById(R.id.btn_car_model_import_png);
+    }
+
+    private void wireListeners() {
+        View root = null;
+        if (btnModeA != null) root = btnModeA.getRootView();
+
+        btnModeA.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_A));
+        btnModeB.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_B));
+        btnModeC.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_C));
+
+        btnTopDrive.setOnClickListener(v -> selectTopView(SurroundViewMode.DRIVE));
+        btnTopFront.setOnClickListener(v -> selectTopView(SurroundViewMode.FRONT));
+        btnTopRear.setOnClickListener(v -> selectTopView(SurroundViewMode.REAR));
+        btnTopFrontWheels.setOnClickListener(v -> selectTopView(SurroundViewMode.FRONT_WHEELS));
+        btnTopRearWheels.setOnClickListener(v -> selectTopView(SurroundViewMode.REAR_WHEELS));
+
+        btnBottomFrontWheels.setOnClickListener(v -> selectBottomView(SurroundViewMode.FRONT_WHEELS));
+        btnBottomRearWheels.setOnClickListener(v -> selectBottomView(SurroundViewMode.REAR_WHEELS));
+        btnBottomSides.setOnClickListener(v -> selectBottomView(SurroundViewMode.SIDES));
+
+        switchSuppressBlindSpot.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setBlindSpotSuppressOn360(isChecked);
+            if (getContext() != null) {
+                BlindSpotService.update(getContext());
+            }
+        });
+        switchStretchRoad.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setSurroundStretchRoadViews(isChecked);
+            notifyHostSurroundChanged();
+        });
+        switchOverlayButtons.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setSurroundOverlayButtonsVisible(isChecked);
+            notifyHostSurroundChanged();
+        });
+
+        switchReversePreviewEnabled.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setReversePreviewEnabled(isChecked);
+            reloadAutomation();
+        });
+        wireStepPair(root, R.id.btn_reverse_delay_minus, R.id.btn_reverse_delay_plus, () -> {
+            appConfig.setReversePreviewDelayMs(appConfig.getReversePreviewDelayMs() - AppConfig.STEP_REVERSE_PREVIEW_DELAY_MS);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        }, () -> {
+            appConfig.setReversePreviewDelayMs(appConfig.getReversePreviewDelayMs() + AppConfig.STEP_REVERSE_PREVIEW_DELAY_MS);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        });
+
+        switchSpeedCloseEnabled.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setPreviewSpeedCloseEnabled(isChecked);
+            reloadAutomation();
+        });
+        wireStepPair(root, R.id.btn_speed_threshold_minus, R.id.btn_speed_threshold_plus, () -> {
+            appConfig.setPreviewSpeedThresholdKmh(appConfig.getPreviewSpeedThresholdKmh() - 1);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        }, () -> {
+            appConfig.setPreviewSpeedThresholdKmh(appConfig.getPreviewSpeedThresholdKmh() + 1);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        });
+
+        switchParkCloseEnabled.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setParkPreviewCloseEnabled(isChecked);
+            reloadAutomation();
+        });
+        wireStepPair(root, R.id.btn_park_delay_minus, R.id.btn_park_delay_plus, () -> {
+            appConfig.setParkPreviewCloseDelaySeconds(appConfig.getParkPreviewCloseDelaySeconds() - 1);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        }, () -> {
+            appConfig.setParkPreviewCloseDelaySeconds(appConfig.getParkPreviewCloseDelaySeconds() + 1);
+            reloadAutomation();
+            refreshAutoCloseUi();
+        });
+
+        btnCalibBuiltin.setOnClickListener(v -> {
+            appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_BUILTIN);
+            notifyHostSurroundChanged();
+            refreshCalibrationAndModelUi(requireContext());
+        });
+        btnCalibImportLocal.setOnClickListener(v -> showLocalCalibrationPicker());
+
+        wireStepPair(root, R.id.btn_ground_width_minus, R.id.btn_ground_width_plus, () -> {
+            appConfig.setSurroundGroundWidthCm(appConfig.getSurroundGroundWidthCm() - 5);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        }, () -> {
+            appConfig.setSurroundGroundWidthCm(appConfig.getSurroundGroundWidthCm() + 5);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        });
+
+        wireStepPair(root, R.id.btn_ground_length_minus, R.id.btn_ground_length_plus, () -> {
+            appConfig.setSurroundGroundLengthCm(appConfig.getSurroundGroundLengthCm() - 10);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        }, () -> {
+            appConfig.setSurroundGroundLengthCm(appConfig.getSurroundGroundLengthCm() + 10);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        });
+
+        wireStepPair(root, R.id.btn_ground_ext_minus, R.id.btn_ground_ext_plus, () -> {
+            appConfig.setSurroundGroundFrontExtensionCm(appConfig.getSurroundGroundFrontExtensionCm() - 10);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        }, () -> {
+            appConfig.setSurroundGroundFrontExtensionCm(appConfig.getSurroundGroundFrontExtensionCm() + 10);
+            notifyHostSurroundChanged();
+            refreshGroundDimensionTexts();
+        });
+
+        View btnResetGround = root != null ? root.findViewById(R.id.btn_ground_reset_default) : null;
+        if (btnResetGround != null) {
+            btnResetGround.setOnClickListener(v -> {
+                appConfig.resetSurroundGroundDimensions();
+                notifyHostSurroundChanged();
+                refreshGroundDimensionTexts();
+                Toast.makeText(getContext(), "已恢复银河 E5 默认拼接视野参数", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        switchGuidanceEnabled.setOnCheckedChangeListener((b, isChecked) -> {
+            if (bindingUi) return;
+            appConfig.setPreviewGuidanceEnabled(isChecked);
+            notifyHostSurroundChanged();
+        });
+
+        btnCarModelBuiltin.setOnClickListener(v -> {
+            appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_E5_BUILTIN);
+            notifyHostSurroundChanged();
+            refreshCalibrationAndModelUi(requireContext());
+        });
+        btnCarModelImportPng.setOnClickListener(v -> showLocalCarModelPngPicker());
+    }
+
+    private void wireStepPair(@Nullable View root, int minusId, int plusId,
+                              @NonNull Runnable onMinus, @NonNull Runnable onPlus) {
+        if (root == null) return;
+        View minus = root.findViewById(minusId);
+        View plus = root.findViewById(plusId);
+        if (minus != null) minus.setOnClickListener(v -> onMinus.run());
+        if (plus != null) plus.setOnClickListener(v -> onPlus.run());
+    }
+
+    private void selectPreviewMode(@NonNull String previewMode) {
+        appConfig.setPreviewMode(previewMode);
+        if (getActivity() instanceof PreviewModeController.Host) {
+            ((PreviewModeController.Host) getActivity()).onDefaultPreviewModeChanged(
+                    PreviewMode.fromKey(appConfig.getPreviewMode()));
+        }
+        if (getContext() != null) {
+            refreshAllUi(getContext());
+        }
+    }
+
+    private void selectTopView(@NonNull SurroundViewMode topMode) {
+        appConfig.setSurroundDetailViews(topMode, appConfig.getSurroundBottomView());
+        notifyHostSurroundChanged();
+        if (getContext() != null) {
+            refreshAllUi(getContext());
+        }
+    }
+
+    private void selectBottomView(@NonNull SurroundViewMode bottomMode) {
+        appConfig.setSurroundDetailViews(appConfig.getSurroundTopView(), bottomMode);
+        notifyHostSurroundChanged();
+        if (getContext() != null) {
+            refreshAllUi(getContext());
+        }
+    }
+
+    private void notifyHostSurroundChanged() {
+        if (getActivity() instanceof PreviewModeController.Host) {
+            ((PreviewModeController.Host) getActivity()).onPreviewShortcutPreferencesChanged();
+        }
+    }
+
+    private void reloadAutomation() {
+        if (getContext() != null) {
+            VehicleAutomationCoordinator.getInstance().startOrReload(getContext());
+        }
+    }
+
+    private void refreshAllUi(@NonNull Context ctx) {
+        bindingUi = true;
+        try {
+            String mode = appConfig.getPreviewMode();
+            tvModeStatus.setText("当前主预览模式：" + AppearanceSettingsFragment.formatPreviewModeLabel(mode));
+            applyOptionButtonState(btnModeA, ctx, AppConfig.PREVIEW_MODE_A.equals(mode));
+            applyOptionButtonState(btnModeB, ctx, AppConfig.PREVIEW_MODE_B.equals(mode));
+            applyOptionButtonState(btnModeC, ctx, AppConfig.PREVIEW_MODE_C.equals(mode));
+
+            SurroundViewMode top = appConfig.getSurroundTopView();
+            SurroundViewMode bottom = appConfig.getSurroundBottomView();
+            applyOptionButtonState(btnTopDrive, ctx, top == SurroundViewMode.DRIVE);
+            applyOptionButtonState(btnTopFront, ctx, top == SurroundViewMode.FRONT);
+            applyOptionButtonState(btnTopRear, ctx, top == SurroundViewMode.REAR);
+            applyOptionButtonState(btnTopFrontWheels, ctx, top == SurroundViewMode.FRONT_WHEELS);
+            applyOptionButtonState(btnTopRearWheels, ctx, top == SurroundViewMode.REAR_WHEELS);
+
+            applyOptionButtonState(btnBottomFrontWheels, ctx, bottom == SurroundViewMode.FRONT_WHEELS);
+            applyOptionButtonState(btnBottomRearWheels, ctx, bottom == SurroundViewMode.REAR_WHEELS);
+            applyOptionButtonState(btnBottomSides, ctx, bottom == SurroundViewMode.SIDES);
+
+            switchSuppressBlindSpot.setChecked(appConfig.isBlindSpotSuppressOn360());
+            switchStretchRoad.setChecked(appConfig.isSurroundStretchRoadViews());
+            switchOverlayButtons.setChecked(appConfig.isSurroundOverlayButtonsVisible());
+
+            switchReversePreviewEnabled.setChecked(appConfig.isReversePreviewEnabled());
+            switchSpeedCloseEnabled.setChecked(appConfig.isPreviewSpeedCloseEnabled());
+            switchParkCloseEnabled.setChecked(appConfig.isParkPreviewCloseEnabled());
+            refreshAutoCloseUi();
+
+            refreshGroundDimensionTexts();
+            switchGuidanceEnabled.setChecked(appConfig.isPreviewGuidanceEnabled());
+            refreshCalibrationAndModelUi(ctx);
+        } finally {
+            bindingUi = false;
+        }
+    }
+
+    private void refreshAutoCloseUi() {
+        tvReverseDelayValue.setText("触发延迟：" + appConfig.getReversePreviewDelayMs() + " ms（范围 0–5000 ms）");
+        tvSpeedThresholdValue.setText("返桌速度阈值：" + appConfig.getPreviewSpeedThresholdKmh() + " km/h（范围 15–50）");
+        tvParkCloseDelayValue.setText("等待时长：" + appConfig.getParkPreviewCloseDelaySeconds() + " 秒（范围 1–60 秒）");
+    }
+
+    private void refreshGroundDimensionTexts() {
+        tvGroundWidthValue.setText("地面宽度：" + appConfig.getSurroundGroundWidthCm() + " cm（160–260）");
+        tvGroundLengthValue.setText("地面长度：" + appConfig.getSurroundGroundLengthCm() + " cm（420–600）");
+        tvGroundFrontExtValue.setText("车头视野延伸：" + appConfig.getSurroundGroundFrontExtensionCm() + " cm（0–100）");
+    }
+
+    private void refreshCalibrationAndModelUi(@NonNull Context ctx) {
+        boolean customCalib = AppConfig.SURROUND_CALIBRATION_E5_CUSTOM.equals(appConfig.getSurroundCalibrationSource())
+                && !appConfig.getSurroundCustomCalibrationPath().isEmpty();
+        tvCalibrationStatus.setText(customCalib
+                ? "当前方案：本地导入 E5 校准（已校验）"
+                : "当前方案：银河 E5 内置校准");
+        applyOptionButtonState(btnCalibBuiltin, ctx, !customCalib);
+        applyOptionButtonState(btnCalibImportLocal, ctx, customCalib);
+
+        boolean customCar = AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG.equals(appConfig.getSurroundCarModelSource())
+                && !appConfig.getSurroundCustomCarModelPath().isEmpty();
+        tvCarModelStatus.setText(customCar
+                ? "当前车模：本地导入 PNG 车模"
+                : "当前车模：银河 E5 内置车模");
+        applyOptionButtonState(btnCarModelBuiltin, ctx, !customCar);
+        applyOptionButtonState(btnCarModelImportPng, ctx, customCar);
+
+        Bitmap previewBmp = SurroundCarModelRepository.loadActiveCarModelBitmap(appConfig);
+        ivCarModelPreview.setImageBitmap(previewBmp);
+    }
+
+    private void showLocalCalibrationPicker() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        List<File> candidates = SurroundCalibrationManager.findCalibrationCandidates(downloadDir);
+        if (candidates.isEmpty()) {
+            Toast.makeText(ctx, "Download 目录下未找到可导入的 E5 calibration.json", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            File f = candidates.get(i);
+            labels[i] = f.getParentFile() != null && !"Download".equalsIgnoreCase(f.getParentFile().getName())
+                    ? f.getParentFile().getName() + "/" + f.getName()
+                    : f.getName();
+        }
+        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("选择本地 E5 校准文件（Download）")
+                .setItems(labels, (d, which) -> {
+                    File selected = candidates.get(which);
+                    File internalDir = new File(ctx.getFilesDir(), "surround");
+                    SurroundCalibrationManager.ImportResult result =
+                            SurroundCalibrationManager.importCalibrationFile(selected, internalDir);
+                    if (result.success && result.importedFilePath != null) {
+                        appConfig.setSurroundCustomCalibrationPath(result.importedFilePath);
+                        appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
+                        notifyHostSurroundChanged();
+                        refreshCalibrationAndModelUi(ctx);
+                    }
+                    Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void showLocalCarModelPngPicker() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        List<File> candidates = SurroundCarModelRepository.findCustomPngCandidates(downloadDir);
+        if (candidates.isEmpty()) {
+            Toast.makeText(ctx, "Download 目录下未找到透明 PNG 车模文件（需 ≤ 4MB）", Toast.LENGTH_LONG).show();
+            return;
+        }
+        String[] labels = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            labels[i] = candidates.get(i).getName();
+        }
+        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("选择本地透明 PNG 车模（Download）")
+                .setItems(labels, (d, which) -> {
+                    File selected = candidates.get(which);
+                    File internalDir = new File(ctx.getFilesDir(), "surround");
+                    SurroundCarModelRepository.ImportResult result =
+                            SurroundCarModelRepository.importCustomCarModelPng(selected, internalDir);
+                    if (result.success && result.importedFilePath != null) {
+                        appConfig.setSurroundCustomCarModelPath(result.importedFilePath);
+                        appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG);
+                        notifyHostSurroundChanged();
+                        refreshCalibrationAndModelUi(ctx);
+                    }
+                    Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void applyOptionButtonState(@Nullable Button button, @NonNull Context context, boolean selected) {
+        if (button == null) return;
+        int fillColor = ContextCompat.getColor(context, selected ? R.color.ui_accent_soft : R.color.input_background);
+        int strokeColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_stroke : R.color.ui_border);
+        int textColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_text : R.color.text_primary);
+        int strokeWidthPx = Math.max(1, Math.round(TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 1f, context.getResources().getDisplayMetrics())));
+        float radiusPx = TypedValue.applyDimension(
+                TypedValue.COMPLEX_UNIT_DIP, 8f, context.getResources().getDisplayMetrics());
+
+        GradientDrawable pill = new GradientDrawable();
+        pill.setShape(GradientDrawable.RECTANGLE);
+        pill.setColor(fillColor);
+        pill.setStroke(strokeWidthPx, strokeColor);
+        pill.setCornerRadius(radiusPx);
+
+        int pl = button.getPaddingLeft();
+        int pt = button.getPaddingTop();
+        int pr = button.getPaddingRight();
+        int pb = button.getPaddingBottom();
+        ViewCompat.setBackgroundTintList(button, null);
+        button.setBackground(pill);
+        button.setPadding(pl, pt, pr, pb);
+        button.setTextColor(textColor);
+        button.setTag(R.id.ui_theme_bg_role, null);
+        button.setTag(R.id.ui_theme_text_role, null);
+        button.setSelected(selected);
+    }
+}

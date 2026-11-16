@@ -85,4 +85,20 @@ public class PreviewModeControllerTest {
         assertEquals(Arrays.asList("back", "left", "right"),
                 PreviewModeController.hiddenKeysFromMask(onlyFront));
     }
+
+    @Test
+    public void modeAActivatesGlOnlyWhenHostEligibleAndMainPreviewEnabled() {
+        assertEquals(PreviewMode.MODE_A, PreviewModeController.normalizeSupportedMode(PreviewMode.MODE_A));
+        assertEquals(PreviewMode.MODE_B, PreviewModeController.normalizeSupportedMode(null));
+
+        assertTrue(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, true, true));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_B, true, true));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_C, true, true));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, false, true));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, true, false));
+
+        assertTrue(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, true));
+        assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, false));
+        assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_B, true));
+    }
 }

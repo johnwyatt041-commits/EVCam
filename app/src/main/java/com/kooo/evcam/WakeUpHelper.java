@@ -278,9 +278,10 @@ public class WakeUpHelper {
     public static final String EXTRA_VEHICLE_ACTION = "vehicle_action";
     public static final String VEHICLE_ACTION_RD_POPUP = "rd_popup";
     public static final String VEHICLE_ACTION_CAMERA_RECOVERY = "camera_recovery";
+    public static final String VEHICLE_ACTION_REVERSE_PREVIEW = "reverse_preview";
 
     /**
-     * 因 R/D 换挡自动弹出或摄像头掉线有门槛恢复拉起 MainActivity 到前台。
+     * 因 R/D 换挡自动弹出、R 档倒车自动预览或摄像头掉线有门槛恢复拉起 MainActivity 到前台。
      */
     public static void launchForVehicleAction(Context context, String vehicleAction) {
         if (context == null || vehicleAction == null) return;
@@ -297,6 +298,10 @@ public class WakeUpHelper {
 
     public static void launchForGearShiftPopup(Context context) {
         launchForVehicleAction(context, VEHICLE_ACTION_RD_POPUP);
+    }
+
+    public static void launchForReversePreview(Context context) {
+        launchForVehicleAction(context, VEHICLE_ACTION_REVERSE_PREVIEW);
     }
 
     public static void launchForCameraRecovery(Context context) {

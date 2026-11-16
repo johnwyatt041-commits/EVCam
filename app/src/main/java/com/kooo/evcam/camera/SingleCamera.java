@@ -78,6 +78,9 @@ public class SingleCamera {
     private Surface streamSurface;
     private Handler streamSurfaceHandler; // StreamGlEncoder 的渲染线程 Handler
     private android.graphics.SurfaceTexture streamSurfaceTexture; // 暂未使用，预留
+    // T07: 模式 A 360 GL 按需预览挂载点（仅在模式 A 激活时有效）
+    private Surface surroundPreviewSurface;
+    private android.graphics.SurfaceTexture surroundPreviewSurfaceTexture;
     private OutputConfiguration activePreviewConfig; // 共享预览配置，用于动态 Surface 增减
     private Surface previewSurface;  // 预览Surface（缓存以避免重复创建）
     private ImageReader imageReader;  // 用于拍照的ImageReader
@@ -210,7 +213,8 @@ public class SingleCamera {
                 || isValidSurface(mainFloatingSurface)
                 || isValidSurface(secondaryDisplaySurface)
                 || isValidSurface(fullscreenPreviewSurface)
-                || isValidSurface(streamSurface);
+                || isValidSurface(streamSurface)
+                || isValidSurface(surroundPreviewSurface);
     }
 
     private static boolean isValidSurface(Surface surface) {
@@ -501,6 +505,72 @@ public class SingleCamera {
     }
 
     /**
+     * T07: 按需绑定或解绑模式 A 360 OES 预览 Surface。
+     * 挂载时优先复用 OutputConfiguration.enableSurfaceSharing() 动态加入当前会话，不打断正在进行的录制；
+     * 解绑时先停推帧再动态移除，确保退出模式 A 零残留且不触发 Surface abandoned。
+     */
+    public void setSurroundPreviewSurface(Surface surface, android.graphics.SurfaceTexture surfaceTexture) {
+        final Surface oldSurface = this.surroundPreviewSurface;
+        boolean changed = (oldSurface != null) != (surface != null)
+                || (oldSurface != null && !oldSurface.equals(surface));
+        this.surroundPreviewSurface = surface;
+        this.surroundPreviewSurfaceTexture = surfaceTexture;
+
+        if (surface != null) {
+            if (!surface.isValid()) {
+                AppLog.w(TAG, "Camera " + cameraId + " surround preview surface invalid");
+                return;
+            }
+            if (surfaceTexture != null && previewSize != null) {
+                try {
+                    surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+                } catch (Exception ignored) {
+                }
+            }
+            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface);
+            if (!isConnected()) {
+                openCamera();
+            }
+            if (backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
+                backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                backgroundHandler.post(() -> {
+                    if (surroundPreviewSurface == surface && surface.isValid()) {
+                        if (!tryDynamicSurfaceAdd(surface, false)) {
+                            AppLog.d(TAG, "Camera " + cameraId + " surround dynamic add failed, rebuild session");
+                            createCameraPreviewSession();
+                        }
+                    }
+                });
+            } else {
+                recreateSession(true);
+            }
+        } else {
+            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface cleared");
+            if (changed && oldSurface != null) {
+                stopRepeatingNow();
+                if (backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
+                    backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                    backgroundHandler.post(() -> {
+                        if (!tryDynamicSurfaceRemove(oldSurface)) {
+                            if (!closeIfUnused()) {
+                                createCameraPreviewSession();
+                            }
+                        } else {
+                            closeIfUnused();
+                        }
+                    });
+                } else if (!closeIfUnused()) {
+                    recreateSession(false);
+                }
+            }
+        }
+    }
+
+    public boolean isSurroundPreviewSurfaceBound() {
+        return isValidSurface(surroundPreviewSurface);
+    }
+
+    /**
      * 动态把 streamSurface 加入当前预览 session。
      * 复用 OutputConfiguration.addSurface + finalizeOutputConfigurations 机制；
      * 失败时降级到 recreateSession。
@@ -568,6 +638,7 @@ public class SingleCamera {
         if (isValidSurface(secondaryDisplaySurface)) return secondaryDisplaySurface;
         if (isValidSurface(fullscreenPreviewSurface)) return fullscreenPreviewSurface;
         if (isValidSurface(streamSurface)) return streamSurface;
+        if (isValidSurface(surroundPreviewSurface)) return surroundPreviewSurface;
         return null;
     }
 
@@ -580,6 +651,7 @@ public class SingleCamera {
         addUniqueValidSurface(targets, secondaryDisplaySurface);
         addUniqueValidSurface(targets, fullscreenPreviewSurface);
         addUniqueValidSurface(targets, streamSurface);
+        addUniqueValidSurface(targets, surroundPreviewSurface);
         return targets;
     }
 
@@ -1405,7 +1477,8 @@ public class SingleCamera {
                     || (secondaryDisplaySurface != null && secondaryDisplaySurface.isValid())
                     || (fullscreenPreviewSurface != null && fullscreenPreviewSurface.isValid())
                     || (recordSurface != null && recordSurface.isValid())
-                    || (streamSurface != null && streamSurface.isValid());
+                    || (streamSurface != null && streamSurface.isValid())
+                    || (surroundPreviewSurface != null && surroundPreviewSurface.isValid());
             if (!hasAnySurface) {
                 AppLog.d(TAG, "Camera " + cameraId + " no available surfaces, skipping session creation (waiting for surface)");
                 // 关闭旧 session，防止继续推帧到已销毁的 Surface（queueBuffer abandoned）
@@ -1500,6 +1573,9 @@ public class SingleCamera {
                         if (fullscreenPreviewSurfaceTexture != null) {
                             fullscreenPreviewSurfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
                         }
+                        if (surroundPreviewSurfaceTexture != null) {
+                            surroundPreviewSurfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+                        }
                     }
 
                     if (surface != null && surface.isValid()) {
@@ -1559,6 +1635,17 @@ public class SingleCamera {
                             surfaces.add(streamSurface);
                             previewRequestBuilder.addTarget(streamSurface);
                             AppLog.d(TAG, "Added stream surface to SHARED preview stream");
+                        }
+
+                        // T07: 360 模式 A OES 预览 Surface（仅激活模式 A 时加入共享预览流）
+                        if (surroundPreviewSurface != null && surroundPreviewSurface.isValid() &&
+                            surroundPreviewSurface != surface && surroundPreviewSurface != mainFloatingSurface &&
+                            surroundPreviewSurface != secondaryDisplaySurface && surroundPreviewSurface != fullscreenPreviewSurface &&
+                            surroundPreviewSurface != streamSurface) {
+                            previewSharedConfig.addSurface(surroundPreviewSurface);
+                            surfaces.add(surroundPreviewSurface);
+                            previewRequestBuilder.addTarget(surroundPreviewSurface);
+                            AppLog.d(TAG, "Added surround 360 surface to SHARED preview stream");
                         }
 
                         outputConfigs.add(previewSharedConfig);
@@ -1778,6 +1865,12 @@ public class SingleCamera {
                     mainFloatingSurface = null;
                     cleared = true;
                     AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned mainFloatingSurface and retrying");
+                }
+                if (!cleared && surroundPreviewSurface != null) {
+                    surroundPreviewSurface = null;
+                    surroundPreviewSurfaceTexture = null;
+                    cleared = true;
+                    AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned surroundPreviewSurface and retrying");
                 }
                 if (!cleared && recordSurface != null) {
                     recordSurface = null;
@@ -2427,6 +2520,12 @@ public class SingleCamera {
                 streamSurface = null;
                 streamSurfaceHandler = null;
                 streamSurfaceTexture = null;
+            }
+            // 清理模式 A 360 预览 Surface 引用（实际 release 由 SurroundGlRenderer 负责）
+            if (surroundPreviewSurface != null) {
+                AppLog.d(TAG, "Camera " + cameraId + " clearing surround 360 surface reference");
+                surroundPreviewSurface = null;
+                surroundPreviewSurfaceTexture = null;
             }
 
             // 释放ImageReader

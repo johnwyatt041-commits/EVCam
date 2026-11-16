@@ -116,4 +116,24 @@ public class SingleCameraResourceTest {
         assertTrue(camera.isMainPreviewEnabled());
         verify(camera).openCamera();
     }
+
+    @Test public void surround360SurfaceRetainsCameraOnlyWhileModeAActiveAndReleasesCleanly() {
+        camera.setMainPreviewEnabled(false);
+        camera.setSurroundPreviewSurface(surface, null);
+        verify(camera).openCamera();
+        assertTrue(camera.hasActiveOutputs());
+        assertTrue(camera.isSurroundPreviewSurfaceBound());
+        assertFalse(camera.closeIfUnused());
+
+        // 若正在录像时退出模式 A，只解绑 360 预览流，不断开录像
+        camera.setRecordSurface(surface, true);
+        camera.setSurroundPreviewSurface(null, null);
+        assertFalse(camera.isSurroundPreviewSurfaceBound());
+        assertTrue(camera.hasActiveOutputs());
+
+        // 若未在录像时退出模式 A，释放所有闲置相机
+        camera.clearRecordSurface();
+        assertFalse(camera.hasActiveOutputs());
+        assertTrue(camera.closeIfUnused());
+    }
 }

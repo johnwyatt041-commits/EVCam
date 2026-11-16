@@ -110,6 +110,41 @@ public final class VehicleAutomationCoordinator {
             mainScheduler
     );
 
+    private final ReversePreviewAutoCloseCoordinator reversePreviewCoordinator = new ReversePreviewAutoCloseCoordinator(
+            new ReversePreviewAutoCloseCoordinator.Host() {
+                @Override
+                public boolean isUiInForeground() {
+                    UiHost host = getUiHost();
+                    return host != null && host.isUiInForeground();
+                }
+
+                @Override
+                public void launchReversePreviewToForeground() {
+                    Context ctx = appContext;
+                    if (ctx == null || !AppLifecycleState.canRunBackgroundServices(ctx)) {
+                        return;
+                    }
+                    if (!WakeUpHelper.hasOverlayPermission(ctx)) {
+                        AppLog.w(TAG, "R 档自动打开预览跳过：缺少悬浮窗后台弹出权限");
+                        return;
+                    }
+                    WakeUpHelper.launchForReversePreview(ctx);
+                }
+
+                @Override
+                public void moveReversePreviewToBackground(@NonNull String reason) {
+                    mainHandler.post(() -> {
+                        UiHost host = getUiHost();
+                        if (host != null && host.isUiInForeground()) {
+                            host.exitUiToBackgroundForAutomation("reverse_preview_" + reason);
+                        }
+                    });
+                }
+            },
+            SystemClock::uptimeMillis,
+            mainScheduler
+    );
+
     private final CameraRecoveryCoordinator cameraRecoveryCoordinator = new CameraRecoveryCoordinator(
             new CameraRecoveryCoordinator.Host() {
                 @Override
@@ -239,10 +274,20 @@ public final class VehicleAutomationCoordinator {
         List<VehicleTriggerRule> rules = config.getVehicleTriggerRules();
         ruleEngine.setRules(rules);
         gearPopupCoordinator.setConfig(config.isRdShiftAutoPopupEnabled(), config.getRdShiftPopupSeconds());
+        reversePreviewCoordinator.setConfig(
+                config.isReversePreviewEnabled(),
+                config.getReversePreviewDelayMs(),
+                config.isPreviewSpeedCloseEnabled(),
+                config.getPreviewSpeedThresholdKmh(),
+                config.isParkPreviewCloseEnabled(),
+                config.getParkPreviewCloseDelaySeconds()
+        );
         cameraRecoveryCoordinator.setConfig(config.isKeepCameraConnectedEnabled(), config.isCameraRecoveryEnabled());
 
         boolean needsVhalLease = config.isVhalGrpcTriggerMode()
-                && (config.hasActiveVehicleTriggerRules() || config.isRdShiftAutoPopupEnabled());
+                && (config.hasActiveVehicleTriggerRules()
+                || config.isRdShiftAutoPopupEnabled()
+                || config.isReversePreviewEnabled());
         if (needsVhalLease && signalLease == null) {
             signalLease = RecordingVehicleSource.acquire();
         } else if (!needsVhalLease && signalLease != null) {
@@ -270,6 +315,7 @@ public final class VehicleAutomationCoordinator {
         }
         ruleEngine.reset();
         gearPopupCoordinator.reset();
+        reversePreviewCoordinator.reset();
         cameraRecoveryCoordinator.reset();
     }
 
@@ -290,6 +336,7 @@ public final class VehicleAutomationCoordinator {
         UiHost current = getUiHost();
         if (current == host) {
             gearPopupCoordinator.notifyUiMovedToBackground();
+            reversePreviewCoordinator.notifyUiMovedToBackground();
         }
     }
 
@@ -298,14 +345,17 @@ public final class VehicleAutomationCoordinator {
         if (current == host) {
             uiHostRef = new WeakReference<>(null);
             gearPopupCoordinator.notifyUiMovedToBackground();
+            reversePreviewCoordinator.notifyUiMovedToBackground();
         }
     }
 
     /**
-     * 自动弹出记录仪期间用户发生主动交互（切 Tab / 编辑布局等），解除 X 秒自动退后台接管。
+     * 自动弹出记录仪或 R 档自动预览期间用户发生主动交互（切 Tab / 编辑布局 / 开关设置），解除自动退后台接管。
      */
     public boolean notifyUserInteraction() {
-        return gearPopupCoordinator.notifyUserInteraction();
+        boolean gearCancelled = gearPopupCoordinator.notifyUserInteraction();
+        boolean reverseCancelled = reversePreviewCoordinator.notifyUserManualInteraction();
+        return gearCancelled || reverseCancelled;
     }
 
     public boolean isGearPopupActive() {
@@ -336,6 +386,7 @@ public final class VehicleAutomationCoordinator {
             return;
         }
         gearPopupCoordinator.onSnapshot(snapshot);
+        reversePreviewCoordinator.onSnapshot(snapshot);
         VehicleRuleEngine.TriggerEvent event = ruleEngine.evaluate(snapshot, SystemClock.uptimeMillis());
         if (event != null) {
             handleRuleTrigger(event);

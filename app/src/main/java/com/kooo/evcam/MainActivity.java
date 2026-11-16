@@ -79,6 +79,7 @@ public class MainActivity extends AppCompatActivity implements
     @Override
     public void onPreviewShortcutPreferencesChanged() {
         if (previewModeController != null) {
+            previewModeController.syncSurroundPreferences();
             previewModeController.refreshShortcutsOverlay();
         }
     }
@@ -285,7 +286,10 @@ public class MainActivity extends AppCompatActivity implements
                 this::navigateToSection,
                 this::showExitConfirmationDialog,
                 this::onBackPressed,
-                () -> setMainPreviewEnabled(!appConfig.isMainPreviewEnabled()),
+                () -> {
+                    com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
+                    setMainPreviewEnabled(!appConfig.isMainPreviewEnabled());
+                },
                 previewEditor::begin);
         uiShell.bindRecordToggle(this::toggleRecording);
         initPreviewModeController();
@@ -970,9 +974,26 @@ public class MainActivity extends AppCompatActivity implements
                             applyPreviewSizeTransform(cameraKey, (AutoFitTextureView) view, previewSize);
                         }
                     }
+
+                    @Override
+                    public void onSurroundSurfacesReady() {
+                        if (cameraManager == null && checkPermissions()) {
+                            initCamera();
+                        } else if (cameraManager != null && previewModeController != null) {
+                            previewModeController.onCamerasInitialized();
+                        }
+                    }
+
+                    @Override
+                    public void onRebindVisibleTextureViews() {
+                        if (cameraManager != null) {
+                            cameraManager.updatePreviewTextureViews(textureFront, textureBack, textureLeft, textureRight);
+                        }
+                    }
                 });
         uiShell.bindPreviewModeControls(
                 mode -> {
+                    com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
                     if (previewEditor != null && previewEditor.isEditing()) {
                         previewEditor.finish(false);
                     }
@@ -988,6 +1009,7 @@ public class MainActivity extends AppCompatActivity implements
                 fullscreen -> previewModeController.onFullscreenStateChanged());
         uiShell.bindFloatingWindowAction(this::enterFloatingWindowPresentation);
         previewModeController.start();
+        updateSurroundLifecycleInActivity();
     }
 
     private int getExpectedReadyTextureCount() {
@@ -1732,6 +1754,18 @@ public class MainActivity extends AppCompatActivity implements
         if (uiShell != null) uiShell.setPreviewEnabled(enabled);
         if (cameraManager != null) cameraManager.setMainPreviewEnabled(enabled && !isInBackground);
         if (previewVisibilityController != null) previewVisibilityController.setPreviewEnabled(enabled);
+        if (previewModeController != null) {
+            previewModeController.syncSurroundPreferences();
+        }
+        updateSurroundLifecycleInActivity();
+    }
+
+    private void updateSurroundLifecycleInActivity() {
+        if (previewModeController == null) {
+            return;
+        }
+        boolean onRecordingSection = uiShell == null || uiShell.getCurrentRoot() == R.id.nav_recording;
+        previewModeController.setSurroundHostEligible(!isInBackground && onRecordingSection);
     }
 
     private void showExitConfirmationDialog() {
@@ -1860,6 +1894,15 @@ public class MainActivity extends AppCompatActivity implements
                 }
                 showRecordingInterface();
             }
+        } else if (WakeUpHelper.VEHICLE_ACTION_REVERSE_PREVIEW.equals(action)) {
+            AppLog.i(TAG, "处理 R 档自动预览 Intent -> 切换到记录仪页并开启主预览");
+            if (uiShell != null) {
+                if (uiShell.isFullscreenPreview()) {
+                    uiShell.setFullscreenPreview(false);
+                }
+                showRecordingInterface();
+            }
+            setMainPreviewEnabled(true);
         } else if (WakeUpHelper.VEHICLE_ACTION_CAMERA_RECOVERY.equals(action)) {
             AppLog.i(TAG, "处理摄像头有门槛前台恢复 Intent -> 触发 checkAndRepairCameras");
             if (cameraManager != null) {
@@ -1955,6 +1998,7 @@ public class MainActivity extends AppCompatActivity implements
      */
     public void showRecordingInterface() {
         uiShell.showRoot(R.id.nav_recording, null);
+        updateSurroundLifecycleInActivity();
     }
 
     /**
@@ -1972,6 +2016,7 @@ public class MainActivity extends AppCompatActivity implements
         uiShell.showRoot(R.id.nav_playback,
                 com.kooo.evcam.playback.PlaybackHubFragment.newInstance(
                         com.kooo.evcam.playback.PlaybackHubFragment.TAB_VIDEO));
+        updateSurroundLifecycleInActivity();
     }
 
     /**
@@ -1981,6 +2026,7 @@ public class MainActivity extends AppCompatActivity implements
         uiShell.showRoot(R.id.nav_playback,
                 com.kooo.evcam.playback.PlaybackHubFragment.newInstance(
                         com.kooo.evcam.playback.PlaybackHubFragment.TAB_PHOTO));
+        updateSurroundLifecycleInActivity();
     }
 
     /**
@@ -2010,9 +2056,11 @@ public class MainActivity extends AppCompatActivity implements
                 && uiShell.getCurrentRoot() == R.id.nav_settings
                 && current instanceof SettingsFragment) {
             ((SettingsFragment) current).selectCategory(categoryId);
+            updateSurroundLifecycleInActivity();
             return;
         }
         uiShell.showRoot(R.id.nav_settings, SettingsFragment.newInstance(categoryId));
+        updateSurroundLifecycleInActivity();
     }
 
     /**
@@ -2040,8 +2088,9 @@ public class MainActivity extends AppCompatActivity implements
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
         if (requestCode == REQUEST_PERMISSIONS) {
             if (checkPermissions()) {
-                // 权限已授予，但需要等待可见 TextureView 准备好
-                if (textureReadyCount >= getExpectedReadyTextureCount()) {
+                // 权限已授予，等待可见 TextureView（或模式 A 360 OES Surface）准备好
+                boolean surroundReady = previewModeController == null || previewModeController.isReadyForCameraInit();
+                if (textureReadyCount >= getExpectedReadyTextureCount() && surroundReady) {
                     initCamera();
                 }
             } else {
@@ -2052,10 +2101,12 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     private void initCamera() {
-        // 确保所有可见的 TextureView 都准备好（隐藏路不阻塞启动）
+        // 确保所有可见的 TextureView（或模式 A 360 OES Surface）都准备好（隐藏路不阻塞启动）
         int expectedTextures = getExpectedReadyTextureCount();
-        if (textureReadyCount < expectedTextures) {
-            AppLog.w(TAG, "Not all visible TextureViews are ready yet: " + textureReadyCount + "/" + expectedTextures);
+        boolean surroundReady = previewModeController == null || previewModeController.isReadyForCameraInit();
+        if (textureReadyCount < expectedTextures || !surroundReady) {
+            AppLog.w(TAG, "Not all visible preview surfaces ready yet: textures="
+                    + textureReadyCount + "/" + expectedTextures + ", surroundReady=" + surroundReady);
             return;
         }
         
@@ -2201,8 +2252,11 @@ public class MainActivity extends AppCompatActivity implements
                 });
             });
 
-            // 绑定 TextureView
+            // 绑定 TextureView（模式 A 下会按需挂载 360 OES Surface）
             cameraManager.updatePreviewTextureViews(textureFront, textureBack, textureLeft, textureRight);
+            if (previewModeController != null) {
+                previewModeController.onCamerasInitialized();
+            }
 
             // 打开所有摄像头（后台初始化时仅创建了对象，可能只打开了补盲所需的单个摄像头）
             // 主界面需要所有摄像头画面，已打开的摄像头会被 openCamera 内部的防重复检查跳过
@@ -2492,6 +2546,10 @@ public class MainActivity extends AppCompatActivity implements
                 String recordingMode = appConfig.getRecordingMode();
                 String modeDesc = useCodecRecording ? "MediaCodec" : "MediaRecorder";
                 AppLog.d(TAG, "录制模式: " + modeDesc + " (设置: " + recordingMode + ")");
+
+                if (previewModeController != null) {
+                    previewModeController.onCamerasInitialized();
+                }
 
                 // 打开所有摄像头
                 cameraManager.openAllCameras();
@@ -4214,6 +4272,7 @@ public class MainActivity extends AppCompatActivity implements
     protected void onPause() {
         super.onPause();
         isInBackground = true;
+        updateSurroundLifecycleInActivity();
         com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUiPaused(vehicleAutomationUiHost);
         updateRecordingFloatingVisibility(false);
         BlindSpotService.notifySelfBackground();
@@ -4308,6 +4367,7 @@ public class MainActivity extends AppCompatActivity implements
             previewModeController.start();
             previewModeController.syncFromPreferences();
         }
+        updateSurroundLifecycleInActivity();
         
         // 标记 Activity 已经完全恢复过一次（用于区分新创建和已存在的 Activity）
         // 这个标记在 onCreate 后第一次 onResume 时设为 true

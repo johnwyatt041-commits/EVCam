@@ -6,9 +6,11 @@ import com.kooo.evcam.AppLog;
 import com.kooo.evcam.FileTransferManager;
 import com.kooo.evcam.StorageHelper;
 import android.content.Context;
+import android.graphics.SurfaceTexture;
 import android.os.Environment;
 import android.util.Log;
 import android.util.Size;
+import android.view.Surface;
 import android.view.TextureView;
 
 import java.io.File;
@@ -412,6 +414,31 @@ public class MultiCameraManager {
 
     public void setPhotoSurfaceProvider(PhotoSurfaceProvider provider) {
         this.photoSurfaceProvider = provider;
+    }
+
+    /** T07: 仅在模式 A 激活时挂载四路 360 OES Surface。 */
+    public void setSurroundPreviewSurfaces(Surface front, SurfaceTexture stFront,
+                                           Surface back, SurfaceTexture stBack,
+                                           Surface left, SurfaceTexture stLeft,
+                                           Surface right, SurfaceTexture stRight) {
+        setSingleSurroundSurface("front", front, stFront);
+        setSingleSurroundSurface("back", back, stBack);
+        setSingleSurroundSurface("left", left, stLeft);
+        setSingleSurroundSurface("right", right, stRight);
+    }
+
+    /** T07: 退出模式 A 或退后台时立即解绑全部四路 360 OES Surface。 */
+    public void clearSurroundPreviewSurfaces() {
+        for (SingleCamera camera : cameras.values()) {
+            camera.setSurroundPreviewSurface(null, null);
+        }
+    }
+
+    private void setSingleSurroundSurface(String cameraKey, Surface surface, SurfaceTexture st) {
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera != null) {
+            camera.setSurroundPreviewSurface(surface, st);
+        }
     }
 
     public Size getCameraPreviewSize(String cameraKey) {

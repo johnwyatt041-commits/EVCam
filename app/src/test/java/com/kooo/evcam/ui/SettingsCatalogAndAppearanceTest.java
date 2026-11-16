@@ -41,6 +41,10 @@ public class SettingsCatalogAndAppearanceTest {
             Object val = backingStore.get(inv.getArgument(0));
             return val instanceof Integer ? (Integer) val : inv.getArgument(1);
         });
+        when(prefs.getFloat(anyString(), anyFloat())).thenAnswer(inv -> {
+            Object val = backingStore.get(inv.getArgument(0));
+            return val instanceof Float ? (Float) val : inv.getArgument(1);
+        });
         when(editor.putString(anyString(), nullable(String.class))).thenAnswer(inv -> {
             String key = inv.getArgument(0);
             String value = inv.getArgument(1);
@@ -56,13 +60,17 @@ public class SettingsCatalogAndAppearanceTest {
             backingStore.put(inv.getArgument(0), inv.getArgument(1));
             return editor;
         });
+        when(editor.putFloat(anyString(), anyFloat())).thenAnswer(inv -> {
+            backingStore.put(inv.getArgument(0), inv.getArgument(1));
+            return editor;
+        });
         return new AppConfig(context);
     }
 
     @Test
     public void catalogShowsOnlyImplementedEntriesWithoutShellsOrExcludedCategories() {
         List<SettingsCatalog.Entry> entries = SettingsCatalog.getImplementedEntries();
-        assertEquals(8, entries.size());
+        assertEquals(9, entries.size());
 
         List<String> actualTitles = new ArrayList<>();
         List<String> actualDisplayTitles = new ArrayList<>();
@@ -72,7 +80,6 @@ public class SettingsCatalogAndAppearanceTest {
             assertNotEquals(0, entry.iconResId);
             assertFalse(entry.title.contains("屏幕尺寸"));
             assertFalse(entry.title.contains("外设"));
-            assertFalse(entry.title.startsWith("4."));
             assertFalse(entry.title.startsWith("7."));
             assertFalse(entry.title.startsWith("8."));
             assertFalse(entry.title.startsWith("9."));
@@ -82,6 +89,7 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals(Arrays.asList(
                 "1. 外观与交互",
                 "3. 记录仪",
+                "4. 360 画面",
                 "5. 补盲",
                 "10. 信号预设与匹配",
                 "11. 飞书远程",
@@ -93,6 +101,7 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals(Arrays.asList(
                 "外观与交互",
                 "记录仪",
+                "360 画面",
                 "补盲",
                 "信号预设与匹配",
                 "飞书远程",
@@ -166,9 +175,11 @@ public class SettingsCatalogAndAppearanceTest {
         AppConfig config = createAppConfig(store);
 
         assertEquals(AppConfig.PREVIEW_MODE_B, config.getPreviewMode());
-        assertEquals(AppConfig.PREVIEW_MODE_B, AppConfig.normalizePreviewMode("mode_a"));
+        assertEquals(AppConfig.PREVIEW_MODE_A, AppConfig.normalizePreviewMode("mode_a"));
         assertEquals(AppConfig.PREVIEW_MODE_C, AppConfig.normalizePreviewMode(AppConfig.PREVIEW_MODE_C));
 
+        config.setPreviewMode(AppConfig.PREVIEW_MODE_A);
+        assertEquals(AppConfig.PREVIEW_MODE_A, config.getPreviewMode());
         config.setPreviewMode(AppConfig.PREVIEW_MODE_C);
         assertEquals(AppConfig.PREVIEW_MODE_C, config.getPreviewMode());
         config.setPreviewMode("unknown");
@@ -230,5 +241,48 @@ public class SettingsCatalogAndAppearanceTest {
         config.resetCustomVhalPropertyIds();
         assertEquals(com.kooo.evcam.vehicle.VehicleSignalCategory.PROP_GEAR_SELECTION,
                 config.getCustomGearSelectionPropId());
+    }
+
+    @Test
+    public void t07SurroundModeAAnd41To43SettingsNormalizeAndPersistWithoutLynk08() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertEquals(com.kooo.evcam.surround.SurroundViewMode.DRIVE, config.getSurroundTopView());
+        assertEquals(com.kooo.evcam.surround.SurroundViewMode.FRONT_WHEELS, config.getSurroundBottomView());
+        assertTrue(config.isSurroundOverlayButtonsVisible());
+        config.setSurroundOverlayButtonsVisible(false);
+        assertFalse(config.isSurroundOverlayButtonsVisible());
+
+        // R 档延时 0..5000ms 步长 50ms
+        assertEquals(200, config.getReversePreviewDelayMs());
+        config.setReversePreviewDelayMs(233);
+        assertEquals(250, config.getReversePreviewDelayMs());
+        config.setReversePreviewDelayMs(9999);
+        assertEquals(5000, config.getReversePreviewDelayMs());
+
+        // 车速返桌 15..50km/h；P 档返桌 1..60s
+        assertEquals(20, config.getPreviewSpeedThresholdKmh());
+        config.setPreviewSpeedThresholdKmh(5);
+        assertEquals(15, config.getPreviewSpeedThresholdKmh());
+        assertEquals(3, config.getParkPreviewCloseDelaySeconds());
+        config.setParkPreviewCloseDelaySeconds(120);
+        assertEquals(60, config.getParkPreviewCloseDelaySeconds());
+
+        // 仅允许 E5 内置/本地校准，彻底剔除领克 08
+        assertEquals(AppConfig.SURROUND_CALIBRATION_E5_BUILTIN, config.getSurroundCalibrationSource());
+        assertEquals(AppConfig.SURROUND_CALIBRATION_E5_BUILTIN,
+                AppConfig.normalizeSurroundCalibrationSource("LYNK_08"));
+        assertEquals(206, config.getSurroundGroundWidthCm());
+        config.setSurroundGroundWidthCm(300);
+        assertEquals(260, config.getSurroundGroundWidthCm());
+        config.resetSurroundGroundDimensions();
+        assertEquals(206, config.getSurroundGroundWidthCm());
+        assertEquals(530, config.getSurroundGroundLengthCm());
+        assertEquals(0, config.getSurroundGroundFrontExtensionCm());
+
+        assertTrue(config.isPreviewGuidanceEnabled());
+        assertEquals("全景 A（360 + 分视角）",
+                AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_A));
     }
 }

@@ -359,6 +359,8 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
                 return new AppearanceSettingsFragment();
             case SettingsCatalog.ID_RECORDER:
                 return new RecorderSettingsFragment();
+            case SettingsCatalog.ID_SURROUND_360:
+                return new com.kooo.evcam.ui.SurroundSettingsFragment();
             case SettingsCatalog.ID_BLIND_SPOT:
                 return new BlindSpotSettingsFragment();
             case SettingsCatalog.ID_SIGNAL_PRESET:
