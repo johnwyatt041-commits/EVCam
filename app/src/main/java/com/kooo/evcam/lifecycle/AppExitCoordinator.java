@@ -239,7 +239,7 @@ public final class AppExitCoordinator {
 
             @Override
             public void stopRemoteServices() {
-                RemoteServiceManager.getInstance().stopAllServices();
+                RemoteServiceManager.stopAllIfInitialized();
             }
 
             @Override

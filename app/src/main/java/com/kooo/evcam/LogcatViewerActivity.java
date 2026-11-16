@@ -95,8 +95,8 @@ public class LogcatViewerActivity extends Activity {
             Process process = null;
             BufferedReader reader = null;
             try {
-                // 读取最近的100条日志并持续监听
-                String cmd = "logcat -v time";
+                // 读取最近的200条日志并持续监听，避免历史缓冲过长卡顿
+                String cmd = "logcat -v time -T 200";
                 process = Runtime.getRuntime().exec(cmd);
                 reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
                 
@@ -117,7 +117,9 @@ public class LogcatViewerActivity extends Activity {
                     }
                 }
             } catch (Exception e) {
-                mainHandler.post(() -> logTextView.append("Error reading logs: " + e.getMessage() + "\n"));
+                if (isRunning) {
+                    mainHandler.post(() -> logTextView.append("读取日志出错: " + e.getMessage() + "\n"));
+                }
             } finally {
                 try {
                     if (reader != null) reader.close();

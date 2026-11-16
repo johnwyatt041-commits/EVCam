@@ -10,6 +10,7 @@ public final class EVCamApplication extends Application {
 
     @Override public void onCreate() {
         super.onCreate();
+        AppLog.init(this);
         registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
             @Override public void onActivityStarted(Activity activity) { startedActivities++; }
             @Override public void onActivityStopped(Activity activity) {

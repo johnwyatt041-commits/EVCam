@@ -377,7 +377,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     
     // 版本更新配置
     private static final String KEY_UPDATE_SERVER_URL = "update_server_url";  // 更新服务器地址
-    private static final String DEFAULT_UPDATE_SERVER_URL = "https://evcam.suyunkai.top:9568/update/";  // 默认更新服务器
+    private static final String DEFAULT_UPDATE_SERVER_URL = "";  // 自定义兼容更新目录默认留空（主更新源已切至 GitHub）
     
     // 车型常量
     public static final String CAR_MODEL_GALAXY_E5 = "galaxy_e5";  // 银河E5
@@ -2687,9 +2687,9 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public String getUpdateServerUrl() {
         String url = prefs.getString(KEY_UPDATE_SERVER_URL, DEFAULT_UPDATE_SERVER_URL);
         if (url == null || url.trim().isEmpty()) {
-            return DEFAULT_UPDATE_SERVER_URL;
+            return null;
         }
-        return url;
+        return url.trim();
     }
     
     /**

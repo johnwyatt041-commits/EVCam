@@ -76,7 +76,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="将 Log.d 转换为 Log.i，并启用日志导出与诊断上传"
+                        android:text="将 Log.d 提升为 INFO 输出，进程内幂等初始化并周期增量落盘"
                         android:textColor="@color/text_secondary"
                         android:textSize="14sp"
                         android:layout_marginTop="4dp" />
@@ -89,18 +89,62 @@
             </LinearLayout>
 
             <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:padding="16dp"
+                android:background="@drawable/ui_card"
+                android:layout_marginBottom="16dp">
+
+                <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="本地会话日志状态"
+                    android:textColor="@color/text_primary"
+                    android:textSize="18sp"
+                    android:fontFamily="sans-serif-medium"
+                    android:layout_marginBottom="8dp" />
+
+                <TextView
+                    android:id="@+id/tv_current_session_summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="本次会话：读取中..."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_previous_session_summary"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="上次会话：读取中..."
+                    android:textColor="@color/text_secondary"
+                    android:textSize="14sp"
+                    android:layout_marginBottom="4dp" />
+
+                <TextView
+                    android:id="@+id/tv_coherence_status"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="连贯性校验：点击下方按钮执行实时落盘与尾部校验"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="13sp" />
+            </LinearLayout>
+
+            <LinearLayout
                 android:id="@+id/layout_log_buttons"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="horizontal"
-                android:visibility="gone">
+                android:layout_marginBottom="12dp">
                 <Button
                     android:id="@+id/btn_save_logs"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="保存日志"
-                    android:textSize="16sp"
+                    android:text="导出本次日志"
+                    android:textSize="15sp"
                     android:minHeight="48dp"
                     android:backgroundTint="@color/button_background"
                     android:textColor="@color/button_text"
@@ -109,15 +153,49 @@
                     android:fontFamily="sans-serif-medium"
                     android:textAllCaps="false" />
                 <Button
-                    android:id="@+id/btn_upload_logs"
+                    android:id="@+id/btn_save_prev_logs"
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="一键上传"
-                    android:textSize="16sp"
+                    android:text="导出上次日志"
+                    android:textSize="15sp"
                     android:minHeight="48dp"
-                    android:backgroundTint="#4CAF50"
-                    android:textColor="#FFFFFFFF"
+                    android:backgroundTint="@color/button_background"
+                    android:textColor="@color/button_text"
+                    android:layout_marginStart="8dp"
+                    android:elevation="0dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textAllCaps="false" />
+            </LinearLayout>
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal">
+                <Button
+                    android:id="@+id/btn_verify_coherence"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="连贯性自检"
+                    android:textSize="15sp"
+                    android:minHeight="48dp"
+                    android:backgroundTint="@color/button_background"
+                    android:textColor="@color/button_text"
+                    android:layout_marginEnd="8dp"
+                    android:elevation="0dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textAllCaps="false" />
+                <Button
+                    android:id="@+id/btn_open_logcat"
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_weight="1"
+                    android:text="实时 Logcat"
+                    android:textSize="15sp"
+                    android:minHeight="48dp"
+                    android:backgroundTint="@color/button_background"
+                    android:textColor="@color/button_text"
                     android:layout_marginStart="8dp"
                     android:elevation="0dp"
                     android:fontFamily="sans-serif-medium"

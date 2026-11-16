@@ -42,9 +42,14 @@ public class FeishuBotManager {
     private final Handler mainHandler;
     private final Gson gson;
 
+    private final Object stateLock = new Object();
     private OkHttpClient wsClient;
     private WebSocket webSocket;
+    private Thread connectThread;
+    private Runnable reconnectRunnable;
+    private long activeGeneration = 0L;
     private volatile boolean isRunning = false;
+    private volatile boolean isStarting = false;
     private volatile boolean shouldStop = false;
     private int reconnectAttempts = 0;
     private CommandCallback currentCommandCallback;
@@ -106,15 +111,6 @@ public class FeishuBotManager {
      * 启动 WebSocket 连接
      */
     public void start(CommandCallback commandCallback) {
-        if (isRunning) {
-            AppLog.w(TAG, "Bot 已在运行");
-            return;
-        }
-
-        this.currentCommandCallback = commandCallback;
-        this.shouldStop = false;
-        this.reconnectAttempts = 0;
-
         String appId = config.getAppId();
         String appSecret = config.getAppSecret();
 
@@ -124,45 +120,99 @@ public class FeishuBotManager {
             return;
         }
 
-        AppLog.d(TAG, "正在初始化飞书 WebSocket 连接...");
-        startConnection();
+        final long gen;
+        synchronized (stateLock) {
+            if (isRunning || isStarting) {
+                AppLog.w(TAG, "Bot 已在运行或正在连接");
+                return;
+            }
+            gen = ++activeGeneration;
+            this.currentCommandCallback = commandCallback;
+            this.shouldStop = false;
+            this.isStarting = true;
+            this.reconnectAttempts = 0;
+        }
+
+        AppLog.d(TAG, "正在初始化飞书 WebSocket 连接... (gen=" + gen + ")");
+        startConnection(gen);
+    }
+
+    private boolean isGenerationCancelled(long generation) {
+        synchronized (stateLock) {
+            return shouldStop || generation != activeGeneration;
+        }
     }
 
     /**
-     * 内部方法：启动连接
+     * 内部方法：启动连接（绑定代际令牌，防止 stop() 后在途线程继续创建幽灵连接）
      */
-    private void startConnection() {
-        new Thread(() -> {
+    private void startConnection(final long gen) {
+        Thread worker = new Thread(() -> {
+            OkHttpClient localClient = null;
             try {
-                // 1. 获取 WebSocket 连接信息
-                AppLog.d(TAG, "正在获取 WebSocket 连接地址...");
+                if (isGenerationCancelled(gen)) {
+                    return;
+                }
+                AppLog.d(TAG, "正在获取 WebSocket 连接地址... (gen=" + gen + ")");
                 FeishuApiClient.WebSocketConnection wsInfo = apiClient.getWebSocketConnection();
+                if (isGenerationCancelled(gen)) {
+                    AppLog.d(TAG, "连接已被取消，中止建立 WebSocket (gen=" + gen + ")");
+                    return;
+                }
                 String wsUrl = wsInfo.url;
                 AppLog.d(TAG, "WebSocket URL: " + wsUrl);
 
-                // 2. 从 URL 中解析 service_id 和 device_id
                 parseUrlParams(wsUrl);
 
-                // 3. 创建 OkHttp WebSocket 客户端
-                wsClient = new OkHttpClient.Builder()
+                localClient = new OkHttpClient.Builder()
                         .connectTimeout(30, TimeUnit.SECONDS)
-                        .readTimeout(0, TimeUnit.SECONDS) // 无超时，保持长连接
+                        .readTimeout(0, TimeUnit.SECONDS)
                         .writeTimeout(30, TimeUnit.SECONDS)
                         .build();
 
-                // 4. 建立 WebSocket 连接
                 Request request = new Request.Builder()
                         .url(wsUrl)
                         .build();
 
-                webSocket = wsClient.newWebSocket(request, new FeishuWebSocketListener());
-                AppLog.d(TAG, "WebSocket 连接请求已发送");
+                synchronized (stateLock) {
+                    if (shouldStop || gen != activeGeneration) {
+                        shutdownOkHttpClientQuietly(localClient);
+                        return;
+                    }
+                    wsClient = localClient;
+                    webSocket = localClient.newWebSocket(request, new FeishuWebSocketListener(gen));
+                }
+                AppLog.d(TAG, "WebSocket 连接请求已发送 (gen=" + gen + ")");
 
             } catch (Exception e) {
+                if (localClient != null) {
+                    synchronized (stateLock) {
+                        if (wsClient == null) {
+                            shutdownOkHttpClientQuietly(localClient);
+                        }
+                    }
+                }
+                if (isGenerationCancelled(gen)) {
+                    AppLog.d(TAG, "飞书已主动停止，忽略在途连接异常 (gen=" + gen + ")");
+                    return;
+                }
                 AppLog.e(TAG, "启动 WebSocket 连接失败", e);
-                handleConnectionError(e.getMessage());
+                handleConnectionError(gen, e.getMessage());
+            } finally {
+                synchronized (stateLock) {
+                    if (connectThread == Thread.currentThread()) {
+                        connectThread = null;
+                    }
+                }
             }
-        }).start();
+        }, "Feishu-Connect-" + gen);
+        synchronized (stateLock) {
+            if (shouldStop || gen != activeGeneration) {
+                return;
+            }
+            connectThread = worker;
+        }
+        worker.start();
     }
 
     /**
@@ -191,59 +241,91 @@ public class FeishuBotManager {
     }
 
     /**
-     * WebSocket 监听器
+     * WebSocket 监听器（绑定代际令牌，旧会话关闭或失败回调绝不污染新会话或触发幽灵重连）
      */
     private class FeishuWebSocketListener extends WebSocketListener {
+        private final long generation;
+
+        FeishuWebSocketListener(long generation) {
+            this.generation = generation;
+        }
+
         @Override
-        public void onOpen(WebSocket webSocket, Response response) {
-            AppLog.d(TAG, "WebSocket 连接已建立");
-            isRunning = true;
-            reconnectAttempts = 0;
-
-            // 启动心跳定时器
-            startPingTimer();
-
+        public void onOpen(WebSocket socket, Response response) {
+            synchronized (stateLock) {
+                if (shouldStop || generation != activeGeneration || socket != webSocket) {
+                    AppLog.d(TAG, "忽略过期代际 WebSocket onOpen (gen=" + generation + ")");
+                    socket.close(1000, "Stale generation");
+                    return;
+                }
+                isStarting = false;
+                isRunning = true;
+                reconnectAttempts = 0;
+            }
+            AppLog.d(TAG, "WebSocket 连接已建立 (gen=" + generation + ")");
+            startPingTimer(generation);
             mainHandler.post(() -> connectionCallback.onConnected());
         }
 
         @Override
-        public void onMessage(WebSocket webSocket, String text) {
-            // 飞书使用二进制 Protobuf 消息，文本消息可能是握手或错误
+        public void onMessage(WebSocket socket, String text) {
+            if (isGenerationCancelled(generation)) {
+                return;
+            }
             AppLog.d(TAG, "收到文本消息: " + text);
         }
 
         @Override
-        public void onMessage(WebSocket webSocket, ByteString bytes) {
-            // 处理二进制 Protobuf 消息
+        public void onMessage(WebSocket socket, ByteString bytes) {
+            if (isGenerationCancelled(generation)) {
+                return;
+            }
             AppLog.d(TAG, "收到二进制消息: " + bytes.size() + " 字节");
             processProtobufMessage(bytes.toByteArray());
         }
 
         @Override
-        public void onClosing(WebSocket webSocket, int code, String reason) {
+        public void onClosing(WebSocket socket, int code, String reason) {
             AppLog.d(TAG, "WebSocket 正在关闭: code=" + code + ", reason=" + reason);
         }
 
         @Override
-        public void onClosed(WebSocket webSocket, int code, String reason) {
+        public void onClosed(WebSocket socket, int code, String reason) {
+            boolean cancelled;
+            synchronized (stateLock) {
+                if (generation != activeGeneration) {
+                    return;
+                }
+                isStarting = false;
+                isRunning = false;
+                cancelled = shouldStop;
+            }
             AppLog.d(TAG, "WebSocket 已关闭: code=" + code + ", reason=" + reason);
-            isRunning = false;
             stopPingTimer();
 
-            if (!shouldStop) {
-                // 非主动关闭，尝试重连
-                attemptReconnect();
+            if (!cancelled) {
+                attemptReconnect(generation);
             } else {
                 mainHandler.post(() -> connectionCallback.onDisconnected());
             }
         }
 
         @Override
-        public void onFailure(WebSocket webSocket, Throwable t, Response response) {
+        public void onFailure(WebSocket socket, Throwable t, Response response) {
+            synchronized (stateLock) {
+                if (generation != activeGeneration) {
+                    return;
+                }
+                isStarting = false;
+                isRunning = false;
+                if (shouldStop) {
+                    AppLog.d(TAG, "飞书已停止，忽略断开故障回调 (gen=" + generation + ")");
+                    return;
+                }
+            }
             AppLog.e(TAG, "WebSocket 连接失败", t);
-            isRunning = false;
             stopPingTimer();
-            handleConnectionError(t.getMessage());
+            handleConnectionError(generation, t != null ? t.getMessage() : "unknown");
         }
     }
 
@@ -623,24 +705,32 @@ public class FeishuBotManager {
     /**
      * 启动心跳定时器
      */
-    private void startPingTimer() {
+    private void startPingTimer(final long gen) {
+        stopPingTimer();
         pingRunnable = new Runnable() {
             @Override
             public void run() {
                 messageCache.prune();
-                if (isRunning && webSocket != null) {
-                    try {
-                        // 发送 Protobuf 格式的 ping 帧
-                        Pbbp2Frame pingFrame = Pbbp2Frame.createPingFrame(serviceId);
-                        byte[] frameBytes = pingFrame.toByteArray();
-                        webSocket.send(ByteString.of(frameBytes));
-                        AppLog.d(TAG, "发送心跳 ping");
-                    } catch (Exception e) {
-                        AppLog.e(TAG, "发送心跳失败", e);
+                WebSocket targetSocket;
+                synchronized (stateLock) {
+                    if (shouldStop || gen != activeGeneration || !isRunning || webSocket == null) {
+                        return;
                     }
+                    targetSocket = webSocket;
+                }
+                try {
+                    Pbbp2Frame pingFrame = Pbbp2Frame.createPingFrame(serviceId);
+                    byte[] frameBytes = pingFrame.toByteArray();
+                    targetSocket.send(ByteString.of(frameBytes));
+                    AppLog.d(TAG, "发送心跳 ping");
+                } catch (Exception e) {
+                    AppLog.e(TAG, "发送心跳失败", e);
+                }
 
-                    // 继续下一次心跳
-                    pingHandler.postDelayed(this, PING_INTERVAL_MS);
+                synchronized (stateLock) {
+                    if (!shouldStop && gen == activeGeneration && isRunning && pingRunnable == this) {
+                        pingHandler.postDelayed(this, PING_INTERVAL_MS);
+                    }
                 }
             }
         };
@@ -648,27 +738,59 @@ public class FeishuBotManager {
     }
 
     /**
-     * 停止心跳定时器
+     * 停止并彻底清理心跳定时器
      */
     private void stopPingTimer() {
-        if (pingRunnable != null) {
-            pingHandler.removeCallbacks(pingRunnable);
+        pingHandler.removeCallbacksAndMessages(null);
+        pingRunnable = null;
+    }
+
+    private void cancelReconnectTimerLocked() {
+        if (reconnectRunnable != null) {
+            mainHandler.removeCallbacks(reconnectRunnable);
+            reconnectRunnable = null;
+        }
+    }
+
+    private void scheduleReconnect(final long gen, String logPrefix) {
+        Runnable scheduled = () -> {
+            synchronized (stateLock) {
+                reconnectRunnable = null;
+                if (shouldStop || gen != activeGeneration) {
+                    return;
+                }
+                isStarting = true;
+            }
+            startConnection(gen);
+        };
+        synchronized (stateLock) {
+            if (shouldStop || gen != activeGeneration) {
+                return;
+            }
+            cancelReconnectTimerLocked();
+            reconnectAttempts++;
+            AppLog.d(TAG, logPrefix + "将在 " + RECONNECT_DELAY_MS + "ms 后尝试第 " + reconnectAttempts + " 次重连 (gen=" + gen + ")");
+            reconnectRunnable = scheduled;
+            mainHandler.postDelayed(scheduled, RECONNECT_DELAY_MS);
         }
     }
 
     /**
      * 处理连接错误
      */
-    private void handleConnectionError(String errorMsg) {
-        if (!shouldStop && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            reconnectAttempts++;
-            AppLog.d(TAG, "将在 " + RECONNECT_DELAY_MS + "ms 后尝试第 " + reconnectAttempts + " 次重连");
-            mainHandler.postDelayed(() -> {
-                if (!shouldStop) {
-                    startConnection();
-                }
-            }, RECONNECT_DELAY_MS);
-        } else if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+    private void handleConnectionError(final long gen, String errorMsg) {
+        boolean maxReached = false;
+        synchronized (stateLock) {
+            if (shouldStop || gen != activeGeneration) {
+                return;
+            }
+            if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                maxReached = true;
+            }
+        }
+        if (!maxReached) {
+            scheduleReconnect(gen, "连接错误，");
+        } else {
             AppLog.w(TAG, "达到最大重连次数（" + MAX_RECONNECT_ATTEMPTS + "），连接失败");
             mainHandler.post(() -> connectionCallback.onError("连接失败: " + errorMsg));
         }
@@ -677,44 +799,97 @@ public class FeishuBotManager {
     /**
      * 尝试重连
      */
-    private void attemptReconnect() {
-        if (!shouldStop && reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-            reconnectAttempts++;
-            AppLog.d(TAG, "连接断开，将在 " + RECONNECT_DELAY_MS + "ms 后尝试第 " + reconnectAttempts + " 次重连");
-            mainHandler.postDelayed(() -> {
-                if (!shouldStop) {
-                    startConnection();
-                }
-            }, RECONNECT_DELAY_MS);
+    private void attemptReconnect(final long gen) {
+        boolean maxReached = false;
+        synchronized (stateLock) {
+            if (shouldStop || gen != activeGeneration) {
+                return;
+            }
+            if (reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+                maxReached = true;
+            }
+        }
+        if (!maxReached) {
+            scheduleReconnect(gen, "连接断开，");
         } else {
             mainHandler.post(() -> connectionCallback.onDisconnected());
         }
     }
 
+    private static void shutdownOkHttpClientQuietly(OkHttpClient client) {
+        if (client == null) {
+            return;
+        }
+        try {
+            client.dispatcher().cancelAll();
+        } catch (Exception ignored) {
+        }
+        try {
+            client.connectionPool().evictAll();
+        } catch (Exception ignored) {
+        }
+        try {
+            client.dispatcher().executorService().shutdownNow();
+        } catch (Exception ignored) {
+        }
+    }
+
     /**
-     * 停止 Bot
+     * 停止 Bot：递增代际、清理重连与心跳定时器、取消在途请求及 WebSocket 连接池。
      */
     public void stop() {
-        AppLog.d(TAG, "正在停止 Bot...");
-        shouldStop = true;
-        isRunning = false;
+        AppLog.d(TAG, "正在彻底停止 Bot...");
+        Thread pendingThread;
+        Runnable pendingReconnect;
+        WebSocket socketToClose;
+        OkHttpClient clientToShutdown;
+        boolean wasActiveOrStarting;
 
-        stopPingTimer();
+        synchronized (stateLock) {
+            activeGeneration++;
+            shouldStop = true;
+            wasActiveOrStarting = isRunning || isStarting;
+            isRunning = false;
+            isStarting = false;
+            reconnectAttempts = 0;
 
-        if (webSocket != null) {
-            webSocket.close(1000, "Normal closure");
+            pendingThread = connectThread;
+            connectThread = null;
+            pendingReconnect = reconnectRunnable;
+            reconnectRunnable = null;
+            socketToClose = webSocket;
             webSocket = null;
-        }
-
-        if (wsClient != null) {
-            wsClient.dispatcher().executorService().shutdown();
+            clientToShutdown = wsClient;
             wsClient = null;
         }
 
-        // 清除消息缓存
+        stopPingTimer();
+        if (pendingReconnect != null) {
+            mainHandler.removeCallbacks(pendingReconnect);
+        }
+        if (pendingThread != null) {
+            pendingThread.interrupt();
+        }
+        if (apiClient != null) {
+            apiClient.cancelAllRequests();
+        }
+        if (socketToClose != null) {
+            try {
+                socketToClose.close(1000, "Normal closure");
+            } catch (Exception ignored) {
+            }
+            try {
+                socketToClose.cancel();
+            } catch (Exception ignored) {
+            }
+        }
+        shutdownOkHttpClientQuietly(clientToShutdown);
         messageCache.clear();
 
-        AppLog.d(TAG, "Bot 已停止");
+        if (wasActiveOrStarting && connectionCallback != null) {
+            mainHandler.post(() -> connectionCallback.onDisconnected());
+        }
+        AppLog.d(TAG, "Bot 已彻底停止");
     }
 
     /**
@@ -722,5 +897,14 @@ public class FeishuBotManager {
      */
     public boolean isRunning() {
         return isRunning;
+    }
+
+    /**
+     * 检查是否正在建立连接或运行中
+     */
+    public boolean isStartingOrRunning() {
+        synchronized (stateLock) {
+            return isRunning || isStarting || reconnectRunnable != null;
+        }
     }
 }

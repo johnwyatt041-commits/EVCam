@@ -36,6 +36,8 @@
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <!-- 请求电池优化白名单（阻止休眠的关键） -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- 手动更新系统安装包安装权限 -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
     <!-- 通知权限（Android 13+，用于显示前台服务通知） -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- 使用情况访问权限（用于全景影像避让检测前台Activity） -->

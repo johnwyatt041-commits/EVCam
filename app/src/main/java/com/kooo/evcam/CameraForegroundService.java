@@ -92,11 +92,16 @@ public class CameraForegroundService extends Service {
     private void startRemoteServicesIfNeeded() {
         try {
             AppConfig appConfig = new AppConfig(this);
-            // 只有开启了开机自启动才启动远程服务和悬浮窗
+            // 仅在飞书明确开启且已配置时才介入远程服务生命周期；未配置/关闭时纯后台录像保持零远程初始化
+            if (com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(this)) {
+                AppLog.d(TAG, "飞书总开关已启用，从 Service 同步 P 档门控生命周期...");
+                RemoteServiceManager.getInstance().syncFeishuLifecycle(this, "service_on_create");
+            } else if (RemoteServiceManager.hasInitializedInstance()) {
+                RemoteServiceManager.stopAllIfInitialized();
+            }
+
+            // 只有开启了开机自启动才拉起悬浮窗/补盲/自录制
             if (appConfig.isAutoStartOnBoot()) {
-                AppLog.d(TAG, "开机自启动已开启，从 Service 启动远程服务...");
-                RemoteServiceManager.getInstance().startRemoteServicesFromService(this);
-                
                 // 启动悬浮窗（如果已启用）
                 if (appConfig.isFloatingWindowEnabled()) {
                     AppLog.d(TAG, "悬浮窗已启用，从 Service 启动悬浮窗...");
@@ -116,10 +121,10 @@ public class CameraForegroundService extends Service {
                     startMainActivityForAutoRecording();
                 }
             } else {
-                AppLog.d(TAG, "开机自启动未开启，跳过远程服务启动");
+                AppLog.d(TAG, "开机自启动未开启，跳过自启动组件");
             }
         } catch (Exception e) {
-            AppLog.e(TAG, "启动远程服务失败: " + e.getMessage(), e);
+            AppLog.e(TAG, "启动后台组件失败: " + e.getMessage(), e);
         }
     }
     
@@ -259,21 +264,21 @@ public class CameraForegroundService extends Service {
                 return;
             }
             AppConfig appConfig = new AppConfig(this);
+            // T10: 仅当飞书总开关开启且凭据有效时同步门控生命周期；未配置/关闭时零远程初始化
+            if (com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(this)) {
+                RemoteServiceManager.getInstance().syncFeishuLifecycle(this, "service_ensure_started");
+            } else if (RemoteServiceManager.hasInitializedInstance()) {
+                RemoteServiceManager.stopAllIfInitialized();
+            }
+
             if (!appConfig.isAutoStartOnBoot()) {
-                return;  // 未开启开机自启动，跳过
+                return;  // 未开启开机自启动，跳过其他后台恢复
             }
             
             // 检查并启动悬浮窗
             if (appConfig.isFloatingWindowEnabled() && !FloatingWindowService.isRunning()) {
                 AppLog.d(TAG, "悬浮窗未运行，重新启动...");
                 FloatingWindowService.start(this);
-            }
-            
-            // 检查并启动远程服务（如果未运行）
-            RemoteServiceManager serviceManager = RemoteServiceManager.getInstance();
-            if (!serviceManager.hasAnyServiceRunning()) {
-                AppLog.d(TAG, "远程服务未运行，重新启动...");
-                serviceManager.startRemoteServicesFromService(this);
             }
             
             // 检查并启动 MainActivity（如果启用了自动录制且 Activity 未运行）
@@ -301,7 +306,9 @@ public class CameraForegroundService extends Service {
         } else {
             AppLog.d(TAG, "Service destroyed - 显式停止/彻底退出状态，不触发重启");
             com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().stop();
+            RemoteServiceManager.stopAllIfInitialized();
         }
+        AppLog.saveToPersistentLog(this);
 
         super.onDestroy();
     }

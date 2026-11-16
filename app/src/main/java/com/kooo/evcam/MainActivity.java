@@ -221,14 +221,11 @@ public class MainActivity extends AppCompatActivity implements
 
     // 远程查看服务相关（移到 Activity 级别）
 
-    // 飞书远程服务相关
-    private com.kooo.evcam.feishu.FeishuConfig feishuConfig;
-    private com.kooo.evcam.feishu.FeishuApiClient feishuApiClient;
-    private com.kooo.evcam.feishu.FeishuBotManager feishuBotManager;
+    // 飞书远程服务相关（仅在飞书总开关与凭据有效时懒加载激活）
     private String pendingFeishuChatId = null;  // 待处理的飞书 Chat ID
-    
-    // 状态信息提供者（必须保持强引用，否则会被 GC 回收导致远程状态查询失败）
     private RemoteServiceManager.StatusInfoProvider statusInfoProvider;
+    private RemoteServiceManager.FeishuCommandBridge feishuCommandBridge;
+    private RemoteServiceManager.FeishuStateListener feishuStateListener;
     
     // 存储清理管理器
     private StorageCleanupManager storageCleanupManager;
@@ -313,17 +310,11 @@ public class MainActivity extends AppCompatActivity implements
         // 检查是否首次启动
         checkFirstLaunch();
 
-        // 初始化飞书配置
-        feishuConfig = new com.kooo.evcam.feishu.FeishuConfig(this);
-
         // 初始化自动停止 Handler
         autoStopHandler = new android.os.Handler(android.os.Looper.getMainLooper());
         
         // 初始化远程录制时间戳
         remoteRecordingTimestamp = null;
-        
-        // 初始化远程命令分发器
-        initRemoteCommandDispatcher();
 
         // 权限检查，但不立即初始化摄像头
         // 等待TextureView准备好后再初始化
@@ -331,60 +322,16 @@ public class MainActivity extends AppCompatActivity implements
             requestPermissions();
         }
 
-        // 如果启用了自动启动，启动远程查看服务
-        // 【优化】先检查服务是否已在 CameraForegroundService 中启动或正在启动
-
-        // 如果启用了飞书自动启动，启动飞书服务
-        if (feishuConfig.isConfigured() && feishuConfig.isAutoStart()) {
-            if (RemoteServiceManager.getInstance().isFeishuStartingOrRunning()) {
-                AppLog.d(TAG, "飞书服务已在运行或正在启动（从 Service 启动），获取已有实例");
-                feishuApiClient = RemoteServiceManager.getInstance().getFeishuApiClient();
-                feishuBotManager = RemoteServiceManager.getInstance().getFeishuBotManager();
-                
-                // 【修复】立即同步到 RemoteCommandDispatcher
-                if (feishuApiClient != null && remoteCommandDispatcher != null) {
-                    remoteCommandDispatcher.setFeishuApiClient(feishuApiClient);
-                    AppLog.d(TAG, "飞书 API 客户端已同步到 RemoteCommandDispatcher");
-                }
-                
-                if (feishuApiClient == null || feishuBotManager == null) {
-                    AppLog.d(TAG, "飞书服务正在启动中，延迟 500ms 后获取实例");
-                    new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
-                        feishuApiClient = RemoteServiceManager.getInstance().getFeishuApiClient();
-                        feishuBotManager = RemoteServiceManager.getInstance().getFeishuBotManager();
-                        AppLog.d(TAG, "延迟获取飞书实例: apiClient=" + (feishuApiClient != null) + 
-                                     ", botManager=" + (feishuBotManager != null));
-                        // 【修复】延迟获取后也需要同步
-                        if (feishuApiClient != null && remoteCommandDispatcher != null) {
-                            remoteCommandDispatcher.setFeishuApiClient(feishuApiClient);
-                            AppLog.d(TAG, "飞书 API 客户端已延迟同步到 RemoteCommandDispatcher");
-                        }
-                    }, 500);
-                }
-            } else {
-                startFeishuService();
-            }
+        // T10: 仅当飞书总开关已启用且已配置凭据时才初始化远程分发器与门控服务；
+        // 未配置或禁用时，纯后台录像不触发 RemoteServiceManager/Feishu 初始化。
+        boolean feishuActive = com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(this);
+        if (feishuActive) {
+            attachFeishuRemoteRuntime("main_activity_create");
         }
-        
-        // 注册状态信息提供者，让远程服务能获取完整的状态信息
-        // 注意：必须保持强引用（statusInfoProvider 成员变量），否则 WeakReference 会导致对象被 GC
-        statusInfoProvider = new RemoteServiceManager.StatusInfoProvider() {
-            @Override
-            public String getFullStatusInfo() {
-                // 直接使用外部类引用，因为 statusInfoProvider 的生命周期与 MainActivity 绑定
-                if (!isDestroyed()) {
-                    return buildStatusInfo();
-                }
-                return null; // 返回 null 会触发使用基本状态信息
-            }
-        };
-        RemoteServiceManager.getInstance().setStatusInfoProvider(statusInfoProvider);
-        AppLog.d(TAG, "StatusInfoProvider 已注册");
 
         // 根据统一退出状态同步定时保活与 TIME_TICK 监听
         com.kooo.evcam.lifecycle.BackgroundCapabilityController.syncBackgroundKeepAlive(this);
-        if (recoveringFromUserExit
-                && (appConfig.isAutoStartOnBoot() || (feishuConfig.isConfigured() && feishuConfig.isAutoStart()))) {
+        if (recoveringFromUserExit && (appConfig.isAutoStartOnBoot() || feishuActive)) {
             CameraForegroundService.start(this, "EVCam", "服务正在运行");
         }
         AppLog.d(TAG, "后台保活状态已同步");
@@ -710,6 +657,7 @@ public class MainActivity extends AppCompatActivity implements
      */
     private void executeFeishuCommand(String action, String chatId, int duration) {
         AppLog.d(TAG, "Executing Feishu command: " + action);
+        ensureRemoteCommandDispatcher();
         
         if ("record".equals(action)) {
             AppLog.d(TAG, "Feishu: Starting remote recording for " + duration + " seconds");
@@ -1593,6 +1541,14 @@ public class MainActivity extends AppCompatActivity implements
      * 初始化远程命令分发器
      * 设置 CameraController 和 RecordingStateListener
      */
+    private void ensureRemoteCommandDispatcher() {
+        if (remoteCommandDispatcher == null) {
+            initRemoteCommandDispatcher();
+        } else {
+            syncApiClientsFromRemoteServiceManager();
+        }
+    }
+
     private void initRemoteCommandDispatcher() {
         remoteCommandDispatcher = new RemoteCommandDispatcher(this);
         
@@ -1717,33 +1673,83 @@ public class MainActivity extends AppCompatActivity implements
      * 在 Activity 重建时，远程服务可能已在运行，需要同步到新的 remoteCommandDispatcher
      */
     private void syncApiClientsFromRemoteServiceManager() {
-        if (remoteCommandDispatcher == null) {
+        if (remoteCommandDispatcher == null || !RemoteServiceManager.hasInitializedInstance()) {
             return;
         }
-        
         RemoteServiceManager serviceManager = RemoteServiceManager.getInstance();
-        
-        // 同步飞书 API 客户端
-        com.kooo.evcam.feishu.FeishuApiClient feishu = serviceManager.getFeishuApiClient();
-        if (feishu != null) {
-            remoteCommandDispatcher.setFeishuApiClient(feishu);
-            this.feishuApiClient = feishu;
-            this.feishuBotManager = serviceManager.getFeishuBotManager();
-            AppLog.d(TAG, "从 RemoteServiceManager 同步飞书 API 客户端");
-        }
+        remoteCommandDispatcher.setFeishuApiClient(serviceManager.getFeishuApiClient());
     }
-    
-    /**
-     * 更新远程命令分发器的 API 客户端
-     * 在服务启动后调用
-     */
-    private void updateRemoteDispatcherApiClients() {
-        if (remoteCommandDispatcher != null) {
 
-            if (feishuApiClient != null) {
-                remoteCommandDispatcher.setFeishuApiClient(feishuApiClient);
-            }
+    private void attachFeishuRemoteRuntime(String reason) {
+        ensureRemoteCommandDispatcher();
+        RemoteServiceManager serviceManager = RemoteServiceManager.getInstance();
+        if (statusInfoProvider == null) {
+            statusInfoProvider = () -> !isDestroyed() ? buildStatusInfo() : null;
         }
+        serviceManager.setStatusInfoProvider(statusInfoProvider);
+        if (feishuCommandBridge == null) {
+            feishuCommandBridge = createFeishuCommandBridge();
+        }
+        serviceManager.setFeishuCommandBridge(feishuCommandBridge);
+        if (feishuStateListener == null) {
+            feishuStateListener = () -> runOnUiThread(() -> {
+                if (isDestroyed()) {
+                    return;
+                }
+                syncApiClientsFromRemoteServiceManager();
+                updateFeishuFragmentUI();
+            });
+        }
+        serviceManager.addFeishuStateListener(feishuStateListener);
+        serviceManager.syncFeishuLifecycle(this, reason);
+        syncApiClientsFromRemoteServiceManager();
+    }
+
+    private RemoteServiceManager.FeishuCommandBridge createFeishuCommandBridge() {
+        return new RemoteServiceManager.FeishuCommandBridge() {
+            @Override
+            public void onRecordCommand(String chatId, String messageId, int durationSeconds) {
+                pendingFeishuChatId = chatId;
+                ensureRemoteCommandDispatcher();
+                if (remoteCommandDispatcher != null) {
+                    remoteCommandDispatcher.startFeishuRecording(chatId, durationSeconds);
+                }
+            }
+
+            @Override
+            public void onPhotoCommand(String chatId, String messageId) {
+                pendingFeishuChatId = chatId;
+                ensureRemoteCommandDispatcher();
+                if (remoteCommandDispatcher != null) {
+                    remoteCommandDispatcher.startFeishuPhoto(chatId);
+                }
+            }
+
+            @Override
+            public String onStartRecordingCommand() {
+                return handleStartRecordingCommand();
+            }
+
+            @Override
+            public String onStopRecordingCommand() {
+                return handleStopRecordingCommand();
+            }
+
+            @Override
+            public String onExitCommand(boolean confirmed) {
+                return handleExitCommand(confirmed);
+            }
+
+            @Override
+            public String onForegroundCommand() {
+                return handleForegroundCommand();
+            }
+
+            @Override
+            public String onBackgroundCommand() {
+                return handleBackgroundCommand();
+            }
+        };
     }
 
     /**
@@ -3873,155 +3879,55 @@ public class MainActivity extends AppCompatActivity implements
         }, 2000);
     }
 
-    // ==================== 飞书服务管理 ====================
+    // ==================== 飞书服务管理（委托 RemoteServiceManager 统一门控） ====================
 
-    /**
-     * 启动飞书远程服务
-     */
+    public void notifyFeishuConfigChanged() {
+        if (com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(this)) {
+            attachFeishuRemoteRuntime("feishu_settings_changed");
+            if (com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+                CameraForegroundService.start(this, "EVCam", "服务正在运行");
+            }
+        } else if (RemoteServiceManager.hasInitializedInstance()) {
+            RemoteServiceManager.getInstance().syncFeishuLifecycle(this, "feishu_disabled");
+            if (remoteCommandDispatcher != null) {
+                remoteCommandDispatcher.setFeishuApiClient(null);
+            }
+        }
+        updateFeishuFragmentUI();
+    }
+
     public void startFeishuService() {
-        if (!feishuConfig.isConfigured()) {
+        if (!com.kooo.evcam.feishu.FeishuConfig.isConfigured(
+                getSharedPreferences(com.kooo.evcam.feishu.FeishuConfig.PREF_NAME, MODE_PRIVATE))) {
             Toast.makeText(this, "请先配置飞书 App ID 和 App Secret", Toast.LENGTH_SHORT).show();
             return;
         }
-
-        // 检查本地实例
-        if (feishuBotManager != null && feishuBotManager.isRunning()) {
-            AppLog.d(TAG, "飞书服务已在运行（本地实例）");
-            return;
+        new com.kooo.evcam.feishu.FeishuConfig(this).setEnabled(true);
+        attachFeishuRemoteRuntime("manual_start");
+        String hint = RemoteServiceManager.getInstance().startFeishuManually(this);
+        if (com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            CameraForegroundService.start(this, "EVCam", "服务正在运行");
         }
-        
-        // 检查 RemoteServiceManager 中是否已有实例
-        if (RemoteServiceManager.getInstance().isFeishuStartingOrRunning()) {
-            AppLog.d(TAG, "飞书服务已在运行（RemoteServiceManager），获取已有实例");
-            feishuApiClient = RemoteServiceManager.getInstance().getFeishuApiClient();
-            feishuBotManager = RemoteServiceManager.getInstance().getFeishuBotManager();
-            updateFeishuFragmentUI();
-            return;
-        }
-
-        AppLog.d(TAG, "正在启动飞书服务...");
-
-        // 创建 API 客户端
-        feishuApiClient = new com.kooo.evcam.feishu.FeishuApiClient(feishuConfig);
-
-        // 更新远程命令分发器的 API 客户端
-        if (remoteCommandDispatcher != null) {
-            remoteCommandDispatcher.setFeishuApiClient(feishuApiClient);
-        }
-
-        // 创建连接回调
-        com.kooo.evcam.feishu.FeishuBotManager.ConnectionCallback connectionCallback = 
-            new com.kooo.evcam.feishu.FeishuBotManager.ConnectionCallback() {
-            @Override
-            public void onConnected() {
-                runOnUiThread(() -> {
-                    AppLog.d(TAG, "飞书服务已连接");
-                    Toast.makeText(MainActivity.this, "飞书已连接", Toast.LENGTH_SHORT).show();
-                    updateFeishuFragmentUI();
-                });
-            }
-
-            @Override
-            public void onDisconnected() {
-                runOnUiThread(() -> {
-                    AppLog.d(TAG, "飞书服务已断开");
-                    updateFeishuFragmentUI();
-                });
-            }
-
-            @Override
-            public void onError(String error) {
-                runOnUiThread(() -> {
-                    AppLog.e(TAG, "飞书服务连接失败: " + error);
-                    Toast.makeText(MainActivity.this, "飞书连接失败: " + error, Toast.LENGTH_LONG).show();
-                    updateFeishuFragmentUI();
-                });
-            }
-        };
-
-        // 创建指令回调（使用远程命令分发器）
-        com.kooo.evcam.feishu.FeishuBotManager.CommandCallback commandCallback = 
-            new com.kooo.evcam.feishu.FeishuBotManager.CommandCallback() {
-            @Override
-            public void onRecordCommand(String chatId, String messageId, int durationSeconds) {
-                pendingFeishuChatId = chatId;
-                // 使用分发器处理远程录制
-                if (remoteCommandDispatcher != null) {
-                    remoteCommandDispatcher.startFeishuRecording(chatId, durationSeconds);
-                }
-            }
-
-            @Override
-            public void onPhotoCommand(String chatId, String messageId) {
-                pendingFeishuChatId = chatId;
-                // 使用分发器处理远程拍照
-                if (remoteCommandDispatcher != null) {
-                    remoteCommandDispatcher.startFeishuPhoto(chatId);
-                }
-            }
-
-            @Override
-            public String getStatusInfo() {
-                return buildStatusInfo();
-            }
-
-            @Override
-            public String onStartRecordingCommand() {
-                return handleStartRecordingCommand();
-            }
-
-            @Override
-            public String onStopRecordingCommand() {
-                return handleStopRecordingCommand();
-            }
-
-            @Override
-            public String onExitCommand(boolean confirmed) {
-                return handleExitCommand(confirmed);
-            }
-
-            @Override
-            public String onForegroundCommand() {
-                return handleForegroundCommand();
-            }
-
-            @Override
-            public String onBackgroundCommand() {
-                return handleBackgroundCommand();
-            }
-        };
-
-        // 创建并启动 Bot 管理器
-        feishuBotManager = new com.kooo.evcam.feishu.FeishuBotManager(this, feishuConfig, feishuApiClient, connectionCallback);
-        feishuBotManager.start(commandCallback);
-        
-        // 注册到 RemoteServiceManager
-        RemoteServiceManager.getInstance().setFeishuService(feishuBotManager, feishuApiClient);
+        Toast.makeText(this, hint, Toast.LENGTH_SHORT).show();
+        updateFeishuFragmentUI();
     }
 
-    /**
-     * 停止飞书远程服务
-     */
     public void stopFeishuService() {
-        if (feishuBotManager != null) {
-            AppLog.d(TAG, "正在停止飞书服务...");
-            feishuBotManager.stop();
-            feishuBotManager = null;
-            feishuApiClient = null;
-            
-            // 从 RemoteServiceManager 清除
-            RemoteServiceManager.getInstance().clearFeishuService();
-            
-            Toast.makeText(this, "飞书服务已停止", Toast.LENGTH_SHORT).show();
-            updateFeishuFragmentUI();
+        if (RemoteServiceManager.hasInitializedInstance()) {
+            RemoteServiceManager.getInstance().stopFeishuManually(this);
+        } else {
+            new com.kooo.evcam.feishu.FeishuConfig(this).setEnabled(false);
         }
+        if (remoteCommandDispatcher != null) {
+            remoteCommandDispatcher.setFeishuApiClient(null);
+        }
+        Toast.makeText(this, "飞书服务已彻底停止", Toast.LENGTH_SHORT).show();
+        updateFeishuFragmentUI();
     }
 
-    /**
-     * 获取飞书服务运行状态
-     */
     public boolean isFeishuServiceRunning() {
-        return feishuBotManager != null && feishuBotManager.isRunning();
+        return RemoteServiceManager.hasInitializedInstance()
+                && RemoteServiceManager.getInstance().isFeishuRunning();
     }
 
     /**
@@ -4313,6 +4219,7 @@ public class MainActivity extends AppCompatActivity implements
     protected void onStop() {
         super.onStop();
         AppLog.d(TAG, "onStop called, isRecording=" + isRecording);
+        AppLog.flushAsync();
         if (cameraManager != null) {
             cameraManager.setMainPreviewEnabled(false);
         }
@@ -4479,7 +4386,15 @@ public class MainActivity extends AppCompatActivity implements
         isRemoteRecording = false;
         wasManualRecordingBeforeRemote = false;
         
-        // 清理远程命令分发器
+        // 清理远程命令分发器及飞书状态监听器
+        if (RemoteServiceManager.hasInitializedInstance()) {
+            RemoteServiceManager serviceManager = RemoteServiceManager.getInstance();
+            if (feishuStateListener != null) {
+                serviceManager.removeFeishuStateListener(feishuStateListener);
+            }
+            serviceManager.clearFeishuCommandBridge();
+            serviceManager.clearStatusInfoProvider();
+        }
         if (remoteCommandDispatcher != null) {
             remoteCommandDispatcher.cleanup();
         }

@@ -7,10 +7,19 @@ import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 
+import com.kooo.evcam.update.AppVersionComparator;
+import com.kooo.evcam.update.GitHubHostPolicy;
+import com.kooo.evcam.update.GitHubReleaseClient;
+import com.kooo.evcam.update.GitHubReleaseParser;
+import com.kooo.evcam.update.GitHubUpdateConfig;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.Call;
@@ -21,86 +30,77 @@ import okhttp3.Response;
 import okhttp3.ResponseBody;
 
 /**
- * 版本更新管理器
- * 负责检查新版本和下载 APK 文件
+ * 14. 版本更新管理器（仅手动触发，无任何后台自动轮询）：
+ * - 主源：私有/公有 GitHub Releases API（支持 Encrypted PAT、Pre-release、A/B 风味精确匹配与历史版本列表）；
+ * - 兼容源：可选自定义 HTTP 目录源（version.txt + EVCam-v{版本号}-release.apk）。
  */
 public class VersionUpdateManager {
     private static final String TAG = "VersionUpdateManager";
-    
-    // 默认更新服务器配置
+
     private static final String VERSION_FILE = "version.txt";
-    // APK 文件名格式：EVCam-v{版本号}-release.apk
     private static final String APK_FILE_PATTERN = "EVCam-v%s-release.apk";
-    
+
     private final Context context;
     private final AppConfig appConfig;
+    private final GitHubUpdateConfig gitHubConfig;
+    private final GitHubReleaseClient gitHubClient;
     private final OkHttpClient httpClient;
     private final Handler mainHandler;
-    
-    // 当前下载任务，用于取消
-    private Call currentDownloadCall;
-    
-    /**
-     * 版本检查回调
-     */
+    private final ExecutorService executor;
+
+    private volatile Call currentDownloadCall;
+    private volatile boolean downloadCancelledByUser = false;
+
     public interface UpdateCheckCallback {
-        /**
-         * 发现新版本
-         * @param newVersion 新版本号
-         */
         void onUpdateAvailable(String newVersion);
-        
-        /**
-         * 已是最新版本
-         */
+
+        default void onUpdateCandidateAvailable(GitHubReleaseParser.UpdateCandidate candidate) {
+            if (candidate != null) {
+                onUpdateAvailable(candidate.release.version);
+            }
+        }
+
         void onNoUpdate();
-        
-        /**
-         * 检查失败
-         * @param error 错误信息
-         */
+
         void onError(String error);
     }
-    
-    /**
-     * 下载回调
-     */
+
+    public interface ReleaseListCallback {
+        void onLoaded(List<GitHubReleaseParser.ReleaseInfo> releases);
+
+        void onError(String error);
+    }
+
     public interface DownloadCallback {
-        /**
-         * 下载进度更新
-         * @param progress 进度百分比 (0-100)
-         */
         void onProgress(int progress);
-        
-        /**
-         * 下载完成
-         * @param apkFile 下载的 APK 文件
-         */
+
         void onComplete(File apkFile);
-        
-        /**
-         * 下载失败
-         * @param error 错误信息
-         */
+
         void onError(String error);
     }
-    
+
     public VersionUpdateManager(Context context) {
         this.context = context.getApplicationContext();
-        this.appConfig = new AppConfig(context);
-        this.mainHandler = new Handler(Looper.getMainLooper());
-        
-        // 配置 OkHttpClient
+        this.appConfig = new AppConfig(this.context);
+        this.gitHubConfig = new GitHubUpdateConfig(this.context);
         this.httpClient = new OkHttpClient.Builder()
                 .connectTimeout(15, TimeUnit.SECONDS)
                 .readTimeout(60, TimeUnit.SECONDS)
                 .writeTimeout(60, TimeUnit.SECONDS)
                 .build();
+        this.gitHubClient = new GitHubReleaseClient(this.httpClient, false);
+        this.mainHandler = new Handler(Looper.getMainLooper());
+        this.executor = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "EVCam-Updater");
+            t.setDaemon(true);
+            return t;
+        });
     }
-    
-    /**
-     * 获取当前应用版本号
-     */
+
+    public GitHubUpdateConfig getGitHubConfig() {
+        return gitHubConfig;
+    }
+
     public String getCurrentVersion() {
         try {
             PackageInfo packageInfo = context.getPackageManager()
@@ -111,86 +111,184 @@ public class VersionUpdateManager {
             return "unknown";
         }
     }
-    
-    /**
-     * 获取更新服务器基础 URL
-     */
-    private String getBaseUrl() {
+
+    public boolean isUpdateServerConfigured() {
+        if (GitHubUpdateConfig.SOURCE_CUSTOM_HTTP.equals(gitHubConfig.getSourceMode())) {
+            String url = appConfig.getUpdateServerUrl();
+            return url != null && !url.isEmpty();
+        }
+        return !gitHubConfig.getRepoOwner().isEmpty() && !gitHubConfig.getRepoName().isEmpty();
+    }
+
+    /** 手动检查更新（仅由 UI 按钮显式触发）。 */
+    public void checkUpdate(UpdateCheckCallback callback) {
+        if (GitHubUpdateConfig.SOURCE_CUSTOM_HTTP.equals(gitHubConfig.getSourceMode())) {
+            checkCustomHttpUpdate(callback);
+            return;
+        }
+        checkGitHubUpdate(callback);
+    }
+
+    /** 手动拉取 GitHub 仓库最近发行版本列表（供选择历史版本或查看更新日志）。 */
+    public void fetchReleases(ReleaseListCallback callback) {
+        final String owner = gitHubConfig.getRepoOwner();
+        final String repo = gitHubConfig.getRepoName();
+        final String apiBase = gitHubConfig.getApiBaseUrl();
+        final boolean includePrerelease = gitHubConfig.isIncludePrerelease();
+        final String pat = gitHubConfig.loadPat();
+
+        AppLog.i(TAG, "手动获取 GitHub Releases 列表: " + owner + "/" + repo
+                + ", includePrerelease=" + includePrerelease + ", hasPat=" + (pat != null));
+
+        executor.execute(() -> {
+            try {
+                List<GitHubReleaseParser.ReleaseInfo> releases =
+                        gitHubClient.fetchReleases(apiBase, owner, repo, pat, includePrerelease);
+                mainHandler.post(() -> callback.onLoaded(releases));
+            } catch (Exception e) {
+                String safeMsg = GitHubHostPolicy.redactSecret(e.getMessage(), pat);
+                AppLog.e(TAG, "拉取 GitHub Releases 失败: " + safeMsg);
+                mainHandler.post(() -> callback.onError(safeMsg != null ? safeMsg : "检查更新失败"));
+            }
+        });
+    }
+
+    private void checkGitHubUpdate(UpdateCheckCallback callback) {
+        final String owner = gitHubConfig.getRepoOwner();
+        final String repo = gitHubConfig.getRepoName();
+        final String apiBase = gitHubConfig.getApiBaseUrl();
+        final boolean includePrerelease = gitHubConfig.isIncludePrerelease();
+        final String pat = gitHubConfig.loadPat();
+        final String currentVersion = getCurrentVersion();
+        final boolean isComposite = BuildConfig.SMARTCAM_COMPOSITE;
+
+        AppLog.i(TAG, "手动检查 GitHub 更新: " + owner + "/" + repo
+                + ", current=" + currentVersion + ", composite=" + isComposite);
+
+        executor.execute(() -> {
+            try {
+                List<GitHubReleaseParser.ReleaseInfo> releases =
+                        gitHubClient.fetchReleases(apiBase, owner, repo, pat, includePrerelease);
+                if (releases.isEmpty()) {
+                    mainHandler.post(callback::onNoUpdate);
+                    return;
+                }
+                GitHubReleaseParser.UpdateCandidate candidate =
+                        GitHubReleaseParser.findLatestUpdate(releases, currentVersion, isComposite);
+                if (candidate != null) {
+                    AppLog.i(TAG, "发现匹配的更新版本: " + candidate.release.tagName
+                            + ", asset=" + candidate.asset.name);
+                    mainHandler.post(() -> callback.onUpdateCandidateAvailable(candidate));
+                    return;
+                }
+
+                // 若存在更高版本号的 Release 但缺少对应风味包，给予明确提示而不是静默报“已是最新”
+                for (GitHubReleaseParser.ReleaseInfo info : releases) {
+                    if (AppVersionComparator.isNewerVersion(info.version, currentVersion)
+                            && GitHubReleaseParser.selectAssetForFlavor(info.assets, isComposite) == null) {
+                        String flavorLabel = isComposite ? "composite(B)" : "independent(A)";
+                        mainHandler.post(() -> callback.onError(
+                                "发现新版本 " + info.tagName + "，但未找到匹配 " + flavorLabel + " 的 APK 资产"));
+                        return;
+                    }
+                }
+                mainHandler.post(callback::onNoUpdate);
+            } catch (Exception e) {
+                String safeMsg = GitHubHostPolicy.redactSecret(e.getMessage(), pat);
+                AppLog.e(TAG, "检查 GitHub 更新失败: " + safeMsg);
+                mainHandler.post(() -> callback.onError(safeMsg != null ? safeMsg : "检查更新失败"));
+            }
+        });
+    }
+
+    /** 下载指定 GitHub Release 的匹配 APK 资产（支持私有仓 API 重定向下载与校验）。 */
+    public void downloadGitHubAsset(GitHubReleaseParser.ReleaseInfo release,
+                                    GitHubReleaseParser.ReleaseAsset asset,
+                                    DownloadCallback callback) {
+        if (release == null || asset == null) {
+            mainHandler.post(() -> callback.onError("无效的 Release 资产"));
+            return;
+        }
+        final String apiBase = gitHubConfig.getApiBaseUrl();
+        final String pat = gitHubConfig.loadPat();
+        final String flavorTag = BuildConfig.SMARTCAM_COMPOSITE ? "composite" : "independent";
+        final String fileName = "EVCam_" + flavorTag + "_" + release.version + ".apk";
+
+        downloadCancelledByUser = false;
+        executor.execute(() -> {
+            try {
+                File downloadDir = Environment.getExternalStoragePublicDirectory(
+                        Environment.DIRECTORY_DOWNLOADS);
+                File targetFile = new File(downloadDir, fileName);
+                Call call = gitHubClient.prepareDownloadAsset(asset, apiBase, pat);
+                currentDownloadCall = call;
+                File downloaded = gitHubClient.executeAssetDownload(
+                        asset, apiBase, pat, targetFile, call,
+                        percent -> mainHandler.post(() -> callback.onProgress(percent)));
+                currentDownloadCall = null;
+                AppLog.i(TAG, "GitHub APK 下载与校验完成: " + downloaded.getAbsolutePath());
+                mainHandler.post(() -> callback.onComplete(downloaded));
+            } catch (Exception e) {
+                currentDownloadCall = null;
+                if (downloadCancelledByUser) {
+                    AppLog.d(TAG, "用户取消 GitHub APK 下载");
+                    mainHandler.post(() -> callback.onError("下载已取消"));
+                } else {
+                    String safeMsg = GitHubHostPolicy.redactSecret(e.getMessage(), pat);
+                    AppLog.e(TAG, "GitHub APK 下载失败: " + safeMsg);
+                    mainHandler.post(() -> callback.onError(safeMsg != null ? safeMsg : "下载失败"));
+                }
+            }
+        });
+    }
+
+    // ==================== 兼容旧自定义 HTTP 目录源 ====================
+
+    private String getCustomBaseUrl() {
         String url = appConfig.getUpdateServerUrl();
         if (url == null || url.isEmpty()) {
             return null;
         }
-        // 确保 URL 以 / 结尾
-        if (!url.endsWith("/")) {
-            url += "/";
-        }
-        return url;
+        return url.endsWith("/") ? url : (url + "/");
     }
-    
-    /**
-     * 检查是否配置了更新服务器
-     */
-    public boolean isUpdateServerConfigured() {
-        String url = appConfig.getUpdateServerUrl();
-        return url != null && !url.isEmpty();
-    }
-    
-    /**
-     * 检查更新
-     */
-    public void checkUpdate(UpdateCheckCallback callback) {
-        String baseUrl = getBaseUrl();
+
+    private void checkCustomHttpUpdate(UpdateCheckCallback callback) {
+        String baseUrl = getCustomBaseUrl();
         if (baseUrl == null) {
-            mainHandler.post(() -> callback.onError("未配置更新服务器地址"));
+            mainHandler.post(() -> callback.onError("未配置自定义更新服务器地址"));
             return;
         }
-        
         String versionUrl = baseUrl + VERSION_FILE;
-        AppLog.d(TAG, "检查版本更新: " + versionUrl);
-        
-        Request request = new Request.Builder()
-                .url(versionUrl)
-                .get()
-                .build();
-        
+        AppLog.d(TAG, "检查自定义服务器更新: " + versionUrl);
+
+        Request request = new Request.Builder().url(versionUrl).get().build();
         httpClient.newCall(request).enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
-                AppLog.e(TAG, "版本检查失败: " + e.getMessage());
                 mainHandler.post(() -> callback.onError("网络错误: " + e.getMessage()));
             }
-            
+
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 try {
                     if (!response.isSuccessful()) {
-                        AppLog.e(TAG, "版本检查失败，HTTP 状态码: " + response.code());
                         mainHandler.post(() -> callback.onError("服务器错误: " + response.code()));
                         return;
                     }
-                    
                     ResponseBody body = response.body();
                     if (body == null) {
                         mainHandler.post(() -> callback.onError("服务器返回空响应"));
                         return;
                     }
-                    
-                    String remoteVersion = body.string().trim();
-                    AppLog.d(TAG, "服务器版本: " + remoteVersion);
-                    
-                    // 验证版本号格式
-                    if (!isValidVersionFormat(remoteVersion)) {
+                    String remoteVersion = AppVersionComparator.normalizeVersion(body.string().trim());
+                    if (!AppVersionComparator.isValidVersionFormat(remoteVersion)) {
                         mainHandler.post(() -> callback.onError("无效的版本号格式: " + remoteVersion));
                         return;
                     }
-                    
-                    String currentVersion = getCurrentVersion();
-                    AppLog.d(TAG, "当前版本: " + currentVersion + ", 远程版本: " + remoteVersion);
-                    
-                    if (isNewerVersion(remoteVersion, currentVersion)) {
+                    if (AppVersionComparator.isNewerVersion(remoteVersion, getCurrentVersion())) {
                         mainHandler.post(() -> callback.onUpdateAvailable(remoteVersion));
                     } else {
-                        mainHandler.post(() -> callback.onNoUpdate());
+                        mainHandler.post(callback::onNoUpdate);
                     }
                 } finally {
                     response.close();
@@ -198,113 +296,75 @@ public class VersionUpdateManager {
             }
         });
     }
-    
-    /**
-     * 下载 APK 文件
-     * @param newVersion 新版本号，用于构建文件名和命名本地文件
-     */
+
     public void downloadApk(String newVersion, DownloadCallback callback) {
-        String baseUrl = getBaseUrl();
+        String baseUrl = getCustomBaseUrl();
         if (baseUrl == null) {
-            mainHandler.post(() -> callback.onError("未配置更新服务器地址"));
+            mainHandler.post(() -> callback.onError("未配置自定义更新服务器地址"));
             return;
         }
-        
-        // 根据版本号构建 APK 文件名
-        String apkFileName = String.format(APK_FILE_PATTERN, newVersion);
-        String apkUrl = baseUrl + apkFileName;
-        AppLog.d(TAG, "开始下载 APK: " + apkUrl);
-        
-        Request request = new Request.Builder()
-                .url(apkUrl)
-                .get()
-                .build();
-        
+        String normalized = AppVersionComparator.normalizeVersion(newVersion);
+        String apkUrl = baseUrl + String.format(APK_FILE_PATTERN, normalized);
+        AppLog.d(TAG, "开始从自定义源下载 APK: " + apkUrl);
+
+        downloadCancelledByUser = false;
+        Request request = new Request.Builder().url(apkUrl).get().build();
         currentDownloadCall = httpClient.newCall(request);
         currentDownloadCall.enqueue(new Callback() {
             @Override
             public void onFailure(Call call, IOException e) {
                 currentDownloadCall = null;
-                if (call.isCanceled()) {
-                    AppLog.d(TAG, "下载已取消");
+                if (downloadCancelledByUser || call.isCanceled()) {
                     mainHandler.post(() -> callback.onError("下载已取消"));
                 } else {
-                    AppLog.e(TAG, "下载失败: " + e.getMessage());
                     mainHandler.post(() -> callback.onError("下载失败: " + e.getMessage()));
                 }
             }
-            
+
             @Override
             public void onResponse(Call call, Response response) throws IOException {
                 currentDownloadCall = null;
-                
-                if (!response.isSuccessful()) {
-                    AppLog.e(TAG, "下载失败，HTTP 状态码: " + response.code());
-                    mainHandler.post(() -> callback.onError("服务器错误: " + response.code()));
-                    response.close();
-                    return;
-                }
-                
-                ResponseBody body = response.body();
-                if (body == null) {
-                    mainHandler.post(() -> callback.onError("服务器返回空响应"));
-                    return;
-                }
-                
                 try {
-                    // 获取文件大小
-                    long contentLength = body.contentLength();
-                    AppLog.d(TAG, "APK 文件大小: " + contentLength + " bytes");
-                    
-                    // 创建目标文件
-                    File downloadDir = Environment.getExternalStoragePublicDirectory(
-                            Environment.DIRECTORY_DOWNLOADS);
+                    if (!response.isSuccessful()) {
+                        mainHandler.post(() -> callback.onError("服务器错误: " + response.code()));
+                        return;
+                    }
+                    ResponseBody body = response.body();
+                    if (body == null) {
+                        mainHandler.post(() -> callback.onError("服务器返回空响应"));
+                        return;
+                    }
+                    File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
                     if (!downloadDir.exists()) {
                         downloadDir.mkdirs();
                     }
-                    
-                    // 文件名：EVCam_版本号.apk
-                    String fileName = "EVCam_" + newVersion + ".apk";
-                    File apkFile = new File(downloadDir, fileName);
-                    
-                    // 如果文件已存在，先删除
+                    File apkFile = new File(downloadDir, "EVCam_" + normalized + ".apk");
                     if (apkFile.exists()) {
                         apkFile.delete();
                     }
-                    
-                    // 写入文件
-                    InputStream inputStream = body.byteStream();
-                    FileOutputStream outputStream = new FileOutputStream(apkFile);
-                    
-                    byte[] buffer = new byte[8192];
+                    long contentLength = body.contentLength();
                     long downloadedBytes = 0;
-                    int bytesRead;
-                    int lastProgress = 0;
-                    
-                    while ((bytesRead = inputStream.read(buffer)) != -1) {
-                        outputStream.write(buffer, 0, bytesRead);
-                        downloadedBytes += bytesRead;
-                        
-                        // 计算进度
-                        if (contentLength > 0) {
-                            int progress = (int) (downloadedBytes * 100 / contentLength);
-                            if (progress != lastProgress) {
-                                lastProgress = progress;
-                                final int finalProgress = progress;
-                                mainHandler.post(() -> callback.onProgress(finalProgress));
+                    int lastProgress = -1;
+                    try (InputStream inputStream = body.byteStream();
+                         FileOutputStream outputStream = new FileOutputStream(apkFile)) {
+                        byte[] buffer = new byte[8192];
+                        int bytesRead;
+                        while ((bytesRead = inputStream.read(buffer)) != -1) {
+                            outputStream.write(buffer, 0, bytesRead);
+                            downloadedBytes += bytesRead;
+                            if (contentLength > 0) {
+                                int progress = (int) (downloadedBytes * 100 / contentLength);
+                                if (progress != lastProgress) {
+                                    lastProgress = progress;
+                                    final int finalProgress = progress;
+                                    mainHandler.post(() -> callback.onProgress(finalProgress));
+                                }
                             }
                         }
+                        outputStream.flush();
                     }
-                    
-                    outputStream.flush();
-                    outputStream.close();
-                    inputStream.close();
-                    
-                    AppLog.d(TAG, "APK 下载完成: " + apkFile.getAbsolutePath());
                     mainHandler.post(() -> callback.onComplete(apkFile));
-                    
                 } catch (IOException e) {
-                    AppLog.e(TAG, "保存文件失败: " + e.getMessage());
                     mainHandler.post(() -> callback.onError("保存文件失败: " + e.getMessage()));
                 } finally {
                     response.close();
@@ -312,133 +372,13 @@ public class VersionUpdateManager {
             }
         });
     }
-    
-    /**
-     * 取消当前下载
-     */
+
     public void cancelDownload() {
-        if (currentDownloadCall != null && !currentDownloadCall.isCanceled()) {
-            currentDownloadCall.cancel();
+        downloadCancelledByUser = true;
+        Call call = currentDownloadCall;
+        if (call != null && !call.isCanceled()) {
+            call.cancel();
             AppLog.d(TAG, "取消下载");
-        }
-    }
-    
-    /**
-     * 验证版本号格式
-     * 支持格式：1.0.0、1.0.0-test-01301530 等
-     */
-    private boolean isValidVersionFormat(String version) {
-        if (version == null || version.isEmpty()) {
-            return false;
-        }
-        // 简单验证：至少包含一个数字和一个点
-        return version.matches("^\\d+\\.\\d+.*$");
-    }
-    
-    /**
-     * 比较版本号，判断 newVersion 是否比 currentVersion 更新
-     * 支持格式：1.0.3、1.0.3-test-01301530
-     * 
-     * 规则：
-     * 1. 主版本号不同时，数字大的更新（1.0.4 > 1.0.3-test-xxx > 1.0.3）
-     * 2. 主版本号相同时，有 -test- 后缀的比没有后缀的更新（1.0.3-test-xxx > 1.0.3）
-     * 3. 都有 -test- 后缀时，比较时间戳（1.0.3-test-02032310 > 1.0.3-test-02031200）
-     */
-    private boolean isNewerVersion(String newVersion, String currentVersion) {
-        try {
-            // 提取主版本号部分（去掉 -test-xxx 后缀）
-            String newMain = extractMainVersion(newVersion);
-            String currentMain = extractMainVersion(currentVersion);
-            
-            // 分割版本号
-            String[] newParts = newMain.split("\\.");
-            String[] currentParts = currentMain.split("\\.");
-            
-            // 比较主版本号每个部分
-            int maxLength = Math.max(newParts.length, currentParts.length);
-            for (int i = 0; i < maxLength; i++) {
-                int newPart = i < newParts.length ? parseVersionPart(newParts[i]) : 0;
-                int currentPart = i < currentParts.length ? parseVersionPart(currentParts[i]) : 0;
-                
-                if (newPart > currentPart) {
-                    return true;
-                } else if (newPart < currentPart) {
-                    return false;
-                }
-            }
-            
-            // 主版本号相同，比较后缀
-            boolean newIsTest = newVersion.contains("-test-");
-            boolean currentIsTest = currentVersion.contains("-test-");
-            
-            // 测试版 > 正式版（主版本号相同时）
-            if (newIsTest && !currentIsTest) {
-                return true;  // 新版本是测试版，当前是正式版，测试版更新
-            }
-            
-            if (!newIsTest && currentIsTest) {
-                return false;  // 新版本是正式版，当前是测试版，不算更新
-            }
-            
-            // 两者都是测试版，比较时间戳
-            if (newIsTest && currentIsTest) {
-                String newTimestamp = extractTestTimestamp(newVersion);
-                String currentTimestamp = extractTestTimestamp(currentVersion);
-                return newTimestamp.compareTo(currentTimestamp) > 0;
-            }
-            
-            // 两者都是正式版且版本号相同
-            return false;
-        } catch (Exception e) {
-            AppLog.e(TAG, "版本比较失败: " + e.getMessage());
-            return false;
-        }
-    }
-    
-    /**
-     * 提取主版本号（去掉 -test-xxx 后缀）
-     */
-    private String extractMainVersion(String version) {
-        int testIndex = version.indexOf("-test-");
-        if (testIndex > 0) {
-            return version.substring(0, testIndex);
-        }
-        // 处理其他可能的后缀（如 -alpha、-beta）
-        int dashIndex = version.indexOf("-");
-        if (dashIndex > 0) {
-            return version.substring(0, dashIndex);
-        }
-        return version;
-    }
-    
-    /**
-     * 提取测试版时间戳
-     */
-    private String extractTestTimestamp(String version) {
-        int testIndex = version.indexOf("-test-");
-        if (testIndex > 0 && testIndex + 6 < version.length()) {
-            return version.substring(testIndex + 6);
-        }
-        return "";
-    }
-    
-    /**
-     * 解析版本号部分为整数
-     */
-    private int parseVersionPart(String part) {
-        try {
-            // 处理可能的非数字字符（如 "3a" -> 3）
-            StringBuilder digits = new StringBuilder();
-            for (char c : part.toCharArray()) {
-                if (Character.isDigit(c)) {
-                    digits.append(c);
-                } else {
-                    break;
-                }
-            }
-            return digits.length() > 0 ? Integer.parseInt(digits.toString()) : 0;
-        } catch (NumberFormatException e) {
-            return 0;
         }
     }
 }

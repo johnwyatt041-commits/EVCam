@@ -38,6 +38,11 @@ public class FeishuApiClient {
                 .build();
     }
 
+    /** 取消所有在途 HTTP 请求（切离 P 档断连时立即中止）。 */
+    public void cancelAllRequests() {
+        httpClient.dispatcher().cancelAll();
+    }
+
     /**
      * 获取 Tenant Access Token
      */

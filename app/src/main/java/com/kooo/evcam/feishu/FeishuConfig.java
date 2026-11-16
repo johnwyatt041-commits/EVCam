@@ -4,72 +4,110 @@ import android.content.Context;
 import android.content.SharedPreferences;
 
 /**
- * 飞书配置存储工具类
+ * 飞书配置存储工具类（独立于 T09 配置广场白名单）。
  */
 public class FeishuConfig {
-    private static final String PREF_NAME = "feishu_config";
+    public static final String PREF_NAME = "feishu_config";
     private static final String KEY_APP_ID = "app_id";
     private static final String KEY_APP_SECRET = "app_secret";
     private static final String KEY_ACCESS_TOKEN = "access_token";
     private static final String KEY_TOKEN_EXPIRE_TIME = "token_expire_time";
     private static final String KEY_AUTO_START = "auto_start";
     private static final String KEY_ALLOWED_USER_IDS = "allowed_user_ids";
+    private static final String KEY_FEISHU_ENABLED = "feishu_enabled";
+    private static final String KEY_P_GEAR_ONLY = "p_gear_only";
 
     private final SharedPreferences prefs;
 
     public FeishuConfig(Context context) {
-        prefs = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        this(context.getApplicationContext().getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE));
+    }
+
+    public FeishuConfig(SharedPreferences prefs) {
+        this.prefs = prefs;
     }
 
     /**
-     * 保存配置
-     * @param appId 应用 App ID
-     * @param appSecret 应用 App Secret
+     * 轻量静态判断：仅读取本地配置标志，不创建任何服务单例、客户端或车况监听租约。
+     * 用于确保未配置或未启用飞书时纯后台录像零远程初始化。
      */
+    public static boolean isFeatureActive(Context context) {
+        if (context == null) {
+            return false;
+        }
+        SharedPreferences prefs = context.getApplicationContext()
+                .getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE);
+        return isFeatureActive(prefs);
+    }
+
+    public static boolean isFeatureActive(SharedPreferences prefs) {
+        return isConfigured(prefs) && isEnabled(prefs);
+    }
+
+    public static boolean isConfigured(SharedPreferences prefs) {
+        if (prefs == null) {
+            return false;
+        }
+        String appId = prefs.getString(KEY_APP_ID, "");
+        String appSecret = prefs.getString(KEY_APP_SECRET, "");
+        return appId != null && !appId.isEmpty() && appSecret != null && !appSecret.isEmpty();
+    }
+
+    /**
+     * 读取飞书总开关：
+     * - 若用户曾显式保存过 feishu_enabled，严格按其值返回；
+     * - 若为 build11 及更早老用户升级（未保存过 feishu_enabled），当且仅当已配置凭据且原 auto_start=true 时映射保留为开启。
+     */
+    public static boolean isEnabled(SharedPreferences prefs) {
+        if (prefs == null) {
+            return false;
+        }
+        if (prefs.contains(KEY_FEISHU_ENABLED)) {
+            return prefs.getBoolean(KEY_FEISHU_ENABLED, false);
+        }
+        return isConfigured(prefs) && prefs.getBoolean(KEY_AUTO_START, false);
+    }
+
     public void saveConfig(String appId, String appSecret) {
-        prefs.edit()
-                .putString(KEY_APP_ID, appId)
-                .putString(KEY_APP_SECRET, appSecret)
-                .apply();
+        saveConfig(appId, appSecret, getAllowedUserIds());
     }
 
-    /**
-     * 保存配置（包含允许的用户ID）
-     */
     public void saveConfig(String appId, String appSecret, String allowedUserIds) {
-        prefs.edit()
-                .putString(KEY_APP_ID, appId)
-                .putString(KEY_APP_SECRET, appSecret)
-                .putString(KEY_ALLOWED_USER_IDS, allowedUserIds)
-                .apply();
+        String safeAppId = appId != null ? appId.trim() : "";
+        String safeSecret = appSecret != null ? appSecret.trim() : "";
+        String safeUsers = allowedUserIds != null ? allowedUserIds.trim() : "";
+
+        boolean credentialsChanged = !safeAppId.equals(getAppId()) || !safeSecret.equals(getAppSecret());
+        SharedPreferences.Editor editor = prefs.edit()
+                .putString(KEY_APP_ID, safeAppId)
+                .putString(KEY_APP_SECRET, safeSecret)
+                .putString(KEY_ALLOWED_USER_IDS, safeUsers);
+        if (credentialsChanged) {
+            editor.remove(KEY_ACCESS_TOKEN).remove(KEY_TOKEN_EXPIRE_TIME);
+        }
+        editor.apply();
     }
 
     public String getAppId() {
-        return prefs.getString(KEY_APP_ID, "");
+        String value = prefs.getString(KEY_APP_ID, "");
+        return value != null ? value : "";
     }
 
     public String getAppSecret() {
-        return prefs.getString(KEY_APP_SECRET, "");
+        String value = prefs.getString(KEY_APP_SECRET, "");
+        return value != null ? value : "";
     }
 
-    /**
-     * 获取允许的用户ID列表
-     * @return 逗号分隔的用户ID字符串
-     */
     public String getAllowedUserIds() {
-        return prefs.getString(KEY_ALLOWED_USER_IDS, "");
+        String value = prefs.getString(KEY_ALLOWED_USER_IDS, "");
+        return value != null ? value : "";
     }
 
-    /**
-     * 检查用户ID是否被允许
-     * 如果未配置任何用户ID，则允许所有
-     */
     public boolean isUserIdAllowed(String userId) {
         String allowedIds = getAllowedUserIds();
         if (allowedIds.isEmpty()) {
-            return true; // 未配置时允许所有
+            return true;
         }
-
         String[] ids = allowedIds.split(",");
         for (String id : ids) {
             if (id.trim().equals(userId)) {
@@ -80,12 +118,29 @@ public class FeishuConfig {
     }
 
     public boolean isConfigured() {
-        return !getAppId().isEmpty() && !getAppSecret().isEmpty();
+        return isConfigured(prefs);
     }
 
-    /**
-     * 保存 Access Token
-     */
+    public void setEnabled(boolean enabled) {
+        prefs.edit()
+                .putBoolean(KEY_FEISHU_ENABLED, enabled)
+                .putBoolean(KEY_AUTO_START, enabled)
+                .apply();
+    }
+
+    public boolean isEnabled() {
+        return isEnabled(prefs);
+    }
+
+    public void setPGearOnly(boolean pGearOnly) {
+        prefs.edit().putBoolean(KEY_P_GEAR_ONLY, pGearOnly).apply();
+    }
+
+    /** 默认开启仅在 P 档连接，配合总开关完成懒加载与非 P 档彻底断连。 */
+    public boolean isPGearOnly() {
+        return prefs.getBoolean(KEY_P_GEAR_ONLY, true);
+    }
+
     public void saveAccessToken(String token, long expireTime) {
         prefs.edit()
                 .putString(KEY_ACCESS_TOKEN, token)
@@ -94,7 +149,8 @@ public class FeishuConfig {
     }
 
     public String getAccessToken() {
-        return prefs.getString(KEY_ACCESS_TOKEN, "");
+        String value = prefs.getString(KEY_ACCESS_TOKEN, "");
+        return value != null ? value : "";
     }
 
     public boolean isTokenValid() {
@@ -102,9 +158,6 @@ public class FeishuConfig {
         return System.currentTimeMillis() < expireTime;
     }
 
-    /**
-     * 清除缓存的 AccessToken
-     */
     public void clearAccessToken() {
         prefs.edit()
                 .remove(KEY_ACCESS_TOKEN)
@@ -113,13 +166,11 @@ public class FeishuConfig {
     }
 
     public void setAutoStart(boolean autoStart) {
-        prefs.edit()
-                .putBoolean(KEY_AUTO_START, autoStart)
-                .apply();
+        setEnabled(autoStart);
     }
 
     public boolean isAutoStart() {
-        return prefs.getBoolean(KEY_AUTO_START, false);
+        return isEnabled();
     }
 
     public void clearConfig() {

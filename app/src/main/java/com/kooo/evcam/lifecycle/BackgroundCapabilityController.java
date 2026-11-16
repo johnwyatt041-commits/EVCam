@@ -48,7 +48,10 @@ public final class BackgroundCapabilityController {
 
     /** 判断当前是否仍有需要在 UI 销毁后继续存活的后台能力。 */
     public static boolean hasActiveBackgroundCapabilities(Context context) {
-        boolean remoteRunning = RemoteServiceManager.getInstance().hasAnyServiceRunning();
+        boolean feishuActive = com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(context);
+        boolean remoteRunning = feishuActive
+                || (RemoteServiceManager.hasInitializedInstance()
+                && RemoteServiceManager.getInstance().hasAnyServiceRunning());
         boolean floatingRunning = FloatingWindowService.isRunning();
         boolean blindSpotRunning = BlindSpotService.hasActiveCameraWindows()
                 || (BlindSpotService.isServiceRunning() && AppLifecycleState.isUiExited(context));
@@ -61,12 +64,15 @@ public final class BackgroundCapabilityController {
     }
 
     /**
-     * 预留给后续 T10 P 档驻留/信号触发的飞书服务懒加载接口。
-     * 仅在未触发 user_exited 时委托 RemoteServiceManager 按需拉起飞书连接。
+     * T10 P 档驻留/信号触发的飞书服务懒加载接口。
+     * 仅在未触发 user_exited 且总开关与凭据有效时委托 RemoteServiceManager 按需拉起连接。
      */
     public static boolean ensureFeishuLazyStarted(Context context, TriggerReason reason) {
         if (context == null || !AppLifecycleState.canRunBackgroundServices(context)) {
             AppLog.d(TAG, "跳过飞书懒加载（user_exited=true 或上下文无效）, reason=" + reason);
+            return false;
+        }
+        if (!com.kooo.evcam.feishu.FeishuConfig.isFeatureActive(context)) {
             return false;
         }
         return RemoteServiceManager.getInstance().ensureFeishuLazyStarted(

@@ -32,12 +32,28 @@ public class RemoteCommandDispatcher {
     public RemoteCommandDispatcher(Context context) {
         this.context = context.getApplicationContext();
         this.handlers = new EnumMap<>(RemotePlatform.class);
-        
-        // 预创建各平台处理器（但不设置 API 客户端）
+        // T10: 不在构造器中预创建 FeishuHandler，确保未配置/未启用飞书时纯后台录像零远程初始化
+        AppLog.d(TAG, "RemoteCommandDispatcher 初始化完成（懒加载模式）");
+    }
 
-        handlers.put(RemotePlatform.FEISHU, new FeishuHandler(context));
-        
-        AppLog.d(TAG, "RemoteCommandDispatcher 初始化完成");
+    private synchronized FeishuHandler getOrCreateFeishuHandler() {
+        RemoteCommandHandler existing = handlers.get(RemotePlatform.FEISHU);
+        if (existing instanceof FeishuHandler) {
+            return (FeishuHandler) existing;
+        }
+        FeishuHandler handler = new FeishuHandler(context);
+        if (cameraController != null) {
+            handler.setCameraController(cameraController);
+        }
+        if (recordingStateListener != null) {
+            handler.setRecordingStateListener(recordingStateListener);
+        }
+        handlers.put(RemotePlatform.FEISHU, handler);
+        return handler;
+    }
+
+    public synchronized boolean hasFeishuHandler() {
+        return handlers.containsKey(RemotePlatform.FEISHU);
     }
     
     // ==================== 依赖注入 ====================
@@ -68,14 +84,19 @@ public class RemoteCommandDispatcher {
     }
     
     /**
-     * 设置飞书 API 客户端
+     * 设置飞书 API 客户端（传入 null 时仅清理已有客户端，不触发懒创建）
      */
-    public void setFeishuApiClient(FeishuApiClient apiClient) {
-        FeishuHandler handler = (FeishuHandler) handlers.get(RemotePlatform.FEISHU);
-        if (handler != null) {
-            handler.setApiClient(apiClient);
-            AppLog.d(TAG, "Feishu API 客户端已设置");
+    public synchronized void setFeishuApiClient(FeishuApiClient apiClient) {
+        if (apiClient == null) {
+            RemoteCommandHandler existing = handlers.get(RemotePlatform.FEISHU);
+            if (existing instanceof FeishuHandler) {
+                ((FeishuHandler) existing).setApiClient(null);
+                AppLog.d(TAG, "Feishu API 客户端已清空");
+            }
+            return;
         }
+        getOrCreateFeishuHandler().setApiClient(apiClient);
+        AppLog.d(TAG, "Feishu API 客户端已设置");
     }
     
     // ==================== 命令分发 ====================
