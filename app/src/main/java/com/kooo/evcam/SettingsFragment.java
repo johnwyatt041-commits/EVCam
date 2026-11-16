@@ -342,6 +342,16 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
                 : SettingsCatalog.ID_APPEARANCE;
     }
 
+    /** 从内置分栏子页面跳转到指定设置分类。 */
+    public static boolean navigateToCategory(@NonNull Fragment caller, @NonNull String categoryId) {
+        Fragment parent = caller.getParentFragment();
+        if (parent instanceof SettingsFragment) {
+            ((SettingsFragment) parent).selectCategory(categoryId);
+            return true;
+        }
+        return false;
+    }
+
     @Nullable
     private Fragment createTargetFragment(@NonNull String entryId) {
         switch (entryId) {
@@ -351,6 +361,8 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
                 return new RecorderSettingsFragment();
             case SettingsCatalog.ID_BLIND_SPOT:
                 return new BlindSpotSettingsFragment();
+            case SettingsCatalog.ID_SIGNAL_PRESET:
+                return new com.kooo.evcam.ui.VehicleSignalPresetFragment();
             case SettingsCatalog.ID_FEISHU:
                 return new FeishuFragment();
             case SettingsCatalog.ID_SYSTEM_PERMISSIONS:

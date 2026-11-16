@@ -148,6 +148,11 @@ public class MainActivity extends AppCompatActivity implements
     private boolean shouldMoveToBackgroundOnReady = false;  // 开机自启动后，窗口准备好时移到后台
     private boolean autoStartRecordingTriggered = false;  // 标记自动录制是否已触发（避免重复触发）
     private boolean isAutoRecordingPending = false;  // 标记自动录制已计划但尚未开始（防止 onPause 关闭摄像头）
+    private boolean suppressKeepCameraOnPauseOnce = false; // 规则动作 STOP_RELEASE / EXIT_APP 显式释放摄像头一次
+    private boolean closeCamerasOnRecordingStopped = false; // 停录完成回调中关闭空闲摄像头
+    private Runnable automationStartRecordingRunnable;
+    private androidx.appcompat.app.AlertDialog doorExitConfirmDialog;
+    private Runnable doorExitCountdownRunnable;
     
     // 自动录制定时检查相关
     private boolean isManuallyStoppedRecording = false;  // 用户是否手动停止了录制（手动停止后不自动恢复）
@@ -269,6 +274,7 @@ public class MainActivity extends AppCompatActivity implements
                 () -> previewEditor != null && previewEditor.isEditing());
         uiTheme.setShellController(uiShell);
         previewEditor = new com.kooo.evcam.ui.PreviewEditorController(this, editing -> {
+            com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
             uiShell.setLayoutEditing(editing);
             if (previewModeController != null) {
                 previewModeController.onEditingStateChanged(editing);
@@ -418,8 +424,10 @@ public class MainActivity extends AppCompatActivity implements
 
         // 检查是否是从录制悬浮按钮启动（需要自动开始录制）
         boolean autoStartRecording = getIntent().getBooleanExtra("auto_start_recording", false);
+        boolean launchedForVehicleAction = getIntent() != null
+                && getIntent().hasExtra(WakeUpHelper.EXTRA_VEHICLE_ACTION);
         if (savedInstanceState == null && !autoStartFromBoot && !autoStartRecording
-                && !appConfig.isAutoStartRecording()) {
+                && !appConfig.isAutoStartRecording() && !launchedForVehicleAction) {
             applyDefaultStartPage();
             applyStartupPreviewPresentation();
         }
@@ -495,6 +503,15 @@ public class MainActivity extends AppCompatActivity implements
         
         // 初始化息屏录制检测
         initScreenStateReceiver();
+
+        // T06: 同步 E5 四类信号映射、绑定自动化总协调器并处理车辆动作 Intent
+        appConfig.syncVehicleSignalCategoryFromConfig();
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().attachUiHost(vehicleAutomationUiHost);
+        if (com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this)
+                && com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
+            CameraForegroundService.start(this, "EVCam", "车辆信号与后台保活运行中");
+        }
+        handleVehicleActionFromIntent(getIntent());
     }
 
     @Override
@@ -505,6 +522,7 @@ public class MainActivity extends AppCompatActivity implements
 
         // 处理远程命令
         handleRemoteCommandFromIntent(intent);
+        handleVehicleActionFromIntent(intent);
 
         // 处理从录制悬浮按钮启动（需要自动开始录制）
         boolean autoStartRecording = intent.getBooleanExtra("auto_start_recording", false);
@@ -936,6 +954,7 @@ public class MainActivity extends AppCompatActivity implements
 
                     @Override
                     public void onToggleFullscreenClicked() {
+                        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
                         if (uiShell == null) return;
                         if (previewEditor != null && previewEditor.isEditing()) {
                             Toast.makeText(MainActivity.this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
@@ -1738,7 +1757,177 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
 
+    // ==================== T06: VehicleAutomationCoordinator.UiHost 与开门确认弹窗 ====================
+
+    private final com.kooo.evcam.vehicle.VehicleAutomationCoordinator.UiHost vehicleAutomationUiHost =
+            new com.kooo.evcam.vehicle.VehicleAutomationCoordinator.UiHost() {
+                @Override
+                public boolean isUiInForeground() {
+                    return isInterfaceInForeground();
+                }
+
+                @Override
+                public boolean isRecordingActive() {
+                    return isRecording || isRemoteRecording || isPreparingRecording
+                            || (cameraManager != null && cameraManager.isRecording());
+                }
+
+                @Override
+                public void startRecordingForAutomation(@NonNull String reason) {
+                    if (isRecordingActive() || cameraManager == null) {
+                        return;
+                    }
+                    if (reopenCameraHandler == null) {
+                        reopenCameraHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+                    }
+                    if (automationStartRecordingRunnable != null) {
+                        reopenCameraHandler.removeCallbacks(automationStartRecordingRunnable);
+                    }
+                    if (cameraManager.hasAvailableCameras()) {
+                        AppLog.i(TAG, "T06 规则直接开始录制: " + reason);
+                        startRecording();
+                        return;
+                    }
+                    isAutoRecordingPending = true;
+                    AppLog.i(TAG, "T06 规则准备打开摄像头后开始录制: " + reason);
+                    cameraManager.openAllCameras();
+                    automationStartRecordingRunnable = () -> {
+                        automationStartRecordingRunnable = null;
+                        isAutoRecordingPending = false;
+                        if (cameraManager != null && cameraManager.hasAvailableCameras()
+                                && !isRecording && !cameraManager.isRecording()
+                                && !com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(MainActivity.this)) {
+                            startRecording();
+                        }
+                    };
+                    reopenCameraHandler.postDelayed(automationStartRecordingRunnable, 1200);
+                }
+
+                @Override
+                public void stopRecordingForAutomation(boolean releaseCameras, @NonNull String reason) {
+                    if (reopenCameraHandler != null && automationStartRecordingRunnable != null) {
+                        reopenCameraHandler.removeCallbacks(automationStartRecordingRunnable);
+                        automationStartRecordingRunnable = null;
+                    }
+                    isAutoRecordingPending = false;
+                    if (releaseCameras) {
+                        suppressKeepCameraOnPauseOnce = true;
+                    }
+                    if (isRecording || isPreparingRecording || (cameraManager != null && cameraManager.isRecording())) {
+                        closeCamerasOnRecordingStopped = releaseCameras;
+                        AppLog.i(TAG, "T06 规则停止录制(release=" + releaseCameras + "): " + reason);
+                        stopRecording();
+                    } else if (releaseCameras && cameraManager != null
+                            && !BlindSpotService.hasActiveCameraWindows()) {
+                        AppLog.i(TAG, "T06 规则释放空闲摄像头: " + reason);
+                        cameraManager.closeAllCameras();
+                    }
+                }
+
+                @Override
+                public void exitUiToBackgroundForAutomation(@NonNull String reason) {
+                    AppLog.i(TAG, "T06 退至后台（保持信号保活）: " + reason);
+                    com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
+                }
+
+                @Override
+                public void requestDoorExitConfirmationDialog(int delaySeconds,
+                                                               @NonNull String reason,
+                                                               @NonNull Runnable onConfirmExit) {
+                    showDoorExitConfirmationDialog(delaySeconds, onConfirmExit);
+                }
+
+                @Override
+                public void moveRecordingToBackgroundForGearShift() {
+                    if (isInterfaceInForeground()) {
+                        AppLog.i(TAG, "R/D 换挡弹出倒计时结束，自动退至后台（保持录制）");
+                        com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
+                    }
+                }
+            };
+
+    private void handleVehicleActionFromIntent(@androidx.annotation.Nullable Intent intent) {
+        if (intent == null) return;
+        String action = intent.getStringExtra(WakeUpHelper.EXTRA_VEHICLE_ACTION);
+        if (action == null || action.isEmpty()) return;
+        intent.removeExtra(WakeUpHelper.EXTRA_VEHICLE_ACTION);
+
+        if (WakeUpHelper.VEHICLE_ACTION_RD_POPUP.equals(action)) {
+            AppLog.i(TAG, "处理 R/D 换挡自动弹出 Intent -> 切换到记录仪页");
+            if (uiShell != null) {
+                if (uiShell.isFullscreenPreview()) {
+                    uiShell.setFullscreenPreview(false);
+                }
+                showRecordingInterface();
+            }
+        } else if (WakeUpHelper.VEHICLE_ACTION_CAMERA_RECOVERY.equals(action)) {
+            AppLog.i(TAG, "处理摄像头有门槛前台恢复 Intent -> 触发 checkAndRepairCameras");
+            if (cameraManager != null) {
+                cameraManager.checkAndRepairCameras();
+            }
+        }
+    }
+
+    private void showDoorExitConfirmationDialog(int delaySeconds, @NonNull Runnable onConfirmExit) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        dismissDoorExitConfirmationDialog();
+        if (reopenCameraHandler == null) {
+            reopenCameraHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        }
+        final int[] remaining = {Math.max(1, delaySeconds)};
+        androidx.appcompat.app.AlertDialog dialog = new com.google.android.material.dialog.MaterialAlertDialogBuilder(
+                this, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("检测到车门打开")
+                .setMessage("将在 " + remaining[0] + " 秒后停止录制并退回后台（仍保持信号监听）")
+                .setPositiveButton("立即退出", (d, which) -> {
+                    dismissDoorExitConfirmationDialog();
+                    onConfirmExit.run();
+                })
+                .setNegativeButton("留在前台", (d, which) -> dismissDoorExitConfirmationDialog())
+                .setOnCancelListener(d -> dismissDoorExitConfirmationDialog())
+                .create();
+        doorExitConfirmDialog = dialog;
+        dialog.show();
+
+        doorExitCountdownRunnable = new Runnable() {
+            @Override
+            public void run() {
+                if (doorExitConfirmDialog == null || !doorExitConfirmDialog.isShowing()) {
+                    return;
+                }
+                remaining[0]--;
+                if (remaining[0] <= 0) {
+                    dismissDoorExitConfirmationDialog();
+                    onConfirmExit.run();
+                } else {
+                    doorExitConfirmDialog.setMessage("将在 " + remaining[0] + " 秒后停止录制并退回后台（仍保持信号监听）");
+                    reopenCameraHandler.postDelayed(this, 1000L);
+                }
+            }
+        };
+        reopenCameraHandler.postDelayed(doorExitCountdownRunnable, 1000L);
+    }
+
+    private void dismissDoorExitConfirmationDialog() {
+        if (reopenCameraHandler != null && doorExitCountdownRunnable != null) {
+            reopenCameraHandler.removeCallbacks(doorExitCountdownRunnable);
+        }
+        doorExitCountdownRunnable = null;
+        if (doorExitConfirmDialog != null) {
+            try {
+                if (doorExitConfirmDialog.isShowing()) {
+                    doorExitConfirmDialog.dismiss();
+                }
+            } catch (Exception ignored) {
+            }
+            doorExitConfirmDialog = null;
+        }
+    }
+
     private void navigateToSection(int destination) {
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
         if (previewEditor != null && previewEditor.isEditing()) {
             Toast.makeText(this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
             return;
@@ -3475,12 +3664,24 @@ public class MainActivity extends AppCompatActivity implements
 
     private void stopRecording() {
         if (cameraManager != null) {
-            cameraManager.stopRecording(false, () -> { if (uiTheme != null) uiTheme.applyIfIdle(); });
+            cameraManager.stopRecording(false, () -> {
+                if (uiTheme != null) uiTheme.applyIfIdle();
+                if (closeCamerasOnRecordingStopped) {
+                    closeCamerasOnRecordingStopped = false;
+                    if (cameraManager != null && !BlindSpotService.hasActiveCameraWindows()) {
+                        cameraManager.closeAllCameras();
+                    }
+                }
+            });
             isRecording = false;
             isPreparingRecording = false;  // 重置准备中状态
 
-            // 停止前台服务
-            CameraForegroundService.stop(this);
+            // 若无后台保活需求（车辆触发规则/换挡弹出/保摄像头/补盲/悬浮窗/远程），才停止前台服务
+            if (!com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this)) {
+                CameraForegroundService.stop(this);
+            } else {
+                AppLog.d(TAG, "存在活跃后台保活能力，停止录制后保持 CameraForegroundService 运行");
+            }
 
             // 停止闪烁动画，恢复红色
             stopBlinkAnimation();
@@ -4013,6 +4214,7 @@ public class MainActivity extends AppCompatActivity implements
     protected void onPause() {
         super.onPause();
         isInBackground = true;
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUiPaused(vehicleAutomationUiHost);
         updateRecordingFloatingVisibility(false);
         BlindSpotService.notifySelfBackground();
         AppLog.d(TAG, "onPause called, isRecording=" + isRecording);
@@ -4034,6 +4236,12 @@ public class MainActivity extends AppCompatActivity implements
                 // 有悬浮窗（补盲/常驻/副屏）正在使用摄像头：保持连接
                 // 悬浮窗关闭时会自行释放摄像头（closeCamerasIfIdle）
                 AppLog.d(TAG, "Active camera windows exist, keeping cameras connected");
+            } else if (!suppressKeepCameraOnPauseOnce
+                    && appConfig != null
+                    && appConfig.isKeepCameraConnectedEnabled()
+                    && !com.kooo.evcam.lifecycle.AppLifecycleState.isUserExited(this)) {
+                // 3.1 后台保摄像头连接：保持连接以降低二次触发录制延迟
+                AppLog.d(TAG, "Keep camera connected enabled, keeping cameras connected in background");
             } else {
                 // 未录制且无悬浮窗：主动断开摄像头，释放资源
                 AppLog.d(TAG, "Not recording, closing all cameras to release resources");
@@ -4087,6 +4295,8 @@ public class MainActivity extends AppCompatActivity implements
             uiShell.setFloatingWindowActive(false);
         }
         if (uiTheme != null) uiTheme.syncSystemBarsAndTree();
+        suppressKeepCameraOnPauseOnce = false;
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUiResumed(vehicleAutomationUiHost);
         boolean wasInBackground = isInBackground;
         isInBackground = false;
         updateRecordingFloatingVisibility(true);
@@ -4167,6 +4377,12 @@ public class MainActivity extends AppCompatActivity implements
 
     @Override
     protected void onDestroy() {
+        dismissDoorExitConfirmationDialog();
+        if (reopenCameraHandler != null && automationStartRecordingRunnable != null) {
+            reopenCameraHandler.removeCallbacks(automationStartRecordingRunnable);
+            automationStartRecordingRunnable = null;
+        }
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().detachUiHost(vehicleAutomationUiHost);
         super.onDestroy();
 
         // 无论是 recreate 还是 finishing，都清掉 Holder 中的旧引用。
@@ -4492,6 +4708,7 @@ public class MainActivity extends AppCompatActivity implements
 
     /** 顶栏"小窗"快捷入口：打开独立预览悬浮窗并退至后台，不抢占导航焦点栈。 */
     public void enterFloatingWindowPresentation() {
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
         if (previewEditor != null && previewEditor.isEditing()) {
             Toast.makeText(this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
             return;

@@ -11,6 +11,9 @@ import com.kooo.evcam.camera.VehicleStatusWatermark;
 import com.kooo.evcam.config.BlindSpotConfig;
 import com.kooo.evcam.config.RecordingConfig;
 import com.kooo.evcam.ui.PreviewPresentation;
+import com.kooo.evcam.vehicle.GearShiftPopupCoordinator;
+import com.kooo.evcam.vehicle.VehicleSignalCategory;
+import com.kooo.evcam.vehicle.rule.VehicleTriggerRule;
 
 /**
  * 应用配置管理类
@@ -3971,6 +3974,140 @@ public class AppConfig implements CameraMirrorPolicy.Store {
             return RecordingSoundPlayer.MODE_CUSTOM;
         }
         return RecordingSoundPlayer.MODE_NONE;
+    }
+
+    // ==================== T06: 3.1 车辆状态规则 / 保摄像头恢复 / R-D 换挡自动弹出 & 10. E5 信号预设 ====================
+
+    private static final String KEY_KEEP_CAMERA_CONNECTED = "keep_camera_connected";
+    private static final String KEY_CAMERA_RECOVERY_ENABLED = "camera_recovery_page_enabled";
+    private static final String KEY_RD_SHIFT_AUTO_POPUP_ENABLED = "rd_shift_auto_popup_enabled";
+    private static final String KEY_RD_SHIFT_POPUP_SECONDS = "rd_shift_popup_seconds";
+    private static final String KEY_VEHICLE_TRIGGER_RULES_JSON = "vehicle_trigger_rules_json";
+    private static final String KEY_VHAL_PROP_GEAR_SELECTION = "t06_vhal_prop_gear_selection";
+    private static final String KEY_VHAL_PROP_CURRENT_GEAR = "t06_vhal_prop_current_gear";
+    private static final String KEY_VHAL_PROP_SPEED = "t06_vhal_prop_speed";
+    private static final String KEY_VHAL_PROP_DOOR_POS = "t06_vhal_prop_door_pos";
+    private static final String KEY_VHAL_PROP_TURN_SIGNAL = "t06_vhal_prop_turn_signal";
+
+    public boolean isKeepCameraConnectedEnabled() {
+        return prefs.getBoolean(KEY_KEEP_CAMERA_CONNECTED, false);
+    }
+
+    public void setKeepCameraConnectedEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_KEEP_CAMERA_CONNECTED, enabled).apply();
+        AppLog.d(TAG, "后台保持摄像头连接开关: " + enabled);
+    }
+
+    public boolean isCameraRecoveryEnabled() {
+        return prefs.getBoolean(KEY_CAMERA_RECOVERY_ENABLED, false);
+    }
+
+    public void setCameraRecoveryEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_CAMERA_RECOVERY_ENABLED, enabled).apply();
+        AppLog.d(TAG, "摄像头掉线有门槛前台拉起恢复开关: " + enabled);
+    }
+
+    public boolean isRdShiftAutoPopupEnabled() {
+        return prefs.getBoolean(KEY_RD_SHIFT_AUTO_POPUP_ENABLED, false);
+    }
+
+    public void setRdShiftAutoPopupEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_RD_SHIFT_AUTO_POPUP_ENABLED, enabled).apply();
+        AppLog.d(TAG, "R/D 换挡自动弹出记录仪开关: " + enabled);
+    }
+
+    public int getRdShiftPopupSeconds() {
+        return GearShiftPopupCoordinator.normalizePopupSeconds(
+                prefs.getInt(KEY_RD_SHIFT_POPUP_SECONDS, GearShiftPopupCoordinator.DEFAULT_POPUP_SECONDS));
+    }
+
+    public void setRdShiftPopupSeconds(int seconds) {
+        int normalized = GearShiftPopupCoordinator.normalizePopupSeconds(seconds);
+        prefs.edit().putInt(KEY_RD_SHIFT_POPUP_SECONDS, normalized).apply();
+        AppLog.d(TAG, "R/D 换挡弹出自动退后台秒数: " + normalized + "s");
+    }
+
+    public java.util.List<VehicleTriggerRule> getVehicleTriggerRules() {
+        String raw = prefs.getString(KEY_VEHICLE_TRIGGER_RULES_JSON, null);
+        return VehicleTriggerRule.fromJsonArray(raw);
+    }
+
+    public void setVehicleTriggerRules(java.util.List<VehicleTriggerRule> rules) {
+        String json = VehicleTriggerRule.toJsonArray(rules);
+        prefs.edit().putString(KEY_VEHICLE_TRIGGER_RULES_JSON, json).apply();
+        AppLog.d(TAG, "已保存车辆触发规则，数量: " + (rules != null ? rules.size() : 0));
+    }
+
+    public void resetVehicleTriggerRulesToDefault() {
+        setVehicleTriggerRules(VehicleTriggerRule.createDefaultRules());
+    }
+
+    public boolean hasActiveVehicleTriggerRules() {
+        for (VehicleTriggerRule rule : getVehicleTriggerRules()) {
+            if (rule != null && rule.enabled) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public int getCustomGearSelectionPropId() {
+        int raw = prefs.getInt(KEY_VHAL_PROP_GEAR_SELECTION, 0);
+        return raw != 0 ? raw : VehicleSignalCategory.PROP_GEAR_SELECTION;
+    }
+
+    public int getCustomCurrentGearPropId() {
+        int raw = prefs.getInt(KEY_VHAL_PROP_CURRENT_GEAR, 0);
+        return raw != 0 ? raw : VehicleSignalCategory.PROP_CURRENT_GEAR;
+    }
+
+    public int getCustomSpeedPropId() {
+        int raw = prefs.getInt(KEY_VHAL_PROP_SPEED, 0);
+        return raw != 0 ? raw : VehicleSignalCategory.PROP_PERF_VEHICLE_SPEED;
+    }
+
+    public int getCustomDoorPosPropId() {
+        int raw = prefs.getInt(KEY_VHAL_PROP_DOOR_POS, 0);
+        return raw != 0 ? raw : VehicleSignalCategory.PROP_DOOR_POS;
+    }
+
+    public int getCustomTurnSignalPropId() {
+        int raw = prefs.getInt(KEY_VHAL_PROP_TURN_SIGNAL, 0);
+        return raw != 0 ? raw : VehicleSignalCategory.PROP_TURN_SIGNAL_STATE;
+    }
+
+    public void setCustomVhalPropertyIds(int gearSelectionId, int currentGearId,
+                                         int speedId, int doorPosId, int turnSignalId) {
+        prefs.edit()
+                .putInt(KEY_VHAL_PROP_GEAR_SELECTION, gearSelectionId)
+                .putInt(KEY_VHAL_PROP_CURRENT_GEAR, currentGearId)
+                .putInt(KEY_VHAL_PROP_SPEED, speedId)
+                .putInt(KEY_VHAL_PROP_DOOR_POS, doorPosId)
+                .putInt(KEY_VHAL_PROP_TURN_SIGNAL, turnSignalId)
+                .apply();
+        syncVehicleSignalCategoryFromConfig();
+    }
+
+    public void resetCustomVhalPropertyIds() {
+        prefs.edit()
+                .putInt(KEY_VHAL_PROP_GEAR_SELECTION, 0)
+                .putInt(KEY_VHAL_PROP_CURRENT_GEAR, 0)
+                .putInt(KEY_VHAL_PROP_SPEED, 0)
+                .putInt(KEY_VHAL_PROP_DOOR_POS, 0)
+                .putInt(KEY_VHAL_PROP_TURN_SIGNAL, 0)
+                .apply();
+        VehicleSignalCategory.resetCustomPropertyIds();
+    }
+
+    /** 将持久化的 4 类白名单属性 ID 同步到核心信号分类白名单。 */
+    public void syncVehicleSignalCategoryFromConfig() {
+        VehicleSignalCategory.setCustomPropertyIds(
+                getCustomGearSelectionPropId(),
+                getCustomCurrentGearPropId(),
+                getCustomSpeedPropId(),
+                getCustomDoorPosPropId(),
+                getCustomTurnSignalPropId()
+        );
     }
 
 }

@@ -16,6 +16,7 @@ public final class SettingsCatalog {
     public static final String ID_APPEARANCE = "appearance";
     public static final String ID_RECORDER = "recorder";
     public static final String ID_BLIND_SPOT = "blind_spot";
+    public static final String ID_SIGNAL_PRESET = "signal_preset";
     public static final String ID_FEISHU = "feishu";
     public static final String ID_SYSTEM_PERMISSIONS = "system_permissions";
     public static final String ID_UPDATE = "update";
@@ -58,6 +59,8 @@ public final class SettingsCatalog {
                     "车型布局、录制模式、分段时长、摄像头选择、画质分辨率、存储与水印", R.drawable.ic_nav_recording),
             new Entry(ID_BLIND_SPOT, "5", "5. 补盲", "补盲",
                     "转向补盲联动、悬浮窗口、副屏显示/流输出与位置校准", R.drawable.ic_nav_blind_spot),
+            new Entry(ID_SIGNAL_PRESET, "10", "10. 信号预设与匹配", "信号预设与匹配",
+                    "银河 E5 四类信号源预设、实时快照诊断与 VHAL 属性映射", R.drawable.ic_vehicle_outline),
             new Entry(ID_FEISHU, "11", "11. 飞书远程", "飞书远程",
                     "飞书机器人凭据、自启动连接与远程查看控制", R.drawable.ic_nav_feishu_mono),
             new Entry(ID_SYSTEM_PERMISSIONS, "13", "13. 系统与权限", "系统与权限",

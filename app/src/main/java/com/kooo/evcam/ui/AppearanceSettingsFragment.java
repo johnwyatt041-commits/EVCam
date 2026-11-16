@@ -168,7 +168,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
                     appConfig.setConfirmDoorExitEnabled(isChecked);
                     refreshDoorExitUi(getContext());
                     Toast.makeText(getContext(),
-                            isChecked ? "已开启开门退出二次确认（配置已保存，待 T06 接入信号）"
+                            isChecked ? "已开启开门退出二次确认（配合 3.1 开门退出规则生效）"
                                     : "已关闭开门退出二次确认",
                             Toast.LENGTH_SHORT).show();
                 }

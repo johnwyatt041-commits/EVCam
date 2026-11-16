@@ -38,7 +38,8 @@ public class CameraForegroundService extends Service {
     // 服务重启延迟时间
     private static final long RESTART_DELAY_MS = 1000;
 
-    private static final long CAMERA_REPAIR_INTERVAL_MS = 10000;
+    // 摄像头状态检查间隔（5秒，对齐 3.1 后台 5s×3 重连策略）
+    private static final long CAMERA_REPAIR_INTERVAL_MS = 5000;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private Runnable cameraRepairRunnable;
 
@@ -79,6 +80,7 @@ public class CameraForegroundService extends Service {
         
         // 这样远程服务不依赖 MainActivity，即使 Activity 被杀也能继续运行
         startRemoteServicesIfNeeded();
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().startOrReload(this);
 
         startCameraRepairLoop();
     }
@@ -232,6 +234,7 @@ public class CameraForegroundService extends Service {
         // 确保远程服务和悬浮窗已启动（处理 START_STICKY 自动重启的情况）
         // onCreate 可能不会被调用（服务自动恢复时），所以这里也要检查
         ensureRemoteServicesStarted();
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().startOrReload(this);
         startCameraRepairLoop();
 
         // 标记就绪，执行所有等待的回调
@@ -297,6 +300,7 @@ public class CameraForegroundService extends Service {
             scheduleServiceRestart();
         } else {
             AppLog.d(TAG, "Service destroyed - 显式停止/彻底退出状态，不触发重启");
+            com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().stop();
         }
 
         super.onDestroy();
@@ -308,13 +312,7 @@ public class CameraForegroundService extends Service {
             @Override
             public void run() {
                 try {
-                    com.kooo.evcam.camera.MultiCameraManager cameraManager = com.kooo.evcam.camera.CameraManagerHolder.getInstance().getCameraManager();
-                    if (cameraManager != null) {
-                        int repaired = cameraManager.checkAndRepairCameras();
-                        if (repaired > 0) {
-                            AppLog.w(TAG, "Camera repair triggered for " + repaired + " cameras");
-                        }
-                    }
+                    com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().onCameraTick();
                 } catch (Exception e) {
                     AppLog.e(TAG, "Camera repair loop error: " + e.getMessage(), e);
                 }

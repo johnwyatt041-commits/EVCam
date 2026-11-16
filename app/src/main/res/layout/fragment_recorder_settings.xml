@@ -741,6 +741,210 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="16dp" />
                 </LinearLayout>
+
+                <!-- T06: 3.1 后台保摄像头连接 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="后台保持摄像头连接"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp"
+                            android:fontFamily="sans-serif-medium" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="退回后台时保持摄像头处于连接状态（减少换挡/触发录制启动耗时）；掉线时先在后台按 5s×3 重连"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="15sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_keep_camera_connected"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <!-- T06: 3.1 摄像头掉线有门槛前台拉起恢复 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="摄像头掉线允许前台拉起恢复"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp"
+                            android:fontFamily="sans-serif-medium" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="后台 5s×3 重连失败后，仅在亮屏且满足 60 秒冷却时拉起前台重开摄像头（最多 3 次，恢复后自动退回后台）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="15sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_camera_recovery_enabled"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <!-- T06: 3.1 R/D 换挡自动弹出记录仪并在 X 秒后自动退后台 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="R/D 换挡自动弹出记录仪"
+                                android:textColor="@color/text_primary"
+                                android:textSize="18sp"
+                                android:fontFamily="sans-serif-medium" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="后台驻留期间挂入 R 或 D 挡（250ms 去抖）自动弹出记录仪画面，倒计时结束后自动退后台；切换页面或操作立即取消自动退后台"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="15sp"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_rd_shift_auto_popup"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/layout_rd_popup_seconds"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:visibility="gone">
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="弹出后自动退后台等待时间"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="15sp" />
+                        <Spinner
+                            android:id="@+id/spinner_rd_popup_seconds"
+                            android:layout_width="140dp"
+                            android:layout_height="44dp"
+                            android:background="@drawable/spinner_background"
+                            android:popupBackground="@color/card_background" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- T06: 3.1 车辆状态触发规则引擎 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card">
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="车辆状态自动触发规则"
+                        android:textColor="@color/text_primary"
+                        android:textSize="18sp"
+                        android:fontFamily="sans-serif-medium" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="仅基于 4 类核心信号（档位 / 车速 / 四车门 / 转向灯）触发；任一停止或退出规则生效时优先压制开始录制，退后台仍保持信号监听。"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp"
+                        android:orientation="horizontal">
+                        <Button
+                            android:id="@+id/btn_add_vehicle_rule"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="+ 添加规则"
+                            android:textAllCaps="false"
+                            android:backgroundTint="@color/button_background"
+                            android:textColor="@color/button_text" />
+                        <Button
+                            android:id="@+id/btn_reset_default_rules"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="6dp"
+                            android:layout_marginEnd="6dp"
+                            android:text="恢复默认 2 条"
+                            android:textAllCaps="false"
+                            android:backgroundTint="@color/button_background"
+                            android:textColor="@color/button_text" />
+                        <Button
+                            android:id="@+id/btn_open_signal_preset"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginStart="6dp"
+                            android:text="10. 信号预设"
+                            android:textAllCaps="false"
+                            android:backgroundTint="@color/button_background"
+                            android:textColor="@color/button_text" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:id="@+id/container_vehicle_rules"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical" />
+                </LinearLayout>
             </LinearLayout>
 
             <!-- ==================== 3.2 画面 ==================== -->

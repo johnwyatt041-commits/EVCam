@@ -16,6 +16,7 @@ public final class VehicleSignalHub {
     private static final VehicleSignalHub INSTANCE = new VehicleSignalHub();
 
     private final CoreVehicleSignalDecoder decoder = new CoreVehicleSignalDecoder();
+    private final VehicleGearStatePublisher gearStatePublisher = new VehicleGearStatePublisher();
     private final CopyOnWriteArrayList<Listener> listeners = new CopyOnWriteArrayList<>();
 
     VehicleSignalHub() {
@@ -23,6 +24,11 @@ public final class VehicleSignalHub {
 
     public static VehicleSignalHub getInstance() {
         return INSTANCE;
+    }
+
+    /** 获取向 T06 规则与后续 T10 导出的标准化挡位订阅与去抖发布器。 */
+    public VehicleGearStatePublisher getGearStatePublisher() {
+        return gearStatePublisher;
     }
 
     public void addListener(Listener listener) {
@@ -77,12 +83,14 @@ public final class VehicleSignalHub {
     public void reset() {
         VehicleSignalSnapshot before = decoder.snapshot(System.currentTimeMillis());
         decoder.reset();
+        gearStatePublisher.reset();
         if (!VehicleSignalSnapshot.UNKNOWN.equals(before)) {
             dispatchSnapshot(VehicleSignalSnapshot.UNKNOWN);
         }
     }
 
     private void dispatchSnapshot(VehicleSignalSnapshot snapshot) {
+        gearStatePublisher.onSnapshot(snapshot);
         for (Listener listener : listeners) {
             listener.onVehicleSignalChanged(snapshot);
         }

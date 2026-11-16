@@ -275,6 +275,34 @@ public class WakeUpHelper {
         AppLog.d(TAG, "MainActivity launch intent sent for foreground");
     }
 
+    public static final String EXTRA_VEHICLE_ACTION = "vehicle_action";
+    public static final String VEHICLE_ACTION_RD_POPUP = "rd_popup";
+    public static final String VEHICLE_ACTION_CAMERA_RECOVERY = "camera_recovery";
+
+    /**
+     * 因 R/D 换挡自动弹出或摄像头掉线有门槛恢复拉起 MainActivity 到前台。
+     */
+    public static void launchForVehicleAction(Context context, String vehicleAction) {
+        if (context == null || vehicleAction == null) return;
+        AppLog.d(TAG, "Launching MainActivity for vehicle action: " + vehicleAction);
+        acquireCpuWakeLock(context);
+
+        Intent intent = new Intent(context, MainActivity.class);
+        intent.setFlags(Intent.FLAG_ACTIVITY_NEW_TASK
+                | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_SINGLE_TOP);
+        intent.putExtra(EXTRA_VEHICLE_ACTION, vehicleAction);
+        context.startActivity(intent);
+    }
+
+    public static void launchForGearShiftPopup(Context context) {
+        launchForVehicleAction(context, VEHICLE_ACTION_RD_POPUP);
+    }
+
+    public static void launchForCameraRecovery(Context context) {
+        launchForVehicleAction(context, VEHICLE_ACTION_CAMERA_RECOVERY);
+    }
+
     /**
      * 发送广播通知 MainActivity 切换到后台
      * 使用广播而不是 startActivity，避免 Activity 闪烁到前台

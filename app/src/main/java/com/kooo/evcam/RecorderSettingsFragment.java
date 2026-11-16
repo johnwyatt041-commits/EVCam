@@ -36,8 +36,17 @@ import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.RecordingSoundPlayer;
 import com.kooo.evcam.camera.VehicleStatusWatermark;
 import com.kooo.evcam.stream.MjpegStreamManager;
+import com.kooo.evcam.ui.SettingsCatalog;
+import com.kooo.evcam.vehicle.VehicleAutomationCoordinator;
+import com.kooo.evcam.vehicle.rule.ConditionLogic;
+import com.kooo.evcam.vehicle.rule.RuleAction;
+import com.kooo.evcam.vehicle.rule.RuleComparison;
+import com.kooo.evcam.vehicle.rule.VehicleRuleCondition;
+import com.kooo.evcam.vehicle.rule.VehicleRuleSignal;
+import com.kooo.evcam.vehicle.rule.VehicleTriggerRule;
 
 import java.io.File;
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -285,6 +294,7 @@ public class RecorderSettingsFragment extends Fragment {
         // 初始化 3.3 扩展水印配置与 3.4 提示音配置
         initDisplayWatermarkExtensions(view);
         initSoundSection(view);
+        initVehicleAutomationSection(view);
 
         // 初始化强制 H.264 编码开关
         forceH264Switch = view.findViewById(R.id.switch_force_h264);
@@ -2542,6 +2552,442 @@ public class RecorderSettingsFragment extends Fragment {
             streamManager.applyParams();
         }
         notifyActiveRecorders();
+    }
+
+    // ==================== T06: 3.1 保摄像头恢复 / R-D 换挡自动弹出 / 车辆触发规则 ====================
+
+    private static final int[] RD_POPUP_SECONDS_VALUES = {3, 5, 10, 15, 30};
+    private static final String[] RD_POPUP_SECONDS_LABELS = {"3 秒", "5 秒（默认）", "10 秒", "15 秒", "30 秒"};
+
+    private LinearLayout rulesListContainer;
+
+    private void initVehicleAutomationSection(@NonNull View root) {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) return;
+
+        SwitchMaterial keepCameraSwitch = root.findViewById(R.id.switch_keep_camera_connected);
+        SwitchMaterial cameraRecoverySwitch = root.findViewById(R.id.switch_camera_recovery_enabled);
+        SwitchMaterial rdPopupSwitch = root.findViewById(R.id.switch_rd_shift_auto_popup);
+        LinearLayout rdSecondsLayout = root.findViewById(R.id.layout_rd_popup_seconds);
+        Spinner rdSecondsSpinner = root.findViewById(R.id.spinner_rd_popup_seconds);
+        rulesListContainer = root.findViewById(R.id.container_vehicle_rules);
+
+        if (keepCameraSwitch != null) {
+            keepCameraSwitch.setChecked(appConfig.isKeepCameraConnectedEnabled());
+            keepCameraSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                appConfig.setKeepCameraConnectedEnabled(isChecked);
+                syncAutomationAfterSettingsChange(ctx);
+                Toast.makeText(ctx, isChecked ? "已开启后台保持摄像头连接" : "已关闭后台保持摄像头连接", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (cameraRecoverySwitch != null) {
+            cameraRecoverySwitch.setChecked(appConfig.isCameraRecoveryEnabled());
+            cameraRecoverySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                appConfig.setCameraRecoveryEnabled(isChecked);
+                syncAutomationAfterSettingsChange(ctx);
+                Toast.makeText(ctx, isChecked ? "已开启摄像头掉线有门槛前台恢复" : "已关闭摄像头掉线前台拉起恢复", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (rdPopupSwitch != null) {
+            boolean enabled = appConfig.isRdShiftAutoPopupEnabled();
+            rdPopupSwitch.setChecked(enabled);
+            if (rdSecondsLayout != null) {
+                rdSecondsLayout.setVisibility(enabled ? View.VISIBLE : View.GONE);
+            }
+            rdPopupSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                appConfig.setRdShiftAutoPopupEnabled(isChecked);
+                if (rdSecondsLayout != null) {
+                    rdSecondsLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
+                }
+                syncAutomationAfterSettingsChange(ctx);
+                Toast.makeText(ctx, isChecked ? "已开启 R/D 换挡自动弹出记录仪" : "已关闭 R/D 换挡自动弹出", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        if (rdSecondsSpinner != null) {
+            ArrayAdapter<String> adapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, RD_POPUP_SECONDS_LABELS);
+            adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+            rdSecondsSpinner.setAdapter(adapter);
+            int savedSeconds = appConfig.getRdShiftPopupSeconds();
+            int initialIdx = 1;
+            for (int i = 0; i < RD_POPUP_SECONDS_VALUES.length; i++) {
+                if (RD_POPUP_SECONDS_VALUES[i] == savedSeconds) {
+                    initialIdx = i;
+                    break;
+                }
+            }
+            rdSecondsSpinner.setSelection(initialIdx);
+            final boolean[] init = {true};
+            rdSecondsSpinner.post(() -> init[0] = false);
+            rdSecondsSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+                @Override
+                public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                    if (init[0]) return;
+                    int nextSeconds = RD_POPUP_SECONDS_VALUES[position];
+                    if (nextSeconds != appConfig.getRdShiftPopupSeconds()) {
+                        appConfig.setRdShiftPopupSeconds(nextSeconds);
+                        syncAutomationAfterSettingsChange(ctx);
+                        Toast.makeText(ctx, "R/D 弹出自动退后台时间已设为 " + nextSeconds + " 秒", Toast.LENGTH_SHORT).show();
+                    }
+                }
+
+                @Override
+                public void onNothingSelected(AdapterView<?> parent) {
+                }
+            });
+        }
+
+        Button btnAddRule = root.findViewById(R.id.btn_add_vehicle_rule);
+        if (btnAddRule != null) {
+            btnAddRule.setOnClickListener(v -> showVehicleRuleEditorDialog(null));
+        }
+
+        Button btnResetDefault = root.findViewById(R.id.btn_reset_default_rules);
+        if (btnResetDefault != null) {
+            btnResetDefault.setOnClickListener(v -> {
+                appConfig.resetVehicleTriggerRulesToDefault();
+                refreshVehicleRulesList();
+                syncAutomationAfterSettingsChange(ctx);
+                Toast.makeText(ctx, "已恢复 SC 默认 2 条触发规则", Toast.LENGTH_SHORT).show();
+            });
+        }
+
+        Button btnOpenPreset = root.findViewById(R.id.btn_open_signal_preset);
+        if (btnOpenPreset != null) {
+            btnOpenPreset.setOnClickListener(v ->
+                    SettingsFragment.navigateToCategory(this, SettingsCatalog.ID_SIGNAL_PRESET));
+        }
+
+        refreshVehicleRulesList();
+    }
+
+    private void syncAutomationAfterSettingsChange(@NonNull Context ctx) {
+        com.kooo.evcam.lifecycle.BackgroundCapabilityController.syncBackgroundKeepAlive(ctx);
+        VehicleAutomationCoordinator.getInstance().startOrReload(ctx);
+        if (com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(ctx)
+                && com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(ctx)) {
+            CameraForegroundService.start(ctx, "EVCam", "车辆信号与录制保护运行中");
+        }
+    }
+
+    private void refreshVehicleRulesList() {
+        Context ctx = getContext();
+        if (ctx == null || rulesListContainer == null || appConfig == null) return;
+        rulesListContainer.removeAllViews();
+
+        List<VehicleTriggerRule> rules = appConfig.getVehicleTriggerRules();
+        if (rules.isEmpty()) {
+            TextView empty = new TextView(ctx);
+            empty.setText("当前暂无触发规则，点击「+ 添加规则」或「恢复默认 2 条」添加。");
+            empty.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+            empty.setTextSize(14f);
+            rulesListContainer.addView(empty);
+            return;
+        }
+
+        float density = getResources().getDisplayMetrics().density;
+        int pad = (int) (12 * density);
+        int gap = (int) (10 * density);
+
+        for (int i = 0; i < rules.size(); i++) {
+            final int index = i;
+            final VehicleTriggerRule rule = rules.get(i);
+
+            LinearLayout card = new LinearLayout(ctx);
+            card.setOrientation(LinearLayout.VERTICAL);
+            card.setBackgroundResource(R.drawable.ui_card);
+            card.setPadding(pad, pad, pad, pad);
+            LinearLayout.LayoutParams cardLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            if (i < rules.size() - 1) {
+                cardLp.bottomMargin = gap;
+            }
+            card.setLayoutParams(cardLp);
+
+            LinearLayout headerRow = new LinearLayout(ctx);
+            headerRow.setOrientation(LinearLayout.HORIZONTAL);
+            headerRow.setGravity(android.view.Gravity.CENTER_VERTICAL);
+
+            TextView title = new TextView(ctx);
+            title.setText(rule.getDisplayName());
+            title.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+            title.setTextSize(16f);
+            title.setLayoutParams(new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+            headerRow.addView(title);
+
+            SwitchMaterial enableSwitch = new SwitchMaterial(ctx);
+            enableSwitch.setChecked(rule.enabled);
+            enableSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                List<VehicleTriggerRule> updated = new ArrayList<>(appConfig.getVehicleTriggerRules());
+                if (index < updated.size()) {
+                    updated.set(index, rule.withEnabled(isChecked));
+                    appConfig.setVehicleTriggerRules(updated);
+                    syncAutomationAfterSettingsChange(ctx);
+                }
+            });
+            headerRow.addView(enableSwitch);
+            card.addView(headerRow);
+
+            TextView detail = new TextView(ctx);
+            detail.setText("条件：" + rule.getConditionsSummary() + "\n动作：" + rule.action.label);
+            detail.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+            detail.setTextSize(13.5f);
+            LinearLayout.LayoutParams detailLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            detailLp.topMargin = (int) (4 * density);
+            detail.setLayoutParams(detailLp);
+            card.addView(detail);
+
+            LinearLayout actionRow = new LinearLayout(ctx);
+            actionRow.setOrientation(LinearLayout.HORIZONTAL);
+            LinearLayout.LayoutParams actionLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            actionLp.topMargin = (int) (8 * density);
+            actionRow.setLayoutParams(actionLp);
+
+            int btnBg = ContextCompat.getColor(ctx, R.color.button_background);
+            int btnText = ContextCompat.getColor(ctx, R.color.button_text);
+
+            Button btnEdit = new Button(ctx);
+            btnEdit.setText("编辑");
+            btnEdit.setAllCaps(false);
+            btnEdit.setBackgroundTintList(android.content.res.ColorStateList.valueOf(btnBg));
+            btnEdit.setTextColor(btnText);
+            btnEdit.setOnClickListener(v -> showVehicleRuleEditorDialog(rule));
+            actionRow.addView(btnEdit);
+
+            Button btnDelete = new Button(ctx);
+            btnDelete.setText("删除");
+            btnDelete.setAllCaps(false);
+            btnDelete.setBackgroundTintList(android.content.res.ColorStateList.valueOf(btnBg));
+            btnDelete.setTextColor(btnText);
+            LinearLayout.LayoutParams delLp = new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+            delLp.setMarginStart((int) (8 * density));
+            btnDelete.setLayoutParams(delLp);
+            btnDelete.setOnClickListener(v -> {
+                List<VehicleTriggerRule> updated = new ArrayList<>(appConfig.getVehicleTriggerRules());
+                if (index < updated.size()) {
+                    updated.remove(index);
+                    appConfig.setVehicleTriggerRules(updated);
+                    refreshVehicleRulesList();
+                    syncAutomationAfterSettingsChange(ctx);
+                }
+            });
+            actionRow.addView(btnDelete);
+
+            card.addView(actionRow);
+            rulesListContainer.addView(card);
+        }
+    }
+
+    private void showVehicleRuleEditorDialog(@Nullable VehicleTriggerRule existing) {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        int pad = (int) (16 * density);
+
+        android.widget.ScrollView scroll = new android.widget.ScrollView(ctx);
+        LinearLayout form = new LinearLayout(ctx);
+        form.setOrientation(LinearLayout.VERTICAL);
+        form.setPadding(pad, pad, pad, pad);
+        scroll.addView(form);
+
+        EditText etName = addRuleField(ctx, form, "规则名称（选填）", existing != null ? existing.name : "", android.text.InputType.TYPE_CLASS_TEXT);
+
+        VehicleRuleSignal[] signals = VehicleRuleSignal.values();
+        RuleComparison[] comps = RuleComparison.values();
+        RuleAction[] actions = RuleAction.values();
+        ConditionLogic[] logics = ConditionLogic.values();
+
+        String[] signalLabels = new String[signals.length];
+        for (int i = 0; i < signals.length; i++) signalLabels[i] = signals[i].label;
+        String[] compLabels = new String[comps.length];
+        for (int i = 0; i < comps.length; i++) compLabels[i] = comps[i].symbol + " (" + comps[i].label + ")";
+        String[] actionLabels = new String[actions.length];
+        for (int i = 0; i < actions.length; i++) actionLabels[i] = actions[i].label;
+        String[] logicLabels = new String[logics.length];
+        for (int i = 0; i < logics.length; i++) logicLabels[i] = logics[i].label;
+
+        Spinner spSignal1 = addRuleSpinner(ctx, form, "主条件信号", signalLabels);
+        TextView tvHint1 = new TextView(ctx);
+        tvHint1.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+        tvHint1.setTextSize(12.5f);
+        form.addView(tvHint1);
+        Spinner spComp1 = addRuleSpinner(ctx, form, "主条件运算符", compLabels);
+        EditText etVal1 = addRuleField(ctx, form, "主条件目标值（整数）",
+                existing != null ? String.valueOf(existing.primaryCondition.expectedValue) : "4",
+                android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
+
+        if (existing != null) {
+            spSignal1.setSelection(existing.primaryCondition.signal.ordinal());
+            spComp1.setSelection(existing.primaryCondition.comparison.ordinal());
+        }
+        tvHint1.setText("取值说明：" + signals[spSignal1.getSelectedItemPosition()].valueHint);
+        spSignal1.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                tvHint1.setText("取值说明：" + signals[position].valueHint);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+
+        android.widget.CheckBox cbSecond = new android.widget.CheckBox(ctx);
+        cbSecond.setText("启用第二个组合条件");
+        cbSecond.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+        boolean hasSecond = existing != null && !existing.additionalConditions.isEmpty();
+        cbSecond.setChecked(hasSecond);
+        form.addView(cbSecond);
+
+        LinearLayout secondContainer = new LinearLayout(ctx);
+        secondContainer.setOrientation(LinearLayout.VERTICAL);
+        secondContainer.setVisibility(hasSecond ? View.VISIBLE : View.GONE);
+        form.addView(secondContainer);
+
+        Spinner spLogic = addRuleSpinner(ctx, secondContainer, "组合逻辑", logicLabels);
+        Spinner spSignal2 = addRuleSpinner(ctx, secondContainer, "第二条件信号", signalLabels);
+        TextView tvHint2 = new TextView(ctx);
+        tvHint2.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+        tvHint2.setTextSize(12.5f);
+        secondContainer.addView(tvHint2);
+        Spinner spComp2 = addRuleSpinner(ctx, secondContainer, "第二条件运算符", compLabels);
+        EditText etVal2 = addRuleField(ctx, secondContainer, "第二条件目标值（整数）",
+                hasSecond ? String.valueOf(existing.additionalConditions.get(0).expectedValue) : "0",
+                android.text.InputType.TYPE_CLASS_NUMBER | android.text.InputType.TYPE_NUMBER_FLAG_SIGNED);
+
+        if (existing != null) {
+            spLogic.setSelection(existing.conditionLogic.ordinal());
+        }
+        if (hasSecond) {
+            VehicleRuleCondition second = existing.additionalConditions.get(0);
+            spSignal2.setSelection(second.signal.ordinal());
+            spComp2.setSelection(second.comparison.ordinal());
+        }
+        tvHint2.setText("取值说明：" + signals[spSignal2.getSelectedItemPosition()].valueHint);
+        spSignal2.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                tvHint2.setText("取值说明：" + signals[position].valueHint);
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        cbSecond.setOnCheckedChangeListener((buttonView, isChecked) ->
+                secondContainer.setVisibility(isChecked ? View.VISIBLE : View.GONE));
+
+        EditText etDelay = addRuleField(ctx, form, "持续满足延迟秒数（0 表示立即触发）",
+                existing != null ? String.valueOf(existing.delaySeconds) : "0",
+                android.text.InputType.TYPE_CLASS_NUMBER);
+        Spinner spAction = addRuleSpinner(ctx, form, "触发动作", actionLabels);
+        if (existing != null) {
+            spAction.setSelection(existing.action.ordinal());
+        }
+
+        androidx.appcompat.app.AlertDialog dialog = new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle(existing == null ? "添加车辆触发规则" : "编辑车辆触发规则")
+                .setView(scroll)
+                .setPositiveButton("保存", null)
+                .setNegativeButton("取消", null)
+                .create();
+        dialog.show();
+
+        dialog.getButton(android.content.DialogInterface.BUTTON_POSITIVE).setOnClickListener(v -> {
+            int val1;
+            int val2 = 0;
+            int delay;
+            try {
+                val1 = Integer.parseInt(etVal1.getText().toString().trim());
+                if (cbSecond.isChecked()) {
+                    val2 = Integer.parseInt(etVal2.getText().toString().trim());
+                }
+                delay = Math.max(0, Integer.parseInt(etDelay.getText().toString().trim()));
+            } catch (NumberFormatException e) {
+                Toast.makeText(ctx, "目标值与延迟秒数必须为有效整数", Toast.LENGTH_SHORT).show();
+                return;
+            }
+
+            VehicleRuleCondition primary = new VehicleRuleCondition(
+                    signals[spSignal1.getSelectedItemPosition()],
+                    comps[spComp1.getSelectedItemPosition()],
+                    val1
+            );
+            List<VehicleRuleCondition> extras = new ArrayList<>();
+            if (cbSecond.isChecked()) {
+                extras.add(new VehicleRuleCondition(
+                        signals[spSignal2.getSelectedItemPosition()],
+                        comps[spComp2.getSelectedItemPosition()],
+                        val2
+                ));
+            }
+            VehicleTriggerRule nextRule = new VehicleTriggerRule(
+                    existing != null ? existing.id : VehicleTriggerRule.generateId(),
+                    etName.getText().toString().trim(),
+                    existing == null || existing.enabled,
+                    primary,
+                    extras,
+                    logics[spLogic.getSelectedItemPosition()],
+                    delay,
+                    actions[spAction.getSelectedItemPosition()]
+            );
+
+            List<VehicleTriggerRule> all = new ArrayList<>(appConfig.getVehicleTriggerRules());
+            if (existing == null) {
+                all.add(nextRule);
+            } else {
+                boolean replaced = false;
+                for (int i = 0; i < all.size(); i++) {
+                    if (all.get(i).id.equals(existing.id)) {
+                        all.set(i, nextRule);
+                        replaced = true;
+                        break;
+                    }
+                }
+                if (!replaced) all.add(nextRule);
+            }
+            appConfig.setVehicleTriggerRules(all);
+            refreshVehicleRulesList();
+            syncAutomationAfterSettingsChange(ctx);
+            dialog.dismiss();
+        });
+    }
+
+    private EditText addRuleField(@NonNull Context ctx, @NonNull LinearLayout parent,
+                                  @NonNull String label, @NonNull String initialValue, int inputType) {
+        TextView tv = new TextView(ctx);
+        tv.setText(label);
+        tv.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+        tv.setTextSize(13f);
+        parent.addView(tv);
+
+        EditText et = new EditText(ctx);
+        et.setInputType(inputType);
+        et.setText(initialValue);
+        et.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
+        parent.addView(et);
+        return et;
+    }
+
+    private Spinner addRuleSpinner(@NonNull Context ctx, @NonNull LinearLayout parent,
+                                   @NonNull String label, @NonNull String[] items) {
+        TextView tv = new TextView(ctx);
+        tv.setText(label);
+        tv.setTextColor(ContextCompat.getColor(ctx, R.color.text_secondary));
+        tv.setTextSize(13f);
+        parent.addView(tv);
+
+        Spinner spinner = new Spinner(ctx);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(ctx, R.layout.spinner_item, items);
+        adapter.setDropDownViewResource(R.layout.spinner_dropdown_item);
+        spinner.setAdapter(adapter);
+        parent.addView(spinner);
+        return spinner;
     }
 
     private String formatPercent(int value) {

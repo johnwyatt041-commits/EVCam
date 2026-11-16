@@ -60,9 +60,9 @@ public class SettingsCatalogAndAppearanceTest {
     }
 
     @Test
-    public void catalogShowsOnlySevenImplementedEntriesWithoutShellsOrExcludedCategories() {
+    public void catalogShowsOnlyImplementedEntriesWithoutShellsOrExcludedCategories() {
         List<SettingsCatalog.Entry> entries = SettingsCatalog.getImplementedEntries();
-        assertEquals(7, entries.size());
+        assertEquals(8, entries.size());
 
         List<String> actualTitles = new ArrayList<>();
         List<String> actualDisplayTitles = new ArrayList<>();
@@ -83,6 +83,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "1. 外观与交互",
                 "3. 记录仪",
                 "5. 补盲",
+                "10. 信号预设与匹配",
                 "11. 飞书远程",
                 "13. 系统与权限",
                 "14. 软件更新",
@@ -93,6 +94,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "外观与交互",
                 "记录仪",
                 "补盲",
+                "信号预设与匹配",
                 "飞书远程",
                 "系统与权限",
                 "软件更新",
@@ -188,5 +190,45 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals("仅沉浸全屏显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_AUTO));
         assertEquals("始终显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_ALWAYS));
         assertEquals("隐藏", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_HIDDEN));
+    }
+
+    @Test
+    public void t06AutomationAndSignalPresetConfigPersistAndNormalize() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertFalse(config.isKeepCameraConnectedEnabled());
+        config.setKeepCameraConnectedEnabled(true);
+        assertTrue(config.isKeepCameraConnectedEnabled());
+
+        assertFalse(config.isCameraRecoveryEnabled());
+        config.setCameraRecoveryEnabled(true);
+        assertTrue(config.isCameraRecoveryEnabled());
+
+        assertFalse(config.isRdShiftAutoPopupEnabled());
+        config.setRdShiftAutoPopupEnabled(true);
+        assertTrue(config.isRdShiftAutoPopupEnabled());
+
+        assertEquals(5, config.getRdShiftPopupSeconds());
+        config.setRdShiftPopupSeconds(15);
+        assertEquals(15, config.getRdShiftPopupSeconds());
+        config.setRdShiftPopupSeconds(77);
+        assertEquals(5, config.getRdShiftPopupSeconds());
+
+        assertEquals(2, config.getVehicleTriggerRules().size());
+        assertTrue(config.hasActiveVehicleTriggerRules());
+        config.setVehicleTriggerRules(java.util.Collections.emptyList());
+        assertTrue(config.getVehicleTriggerRules().isEmpty());
+        assertFalse(config.hasActiveVehicleTriggerRules());
+        config.resetVehicleTriggerRulesToDefault();
+        assertEquals(2, config.getVehicleTriggerRules().size());
+
+        config.setCustomVhalPropertyIds(0x21400400, 0x21400401, 0x21600207, 0x26200b00, 0x21400408);
+        assertEquals(0x21400400, config.getCustomGearSelectionPropId());
+        assertEquals(com.kooo.evcam.vehicle.VehicleSignalCategory.GEAR,
+                com.kooo.evcam.vehicle.VehicleSignalCategory.classifyPropertyId(0x21400400));
+        config.resetCustomVhalPropertyIds();
+        assertEquals(com.kooo.evcam.vehicle.VehicleSignalCategory.PROP_GEAR_SELECTION,
+                config.getCustomGearSelectionPropId());
     }
 }

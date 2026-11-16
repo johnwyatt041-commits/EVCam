@@ -2664,6 +2664,21 @@ public class MultiCameraManager {
     }
 
     /**
+     * 检查是否存在有活跃输出但尚未连接的摄像头（只读查询，不主动重连）。
+     */
+    public boolean hasDisconnectedActiveCamera() {
+        if (repairSuppressed) {
+            return false;
+        }
+        for (SingleCamera camera : cameras.values()) {
+            if (camera.hasActiveOutputs() && !camera.isConnected()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
      * 强制重新打开所有摄像头（用于从后台返回前台时）
      */
     public void forceReopenAllCameras() {

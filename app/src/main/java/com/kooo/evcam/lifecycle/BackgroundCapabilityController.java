@@ -52,7 +52,11 @@ public final class BackgroundCapabilityController {
         boolean floatingRunning = FloatingWindowService.isRunning();
         boolean blindSpotRunning = BlindSpotService.hasActiveCameraWindows()
                 || (BlindSpotService.isServiceRunning() && AppLifecycleState.isUiExited(context));
-        return remoteRunning || floatingRunning || blindSpotRunning;
+        com.kooo.evcam.AppConfig appConfig = new com.kooo.evcam.AppConfig(context);
+        boolean vehicleAutomationActive = appConfig.isKeepCameraConnectedEnabled()
+                || appConfig.isRdShiftAutoPopupEnabled()
+                || appConfig.hasActiveVehicleTriggerRules();
+        return remoteRunning || floatingRunning || blindSpotRunning || vehicleAutomationActive;
     }
 
     /**
