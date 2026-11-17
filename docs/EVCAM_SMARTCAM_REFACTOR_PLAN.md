@@ -1,7 +1,7 @@
 # EVCam 融合 Smartcam V3.0.56 重构蓝图与多轮接力总规
 
-- 创建/更新时间：`2026-11-16 23:24:00 +08:00`（Asia/Hong_Kong）
-- 代码基线：`codex/e5-recording-startup-fix` / `1.6.6-test-11162313`（`build10` 已打包并推送 GitHub，包含 `T01`–`T08`，**未实车测试**；下一会话准备启动 `T09`）
+- 创建/更新时间：`2026-11-17 16:16:18 +08:00`（Asia/Hong_Kong）
+- 代码基线：`codex/e5-recording-startup-fix` / **`build13`（`1.6.6-test-11171608`，`versionCode = 82`，源码 `8ef5b36`，Tag `v1.6.6-test-11171608-build13`）**，在 `build12`（`T01`–`T10`）基础上清零全部 18 项历史 Lint（双风味 `0 errors`）并加固 3 处 `MainActivity` 接收器，已打包并推送 GitHub Pre-release，**仍未实车测试**（详见 [验收与Lint任务](tasks/build12-e5-acceptance-and-lint-cleanup.md)）
 - 对标分析对象：`Smartcam-V3.0.56_11_14_15_39.apk`（全功能清单见 [SMARTCAM_FEATURE_CATALOG.md](SMARTCAM_FEATURE_CATALOG.md)，3.0.56 差异见 [SMARTCAM_V3.0.56_DIFF.md](SMARTCAM_V3.0.56_DIFF.md)）
 - 目标硬件：吉利银河 E5（`2560×1600`，LongYing-1 SoC）；不再引入通用“屏幕尺寸设置”。
 
