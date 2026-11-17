@@ -1,8 +1,10 @@
 package com.kooo.evcam;
 
-import android.app.Activity;
 import android.content.Intent;
 import android.os.Bundle;
+
+import androidx.activity.ComponentActivity;
+import androidx.activity.OnBackPressedCallback;
 
 /**
  * 透明启动 Activity
@@ -13,12 +15,18 @@ import android.os.Bundle;
  * 2. 启动后立即初始化服务并 finish
  * 3. 不会在最近任务中显示
  */
-public class TransparentBootActivity extends Activity {
+public class TransparentBootActivity extends ComponentActivity {
     private static final String TAG = "TransparentBootActivity";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                finish();
+            }
+        });
         if (!com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
             AppLog.d(TAG, "user_exited=true，跳过透明开机启动 Activity");
             finish();
@@ -90,11 +98,5 @@ public class TransparentBootActivity extends Activity {
         } else {
             AppLog.d(TAG, "无需启动 MainActivity（自动录制未启用），仅保持后台运行");
         }
-    }
-    
-    @Override
-    public void onBackPressed() {
-        // 禁用返回键
-        finish();
     }
 }

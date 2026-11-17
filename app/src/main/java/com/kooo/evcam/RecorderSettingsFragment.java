@@ -644,11 +644,9 @@ public class RecorderSettingsFragment extends Fragment {
                     buttonSizeValueText.setText(size + "dp");
 
                     // 实时发送广播更新悬浮按钮大小
-                    if (getContext() != null) {
-                        Intent intent = new Intent(com.kooo.evcam.service.RecordingFloatingService.ACTION_UPDATE_SIZE);
-                        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_BUTTON_SIZE, size);
-                        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_TEXT_SIZE, -1);
-                        getContext().sendBroadcast(intent);
+                    Context ctx = getContext();
+                    if (ctx != null) {
+                        sendRecordingFloatingSizeBroadcast(ctx, size, -1);
                     }
                 }
 
@@ -670,11 +668,9 @@ public class RecorderSettingsFragment extends Fragment {
                     textSizeValueText.setText(size + "sp");
 
                     // 实时发送广播更新文字大小
-                    if (getContext() != null) {
-                        Intent intent = new Intent(com.kooo.evcam.service.RecordingFloatingService.ACTION_UPDATE_SIZE);
-                        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_BUTTON_SIZE, -1);
-                        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_TEXT_SIZE, size);
-                        getContext().sendBroadcast(intent);
+                    Context ctx = getContext();
+                    if (ctx != null) {
+                        sendRecordingFloatingSizeBroadcast(ctx, -1, size);
                     }
                 }
 
@@ -730,6 +726,14 @@ public class RecorderSettingsFragment extends Fragment {
 
             Toast.makeText(getContext(), isChecked ? "录制悬浮按钮已开启" : "录制悬浮按钮已关闭", Toast.LENGTH_SHORT).show();
         });
+    }
+
+    static void sendRecordingFloatingSizeBroadcast(@NonNull Context context, int buttonSize, int textSize) {
+        Intent intent = new Intent(com.kooo.evcam.service.RecordingFloatingService.ACTION_UPDATE_SIZE);
+        intent.setPackage(context.getPackageName());
+        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_BUTTON_SIZE, buttonSize);
+        intent.putExtra(com.kooo.evcam.service.RecordingFloatingService.EXTRA_TEXT_SIZE, textSize);
+        context.sendBroadcast(intent);
     }
 
     /**

@@ -1,6 +1,5 @@
 package com.kooo.evcam.transfer;
 
-import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -20,6 +19,8 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.ComponentDialog;
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -39,7 +40,7 @@ import java.util.Map;
  * QR code & URL controller dialog backed by {@link LanShareService}.
  * Closing the dialog leaves the service alive for background downloads until the 60s idle timeout.
  */
-public class QrTransferDialog extends Dialog implements LanShareService.StateListener {
+public class QrTransferDialog extends ComponentDialog implements LanShareService.StateListener {
 
     private static final String TAG = "QrTransferDialog";
 
@@ -98,6 +99,12 @@ public class QrTransferDialog extends Dialog implements LanShareService.StateLis
         super.onCreate(savedInstanceState);
         setCancelable(false);
         setCanceledOnTouchOutside(false);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                showLeaveConfirmationDialog();
+            }
+        });
 
         setContentView(R.layout.dialog_qr_transfer_v2);
         initViews();
@@ -333,8 +340,7 @@ public class QrTransferDialog extends Dialog implements LanShareService.StateLis
         super.onStop();
     }
 
-    @Override
-    public void onBackPressed() {
+    private void showLeaveConfirmationDialog() {
         new MaterialAlertDialogBuilder(getContext(), R.style.Theme_Cam_MaterialAlertDialog)
                 .setTitle("离开分享窗口")
                 .setMessage("离开弹窗后手机仍可在后台继续浏览或下载（60 秒无人访问自动关闭）；若需立即断开，请选“停止分享”。")

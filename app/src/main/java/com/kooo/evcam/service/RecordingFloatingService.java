@@ -13,7 +13,6 @@ import android.graphics.Paint;
 import android.graphics.PixelFormat;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Binder;
-import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -28,6 +27,7 @@ import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
@@ -166,12 +166,7 @@ public class RecordingFloatingService extends Service {
         };
 
         IntentFilter filter = new IntentFilter(ACTION_UPDATE_SIZE);
-        // Android 14+ 需要指定 RECEIVER_NOT_EXPORTED
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            registerReceiver(sizeUpdateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(sizeUpdateReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, sizeUpdateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
     
     private void registerRecordingStateReceiver() {
@@ -192,12 +187,7 @@ public class RecordingFloatingService extends Service {
         IntentFilter filter = new IntentFilter();
         filter.addAction("com.kooo.evcam.RECORDING_STATE_CHANGED");
         filter.addAction("com.kooo.evcam.action.RECORDING_STATE_CHANGED");
-        // Android 14+ 需要指定 RECEIVER_NOT_EXPORTED
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            registerReceiver(recordingStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(recordingStateReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, recordingStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
 
     private void updateFloatingSize(int buttonSizeDp, int textSizeSp) {

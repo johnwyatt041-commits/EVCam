@@ -8,7 +8,6 @@ import android.content.IntentFilter;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
@@ -19,6 +18,7 @@ import android.view.View;
 import android.view.WindowManager;
 
 import androidx.annotation.Nullable;
+import androidx.core.content.ContextCompat;
 
 import com.kooo.evcam.ui.OverlayWindowParamsFactory;
 
@@ -282,11 +282,7 @@ public class FloatingWindowService extends Service {
         };
         
         IntentFilter filter = new IntentFilter(ACTION_RECORDING_STATE_CHANGED);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(recordingStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(recordingStateReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, recordingStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
     
     /**
@@ -304,11 +300,7 @@ public class FloatingWindowService extends Service {
         };
         
         IntentFilter filter = new IntentFilter(ACTION_UPDATE_FLOATING_WINDOW);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(updateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(updateReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, updateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
     
     /**
@@ -330,11 +322,7 @@ public class FloatingWindowService extends Service {
         };
         
         IntentFilter filter = new IntentFilter(ACTION_APP_FOREGROUND_STATE);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            registerReceiver(foregroundStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
-        } else {
-            registerReceiver(foregroundStateReceiver, filter);
-        }
+        ContextCompat.registerReceiver(this, foregroundStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
     
     /**

@@ -2,7 +2,6 @@ package com.kooo.evcam;
 
 import android.content.Context;
 import android.graphics.PixelFormat;
-import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.util.Size;
@@ -52,20 +51,7 @@ public class MainFloatingWindowView extends FrameLayout {
     private boolean isDragEnabled = false; // 长按后才允许拖动
     private static final long LONG_PRESS_DURATION = 1000; // 长按1秒后才能拖动
     private static final int TOUCH_SLOP = 20; // 移动超过此距离取消长按检测
-    private final Runnable longPressRunnable = () -> {
-        isDragEnabled = true;
-        // 触发轻微震动反馈，提示用户可以拖动了
-        try {
-            android.os.Vibrator vibrator = (android.os.Vibrator) getContext().getSystemService(Context.VIBRATOR_SERVICE);
-            if (vibrator != null && vibrator.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator.vibrate(android.os.VibrationEffect.createOneShot(50, android.os.VibrationEffect.DEFAULT_AMPLITUDE));
-                } else {
-                    vibrator.vibrate(50);
-                }
-            }
-        } catch (Exception ignored) {}
-    };
+    private final Runnable longPressRunnable = () -> isDragEnabled = true;
 
     private BlindSpotStatusBarView statusBar;
     private TurnSignalArrowView turnSignalArrowView;

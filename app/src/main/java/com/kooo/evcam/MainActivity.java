@@ -18,6 +18,7 @@ import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
@@ -282,13 +283,19 @@ public class MainActivity extends AppCompatActivity implements
         uiShell.bind(
                 this::navigateToSection,
                 this::showExitConfirmationDialog,
-                this::onBackPressed,
+                this::handleBackNavigation,
                 () -> {
                     com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
                     setMainPreviewEnabled(!appConfig.isMainPreviewEnabled());
                 },
                 previewEditor::begin);
         uiShell.bindRecordToggle(this::toggleRecording);
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                handleBackNavigation();
+            }
+        });
         initPreviewModeController();
         uiShell.setPreviewEnabled(appConfig.isMainPreviewEnabled());
         uiTheme.syncSystemBarsAndTree();
@@ -892,7 +899,7 @@ public class MainActivity extends AppCompatActivity implements
                         if (uiShell != null && uiShell.isFullscreenPreview()) {
                             uiShell.setFullscreenPreview(false);
                         } else {
-                            onBackPressed();
+                            handleBackNavigation();
                         }
                     }
 
@@ -3313,7 +3320,7 @@ public class MainActivity extends AppCompatActivity implements
         android.content.IntentFilter filter = new android.content.IntentFilter();
         filter.addAction(android.content.Intent.ACTION_SCREEN_OFF);
         filter.addAction(android.content.Intent.ACTION_SCREEN_ON);
-        registerReceiver(screenStateReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, screenStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         
         AppLog.d(TAG, "息屏状态广播接收器已注册");
         
@@ -3345,7 +3352,7 @@ public class MainActivity extends AppCompatActivity implements
         
         android.content.IntentFilter filter = new android.content.IntentFilter();
         filter.addAction("com.kooo.evcam.action.TOGGLE_RECORDING");
-        registerReceiver(toggleRecordingReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, toggleRecordingReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         
         AppLog.d(TAG, "录制切换广播接收器已注册");
     }
@@ -3370,7 +3377,7 @@ public class MainActivity extends AppCompatActivity implements
         
         android.content.IntentFilter filter = new android.content.IntentFilter();
         filter.addAction(WakeUpHelper.ACTION_MOVE_TO_BACKGROUND);
-        registerReceiver(backgroundCommandReceiver, filter, android.content.Context.RECEIVER_NOT_EXPORTED);
+        ContextCompat.registerReceiver(this, backgroundCommandReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         
         AppLog.d(TAG, "后台切换广播接收器已注册");
     }
@@ -4535,32 +4542,65 @@ public class MainActivity extends AppCompatActivity implements
         });
     }
 
-    @Override
-    public void onBackPressed() {
-        if (previewEditor != null && previewEditor.isEditing()) {
-            previewEditor.finish(false);
-            return;
-        }
-        if (uiShell != null && uiShell.isFullscreenPreview()) {
-            uiShell.setFullscreenPreview(false);
-            return;
-        }
-        androidx.fragment.app.Fragment current = getSupportFragmentManager().findFragmentById(R.id.fragment_container);
-        if (current instanceof SettingsFragment && ((SettingsFragment) current).handleBackPressed()) {
-            return;
-        }
-        if (getSupportFragmentManager().getBackStackEntryCount() > 0) {
-            // 如果 Fragment 返回栈不为空（在二级菜单中），则返回上一级
-            getSupportFragmentManager().popBackStack();
+    private void handleBackNavigation() {
+        com.kooo.evcam.ui.MainBackNavigationRouter.Action action =
+                com.kooo.evcam.ui.MainBackNavigationRouter.dispatch(new com.kooo.evcam.ui.MainBackNavigationRouter.Host() {
+                    @Override
+                    public boolean isLayoutEditing() {
+                        return previewEditor != null && previewEditor.isEditing();
+                    }
+
+                    @Override
+                    public void finishLayoutEditing() {
+                        previewEditor.finish(false);
+                    }
+
+                    @Override
+                    public boolean isFullscreenPreview() {
+                        return uiShell != null && uiShell.isFullscreenPreview();
+                    }
+
+                    @Override
+                    public void exitFullscreenPreview() {
+                        uiShell.setFullscreenPreview(false);
+                    }
+
+                    @Override
+                    public boolean handleSettingsSubPageBack() {
+                        Fragment current = getSupportFragmentManager().findFragmentById(R.id.fragment_container);
+                        return current instanceof SettingsFragment && ((SettingsFragment) current).handleBackPressed();
+                    }
+
+                    @Override
+                    public int getFragmentBackStackEntryCount() {
+                        return getSupportFragmentManager().getBackStackEntryCount();
+                    }
+
+                    @Override
+                    public void popFragmentBackStack() {
+                        getSupportFragmentManager().popBackStack();
+                    }
+
+                    @Override
+                    public boolean isFragmentContainerVisible() {
+                        return fragmentContainer != null && fragmentContainer.getVisibility() == View.VISIBLE;
+                    }
+
+                    @Override
+                    public void returnToRecordingInterface() {
+                        goToRecordingInterface();
+                    }
+
+                    @Override
+                    public void moveToBackground() {
+                        com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
+                    }
+                });
+        if (action == com.kooo.evcam.ui.MainBackNavigationRouter.Action.POP_FRAGMENT_BACK_STACK) {
             AppLog.d(TAG, "Popped fragment back stack, returning to previous screen");
-        } else if (fragmentContainer != null && fragmentContainer.getVisibility() == View.VISIBLE) {
-            // 如果当前在非录制界面（Fragment界面），先返回录制界面
-            goToRecordingInterface();
+        } else if (action == com.kooo.evcam.ui.MainBackNavigationRouter.Action.RETURN_TO_RECORDING) {
             AppLog.d(TAG, "Returned to recording interface via back button");
-        } else {
-            // 在录制界面，按返回键将应用移到后台，而不是关闭Activity
-            // 这样下次打开应用时能快速恢复，无需重新创建Activity
-            com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
+        } else if (action == com.kooo.evcam.ui.MainBackNavigationRouter.Action.MOVE_TO_BACKGROUND) {
             AppLog.d(TAG, "Moved to background via back button");
         }
     }
