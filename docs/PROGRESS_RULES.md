@@ -8,7 +8,7 @@
 
 ## 必须执行
 
-1. 开始任务先读 `AGENTS.md`、`STATUS.md`、`REQUIREMENTS.md`、`COLLABORATION.md`，核对 Git、任务登记和本任务相关的坑。
+1. 开始任务先读 `AGENTS.md`、`START_HERE.md`、`docs/STATUS.md` 及本任务 `docs/tasks/<task-id>.md`；核对 Git 与 `work/ACTIVE_TASKS.md`，并按模块需要查阅 `REQUIREMENTS.md`、`COLLABORATION.md`、`PITFALLS.md`。
 2. 每次有效改动或重要发现后，及时更新本任务进度，不能等聊天结束后凭记忆补写。长任务在阶段切换前同步一次。
 3. **每次执行结束都必须核对并更新任务文档；未同步文档，不得宣告完成、交付或移交。** 只读且无新发现时，只覆盖“最后核对时间/结论”，不追加空日志。
 4. 提交代码时，同一提交应包含相应任务进度；验证/应用发布在提交之后完成的，用后续文档提交补齐结果。应用源码提交与文档提交分清。文档自身常规提交/推送以Git为准，不为写回自身哈希或状态循环提交；同步失败等重要异常仍需记录。

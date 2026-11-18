@@ -8,7 +8,7 @@
 - **目标样本**：`work/reference-apks/Smartcam-V3.0.40_11_04_02_02.apk`（`com.yuan.smartcam`，`versionName="3.0.40"`，`versionCode=2`，`minSdk=28`，`targetSdk=37`，单 `classes.dex` 含 5601 个类、4 个 `.so`）。
 - **主交付文档**：[SMARTCAM_FEATURE_CATALOG.md](../SMARTCAM_FEATURE_CATALOG.md)，覆盖全 15 类功能实现机制、快速索引（§16），以及 **Smartcam 与当前 EVCam A/B 的内存结构及优劣对照（§17）**：核明 Smartcam 强在双进程可仅留 `:core`、R8 单 DEX（`6.28 MB`）、共享 GL+5 点限帧、硬件探测与异常恢复；但 `oy2` 预设创建 6 张 `2560×1600` RGBA FBO（约 `93.75 MiB`）、`uq` 写盘积压达 `32 MiB`、`Lk04` 缩略图缓存 `24 MiB`。EVCam 优势在于架构精简无图床/提权依赖、`AsyncMuxerWriter` `4 MiB`/编码器严格封顶、支持三路独立清晰留存与双模 HUD；劣势在于 `isMinifyEnabled = false`（DEX `21.58 MB`）、单进程混载与 `Glide`/MJPEG 缓冲缺积极回收。
 - **边界声明**：全部结论来自静态包/源码核查；**无 E5 实车或同条件 `meminfo`（PSS/RSS）实测数据**，不输出总内存高低定论或百分比。
-- **交接索引更新**：[AI_HANDOFF.md](../AI_HANDOFF.md) 已补充完整功能手册与 14 份证据文件位置；[STATUS.md](../STATUS.md) 已同步本任务进度。
+- **交接索引更新**：[AI_HANDOFF.md](..\..\..\AI_HANDOFF.md) 已补充完整功能手册与 14 份证据文件位置；[STATUS.md](..\..\..\STATUS.md) 已同步本任务进度。
 - **分析方法边界**：全部结论来自静态反编译（`aapt2`、DEX 提取与 `jadx` 反编译）与字符串/资源交叉验证，未在实机/车机动态运行 Smartcam。
 
 ## 保留证据与临时清理

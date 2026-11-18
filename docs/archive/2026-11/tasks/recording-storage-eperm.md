@@ -17,7 +17,7 @@
 ## 证据与历史
 
 - 原B日志：`.codex-attachments/827e18a2-9d50-473a-9a19-6f043e1dfc8e/4c021530-878e-464c-a418-e6783439ead0/evcam_log_20261115_015720.txt`，SHA-256仍为`b2cda13a09f2817c8c4f2150455726b8ccbe413d2222ceaa9b2fe857fca1bed5`。
-- [撤回前完整任务快照](../archive/2026-11/recording-storage-eperm-before-rollback-20261115.md)；离线日志、样本及已撤回候选映射在`work/recording-storage-eperm/`与`outputs/`，只作历史证据。
+- [撤回前完整任务快照](..\recording-storage-eperm-before-rollback-20261115.md)；离线日志、样本及已撤回候选映射在`work/recording-storage-eperm/`与`outputs/`，只作历史证据。
 
 ## 最近记录
 

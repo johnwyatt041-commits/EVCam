@@ -2,7 +2,7 @@
 
 - 创建/更新时间：`2026-11-17 16:16:18 +08:00`（Asia/Hong_Kong）
 - 代码基线：`codex/e5-recording-startup-fix` / **`build13`（`1.6.6-test-11171608`，`versionCode = 82`，源码 `8ef5b36`，Tag `v1.6.6-test-11171608-build13`）**，在 `build12`（`T01`–`T10`）基础上清零全部 18 项历史 Lint（双风味 `0 errors`）并加固 3 处 `MainActivity` 接收器，已打包并推送 GitHub Pre-release，**仍未实车测试**（详见 [验收与Lint任务](tasks/build12-e5-acceptance-and-lint-cleanup.md)）
-- 对标分析对象：`Smartcam-V3.0.56_11_14_15_39.apk`（全功能清单见 [SMARTCAM_FEATURE_CATALOG.md](SMARTCAM_FEATURE_CATALOG.md)，3.0.56 差异见 [SMARTCAM_V3.0.56_DIFF.md](SMARTCAM_V3.0.56_DIFF.md)）
+- 对标分析对象：`Smartcam-V3.0.56_11_14_15_39.apk`（全功能清单见 [SMARTCAM_FEATURE_CATALOG.md](SMARTCAM_FEATURE_CATALOG.md)，3.0.56 差异见 [SMARTCAM_V3.0.56_DIFF.md](..\..\SMARTCAM_V3.0.56_DIFF.md)）
 - 目标硬件：吉利银河 E5（`2560×1600`，LongYing-1 SoC）；不再引入通用“屏幕尺寸设置”。
 
 ---
@@ -89,7 +89,7 @@
 为确保您在更换 AI 模型或新开对话时能无缝接力，所有参与本重构计划的 AI **必须无条件遵守以下 6 条纪律**：
 
 1. **点菜授权制（严禁私自扩改）**：每次对话只执行 **用户明确点名授权的 1 个任务包**（例如用户说“做 T01”或“接着做 T03”）。不得擅自顺手重构未授权模块或合并多个无关任务包。
-2. **先核源码再设计（先证后写）**：开始任一任务包前，**必须先读取涉及的 EC 现行 Java/XML 文件与 SC V3.0.56 对应反编译类**（参考 [SMARTCAM_V3.0.56_DIFF.md](SMARTCAM_V3.0.56_DIFF.md) 及 `work/smartcam-analysis/3.0.56/`），写出具体的“SC 缺陷 + 本包优化点”后，再改业务代码。
+2. **先核源码再设计（先证后写）**：开始任一任务包前，**必须先读取涉及的 EC 现行 Java/XML 文件与 SC V3.0.56 对应反编译类**（参考 [SMARTCAM_V3.0.56_DIFF.md](..\..\SMARTCAM_V3.0.56_DIFF.md) 及 `work/smartcam-analysis/3.0.56/`），写出具体的“SC 缺陷 + 本包优化点”后，再改业务代码。
 3. **禁止破坏当前可用主链路与规则红线**：
    - 遵循根目录 `AGENTS.md`：不在 `MainActivity` 堆业务逻辑；Shell 命令参数**纯英文**；保留 HUD（`EVCC` 副屏 + `Wi-Fi/ESP32`）和飞书基础代码目录；每次修改代码必须更新 `app/build.gradle.kts` 的 `versionName`（`1.6.6-test-MMddHHmm`）。
    - 离线通过（`tools/verify.ps1` / `./gradlew test` / `assembleDebug`）不冒充 E5 实车验证；未在实车测过帧率/内存/VHAL 的项必须标明 **`待实车确认`**。
@@ -97,7 +97,7 @@
 5. **四件套同步 + 递增记录点发布（收尾必做）**：每次完成或挂起任意任务包，必须同步更新：
    - 本蓝图 [EVCAM_SMARTCAM_REFACTOR_PLAN.md](EVCAM_SMARTCAM_REFACTOR_PLAN.md) 的对应任务状态（`[x]` / `[~]` + commit / Tag / 结果）
    - 专属任务文档 `docs/tasks/<task-id>.md`（<=80 行、<=6000 字符）
-   - 总览 [STATUS.md](STATUS.md)（<=80 行、<=6000 字符、最近更新<=5 条）
+   - 总览 [STATUS.md](..\..\STATUS.md)（<=80 行、<=6000 字符、最近更新<=5 条）
    - 共享登记 `work/ACTIVE_TASKS.md`
    并运行 `python work/progress-rules/check_docs.py` 校验通过，否则禁止宣称完成。任务包离线验证通过后，按固定交付节奏**新增递增 `buildXX` 记录点、打包 A/B 双风味 Release APK（含 `mappings`/`manifest`/`SHA256`/`notes`）并打 annotated tag 推送 GitHub Pre-release**。
 6. **接力交接尾段格式**：每次向用户交付当前任务包结果时，末尾必须列出：

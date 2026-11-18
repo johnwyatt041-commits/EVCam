@@ -29,9 +29,11 @@
 | JVM XML 结果 | `app/build/test-results/test{Independent,Composite}DebugUnitTest/TEST-*.xml` |
 | 单元测试报告 | `app/build/reports/tests/test{Independent,Composite}DebugUnitTest/index.html` |
 
-两版同包名同签名，按顺序覆盖安装，共享偏好；不要用不同包名同时运行两套摄像头。A 是整改后的三路独立文件，B 日常三路合成 H.264 单文件；B 的飞书四路仍分别录制。`RecordingExperiment` 和 flavor 的 `BuildConfig.SMARTCAM_COMPOSITE` 决定方法，不能只改 APK 文件名冒充不同架构。详见 `docs/tasks/recording-ab.md`。
+两版同包名同签名，按顺序覆盖安装，共享偏好；不要用不同包名同时运行两套摄像头。A 是整改后的三路独立文件，B 日常三路合成 H.264 单文件；B 的飞书四路仍分别录制。`RecordingExperiment` 和 flavor 的 `BuildConfig.SMARTCAM_COMPOSITE` 决定方法，不能只改 APK 文件名冒充不同架构。详见 [recording-ab.md](archive/2026-11/tasks/recording-ab.md)。
 
-Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生产密钥。构建/迁移不应修改 `outputs/EVCam-E5-UI-1.6.6-test-11140102.apk`；核验时与 `docs/STATUS.md` 的固定 SHA 对比。
+Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生产密钥。`outputs/` 顶层仅保留最新基线（`build12`/`build13`），历史包与说明均归档在 `outputs/archive/`（见该目录下 `INDEX.md`）。构建不应修改历史已发布归档产物。
+
+文档限长与相对链接校验可通过 `python tools/check_docs.py` 执行。
 
 ## 版本和 Git
 
@@ -47,15 +49,15 @@ Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生�
 
 保留版本、源码提交/分支、APK 字节数/SHA-256、测试结果和未实测范围。核验签名、ARM64 `libvhal_decoder.so` 存在、已删除宣传资产未混回；发布后核对 GitHub 附件与本地哈希。
 
-历史 `work/github_release.py`、`work/publish_ui.py` 使用 Git Credential Manager 获取令牌并通过 Windows curl 的 stdin 配置发送；没有把令牌存入文件。它们**固定旧版本和旧标签**，只作参考，不能直接复用为新发布。不要输出认证信息或提交令牌。
+历史打包/发布脚本（如 `github_release.py`、`publish_ui.py`）已移至 `work/archive/legacy-scripts-and-logs/`，**固定旧版本和旧标签**，只作参考，不得直接复用为新发布。不要输出认证信息或提交令牌。
 
 ## 历史辅助资料
 
-- `work/README.md` 标记可用证据与旧脚本限制。
-- `work/analyze_video.py` 和 `work/video-analysis/` 是旧片分析；依赖在 `work/video-deps/`，不是 Android 运行依赖。
-- `work/start_ui_emulator.ps1`、`work/make_ui_emulator.ps1`、`work/ui_smoke.py` 是既有 UI 测试辅助。模拟器副本移除 ARM64 库只为 x86 UI 测试，绝不能当作发布 APK。
+- `work/README.md` 标记可用工具、3.0.56 反编译目录与归档分类。
+- `work/analyze_video.py` 保留在 `work/` 根目录，依赖 `work/video-deps/`，可直接用于分析新实车 MP4 帧率与时间戳。
+- `work/start_ui_emulator.ps1` 保留在 `work/` 根目录，用于启动 `work/avd/EVCamUI.avd`（端口 5556）；旧版单风味 `make_ui_emulator.ps1` 与旧版 `ui_smoke.py` 已归档至 `work/archive/legacy-scripts-and-logs/`。
 - 既有专用模拟器使用 5556/5557，专用 adb server 5039；不要自动连接或操作其他物理设备。重新测试前检查脚本、设备列表与当前端口占用。
-- `work/edit_*.py`、`wire_*.py`、`trim_features.py`、`finalize_*.py` 等是过去的一次性源码改写脚本，**不要重新运行**。维护源码应直接修改并审阅差异。
+- `work/edit_*.py`、`wire_*.py`、`trim_features.py`、`finalize_*.py` 等一次性源码改写脚本已统一归档在 `work/archive/legacy-scripts-and-logs/`，**不要重新运行**。维护源码应直接修改并审阅差异。
 
 ## 多工作树
 

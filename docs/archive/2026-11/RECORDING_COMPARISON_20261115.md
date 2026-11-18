@@ -52,7 +52,7 @@ Smartcam右下格与A样本的视角较接近，但不是同步同位置拍摄�
 
 近重复检测方法：每视角缩为320×200灰度，取内部区域 `x=40:280, y=35:150`，避开时间水印及主要边缘。相邻画面平均绝对灰度差（MAD）分别用0.1、0.3、0.5/255阈值复核。表中更新估计范围取三个阈值、各分格的范围，**不是精确测出的摄像头原始帧率**：慢运动、噪声、压缩和ROI选择都会影响结果；不能理解为每一个低差异点都被证实掉帧。表中比例为阈值范围约数。
 
-代表例证：Smartcam后台右下格第196、197、198帧分别为8.0277、8.0685、8.1088秒；与前帧ROI差异约14.054、0.078、13.739/255。前两帧车身/停车线位置近乎相同，第三帧继续移动，支持存在“文件有新帧、分格沿用旧画面”的现象。[逐帧例证](../work/recording-comparison-20261115/smartcam-background-repeat-example.jpg)。这不等于全片卡死，也没有证据确定其发生在采集、合成还是编码环节。
+代表例证：Smartcam后台右下格第196、197、198帧分别为8.0277、8.0685、8.1088秒；与前帧ROI差异约14.054、0.078、13.739/255。前两帧车身/停车线位置近乎相同，第三帧继续移动，支持存在“文件有新帧、分格沿用旧画面”的现象。[逐帧例证](..\..\..\work\archive\2026-11-runs\recording-comparison-20261115\smartcam-background-repeat-example.jpg)。这不等于全片卡死，也没有证据确定其发生在采集、合成还是编码环节。
 
 ## 清晰度与实际选择
 
@@ -91,5 +91,5 @@ Smartcam右下格与A样本的视角较接近，但不是同步同位置拍摄�
 此前EVCam A/B使用Android SDK Emulator、`work/avd/EVCamUI.avd`（Android11/API30、x86、虚拟后摄）做界面/Camera2/分段/水印/扫码测试；Gradle+JDK21做JVM和R8构建。模拟器APK为剔除ARM64库并重签的专用副本，不能交付车机。现有启动脚本会覆盖AVD配置且带`-no-window`，不作为用户可视启动入口；直接设置`ANDROID_AVD_HOME=E:\GPT\EVCam\work\avd`并调用SDK的`emulator.exe -avd EVCamUI -port 5556 -no-snapshot -no-audio`可显示窗口。本次仅核实模拟器程序、系统镜像与AVD配置存在，未启动，也未核实当前虚拟机里安装了哪些包。模拟器不具备E5四路相机、VHAL、HUD或相同硬件编码环境，不能用其帧率比较实车性能。
 
 - 原件：`C:\Users\luka\Desktop\rec.zip`，68,544,421字节；SHA256：`35fb189ca214200246da55c60dc4a4f9e8f4e94a65ffb780d556f79d108e6c31`。
-- 本地完整证据：[work/recording-comparison-20261115/README.md](../work/recording-comparison-20261115/README.md)，含文件哈希、逐帧CSV、分格检测、原尺寸抽帧、缩略图与分析脚本。`work/`不纳入Git，原件未上传。
+- 本地完整证据：[work/recording-comparison-20261115/README.md](..\..\..\work\archive\2026-11-runs\recording-comparison-20261115\README.md)，含文件哈希、逐帧CSV、分格检测、原尺寸抽帧、缩略图与分析脚本。`work/`不纳入Git，原件未上传。
 - 本次只验证这四个短片的媒体表现；未做长期录像可靠性、同步实车A/B、PSS/CPU、HUD、飞书或多路总负载测试。未修改App，无需改版本或构建APK。

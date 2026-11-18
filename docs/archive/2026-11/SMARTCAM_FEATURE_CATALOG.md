@@ -1,7 +1,7 @@
 # Smartcam v3.0.40 全功能与实现机制参考目录
 
 > 整理时间：2026-11-14（Asia/Hong_Kong）
-> **版本声明（2026-11-15 更新）**：旧版 `Smartcam-V3.0.40_11_04_02_02.apk` 已按用户要求从 `work/reference-apks/` 移除；**后续对 Smartcam 的参考与对照统一以新版 `V3.0.56`（`work/reference-apks/Smartcam-V3.0.56_11_14_15_39.apk`）为准**。本文档正文保留作为基础架构/功能底座，阅读时请先结合 [SMARTCAM_V3.0.56_DIFF.md](SMARTCAM_V3.0.56_DIFF.md) 查看 `3.0.56` 等价混淆类映射及新增/重构机制（Fragmented MP4、`.part` 自愈、`usableSpace` 配额、悬浮预览、补盲独立校正、WSS/对讲/回放等）。
+> **版本声明（2026-11-15 更新）**：旧版 `Smartcam-V3.0.40_11_04_02_02.apk` 已按用户要求从 `work/reference-apks/` 移除；**后续对 Smartcam 的参考与对照统一以新版 `V3.0.56`（`work/reference-apks/Smartcam-V3.0.56_11_14_15_39.apk`）为准**。本文档正文保留作为基础架构/功能底座，阅读时请先结合 [SMARTCAM_V3.0.56_DIFF.md](..\..\SMARTCAM_V3.0.56_DIFF.md) 查看 `3.0.56` 等价混淆类映射及新增/重构机制（Fragmented MP4、`.part` 自愈、`usableSpace` 配额、悬浮预览、补盲独立校正、WSS/对讲/回放等）。
 > 历史分析对象：原 `work/reference-apks/Smartcam-V3.0.40_11_04_02_02.apk`（`com.yuan.smartcam` / “灵视 ✨”，`versionName="3.0.40"`，`versionCode=2`，`minSdk=28`，`targetSdk=37`，`compileSdk=37`，单 `classes.dex` 共 5601 类，`arm64-v8a` + `armeabi-v7a`；APK 原包已移除，静态文本档案留存于 `work/smartcam-analysis/3.0.40/`）。
 > **证据边界**：以下均为对 R8 混淆 APK、Manifest、资源与 4 个 Native `.so` 的静态逆向实测结论（无原作者工程源码；未在本机实车动态运行该 APK）。反编译类/控制流存在混淆重命名（文中标注混淆名与未混淆类名），**严禁直接复制 Smartcam 代码、资源或 APK 进 `app/`**，仅作 EVCam 架构设计对照参考。
 

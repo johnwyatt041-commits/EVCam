@@ -12,11 +12,11 @@
 
 ## 本轮改动清单
 
-1. **统一单进程退出双状态与协调器**：新增 [AppLifecycleState.java](../../app/src/main/java/com/kooo/evcam/lifecycle/AppLifecycleState.java)、[AppExitCoordinator.java](../../app/src/main/java/com/kooo/evcam/lifecycle/AppExitCoordinator.java)、[BackgroundCapabilityController.java](../../app/src/main/java/com/kooo/evcam/lifecycle/BackgroundCapabilityController.java)。
+1. **统一单进程退出双状态与协调器**：新增 [AppLifecycleState.java](..\..\..\..\app\src\main\java\com\kooo\evcam\lifecycle\AppLifecycleState.java)、[AppExitCoordinator.java](..\..\..\..\app\src\main\java\com\kooo\evcam\lifecycle\AppExitCoordinator.java)、[BackgroundCapabilityController.java](..\..\..\..\app\src\main\java\com\kooo\evcam\lifecycle\BackgroundCapabilityController.java)。
    - `user_exited=true` 同步落盘并按方案 A 禁用 `BootReceiver` 组件及运行时门禁，同时在 `KeepAliveProvider` / `BootReceiver` / `KeepAliveReceiver` / `KeepAliveWorker` / `KeepAliveManager` / `KeepAliveAccessibilityService` / `TransparentBootActivity` / `CameraForegroundService` / `BlindSpotService` / `FloatingWindowService` / `RecordingFloatingService` / `RemoteServiceManager` 全部拦截自重启与开机唤醒，直至用户手工打开 `MainActivity` 恢复。
    - `ui_exited=true` 仅藏界面，保活后台服务并禁止 `CameraForegroundService` 自动拉回 `MainActivity`；重构 `MainActivity.exitApp()`、`moveTaskToBack` 及 `onDestroy()`，远程确认退出保留 `600ms` 回执窗口再断飞书与杀进程；预留 `ensureFeishuLazyStarted` 供 `T10` 接入。
-2. **补盲遗留清理与统一无动画显隐**：物理删除 `BlindSpotDisclaimerDialogFragment`、`dialog_blind_spot_disclaimer.xml`、`blind_spot_disclaimer.md` 及对应偏好与设置开关；清理 `BlindSpotFloatingWindowView`、`MainFloatingWindowView`、`BlindSpotSettingsFragment` 与 `AppConfig` 中悬浮窗开关闭动效逻辑，抽离 [FloatingWindowDisplayHelper.java](../../app/src/main/java/com/kooo/evcam/FloatingWindowDisplayHelper.java)（保留首帧等待防黑屏）。
-3. **车辆信号收窄为 4 类核心白名单**：新增 [VehicleSignalCategory.java](../../app/src/main/java/com/kooo/evcam/vehicle/VehicleSignalCategory.java)、[VehicleSignalSnapshot.java](../../app/src/main/java/com/kooo/evcam/vehicle/VehicleSignalSnapshot.java)、[VhalProtoBatchReader.java](../../app/src/main/java/com/kooo/evcam/vehicle/VhalProtoBatchReader.java)、[CoreVehicleSignalDecoder.java](../../app/src/main/java/com/kooo/evcam/vehicle/CoreVehicleSignalDecoder.java)、[VehicleSignalHub.java](../../app/src/main/java/com/kooo/evcam/vehicle/VehicleSignalHub.java)，复用 wire reader 到 `VehicleStatusDecoder`；`VhalSignalObserver` 与 `CarSignalManagerObserver` 仅向 Hub 输出档位、车速、四车门、转向灯并在断连时复位。
+2. **补盲遗留清理与统一无动画显隐**：物理删除 `BlindSpotDisclaimerDialogFragment`、`dialog_blind_spot_disclaimer.xml`、`blind_spot_disclaimer.md` 及对应偏好与设置开关；清理 `BlindSpotFloatingWindowView`、`MainFloatingWindowView`、`BlindSpotSettingsFragment` 与 `AppConfig` 中悬浮窗开关闭动效逻辑，抽离 [FloatingWindowDisplayHelper.java](..\..\..\..\app\src\main\java\com\kooo\evcam\FloatingWindowDisplayHelper.java)（保留首帧等待防黑屏）。
+3. **车辆信号收窄为 4 类核心白名单**：新增 [VehicleSignalCategory.java](..\..\..\..\app\src\main\java\com\kooo\evcam\vehicle\VehicleSignalCategory.java)、[VehicleSignalSnapshot.java](..\..\..\..\app\src\main\java\com\kooo\evcam\vehicle\VehicleSignalSnapshot.java)、[VhalProtoBatchReader.java](..\..\..\..\app\src\main\java\com\kooo\evcam\vehicle\VhalProtoBatchReader.java)、[CoreVehicleSignalDecoder.java](..\..\..\..\app\src\main\java\com\kooo\evcam\vehicle\CoreVehicleSignalDecoder.java)、[VehicleSignalHub.java](..\..\..\..\app\src\main\java\com\kooo\evcam\vehicle\VehicleSignalHub.java)，复用 wire reader 到 `VehicleStatusDecoder`；`VhalSignalObserver` 与 `CarSignalManagerObserver` 仅向 Hub 输出档位、车速、四车门、转向灯并在断连时复位。
 
 ## 验证与证据（离线）
 
@@ -29,9 +29,9 @@
 
 ## 最近记录（最多5条）
 
-- 2026-11-15 21:35:00 +08:00 | build01 存档 | 打包并校验 `1.6.6-test-11152059` 双风味 Release APK，推送分支与标签 `v1.6.6-test-11152059-build01` 并发布 GitHub Pre-release（尚未实车测试）。| [总览](../STATUS.md)
+- 2026-11-15 21:35:00 +08:00 | build01 存档 | 打包并校验 `1.6.6-test-11152059` 双风味 Release APK，推送分支与标签 `v1.6.6-test-11152059-build01` 并发布 GitHub Pre-release（尚未实车测试）。| [总览](..\..\..\STATUS.md)
 - 2026-11-15 21:08:30 +08:00 | T01 收尾 | 完成生命周期/退出协调器、补盲免责与动效清理、4 类车辆信号 Hub；174 项单测与 Debug/Release R8 通过，待实车。| [总蓝图](../EVCAM_SMARTCAM_REFACTOR_PLAN.md)
-- 2026-11-15 20:49:00 +08:00 | 方案确认 | 用户拍板 Option A（彻底退出禁 `BootReceiver`）、双悬浮窗均去动效、同步清停 `BlindSpotService`/`RecordingFloatingService`。| [总览](../STATUS.md)
+- 2026-11-15 20:49:00 +08:00 | 方案确认 | 用户拍板 Option A（彻底退出禁 `BootReceiver`）、双悬浮窗均去动效、同步清停 `BlindSpotService`/`RecordingFloatingService`。| [总览](..\..\..\STATUS.md)
 
 ## 下一步
 

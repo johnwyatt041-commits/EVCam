@@ -1,46 +1,38 @@
 # EVCam E5 项目入口
 
-更新：2026-11-14 19:08:17 +08:00。项目根目录：`E:\GPT\EVCam`。
+更新：2026-11-18 08:52:00 +08:00。项目根目录：`E:\GPT\EVCam`（银河 E5，`2560×1600`）。
 
-## 每次任务必读
+## 开局必读（精简 4 步）
 
-1. [AGENTS.md](AGENTS.md)：项目强制规则。
-2. [进度同步规范](docs/PROGRESS_RULES.md)：有效改动/重要发现及时记录，每次结束必须核对更新。
-3. [当前进度](docs/STATUS.md)：唯一当前状态入口，版本/源码/验证/待办以此为准。
-4. [需求](docs/REQUIREMENTS.md)与[协作规范](docs/COLLABORATION.md)：保留能力、分工和独立工作树。
-
-同时检查 `git status --short`、`git branch --show-current`、`git log -5 --oneline` 及 `work/ACTIVE_TASKS.md`。不把其他对话口头结论当成已同步。
+1. [AGENTS.md](AGENTS.md)：项目强制规则与编码红线。
+2. [START_HERE.md](START_HERE.md)：本入口与目录定位。
+3. [当前进度](docs/STATUS.md)：唯一当前状态、未提交改动、待办与历史归档链接。
+4. 本任务文档 `docs/tasks/<task-id>.md`（新任务按规范创建；并行时核对 `git status --short`、`git branch --show-current`、`git log -5 --oneline` 与 [work/ACTIVE_TASKS.md](work/ACTIVE_TASKS.md)）。
 
 ## 目录索引
 
 | 路径 | 用途 |
 | --- | --- |
-| `app/src/main/` | 应用源码与资源 |
-| `app/src/test/`、`app/src/androidTest/` | 保留的回归测试源码 |
-| `docs/`、`docs/tasks/`、`docs/archive/` | 当前文档、任务进度、按需历史 |
-| `tools/` | 可复用构建/验证流程 |
-| `assets/`、`gradle/`、`keystore/` | 工程依赖资源、构建包装器和既有签名配置 |
-| `outputs/` | 正式/历史交付APK、校验与说明，保留 |
-| `work/` | 本机工具/参考/必要证据，分类见`work/README.md` |
-| `work/tmp/<task-id>/` | 新任务可清理临时文件；结束清理 |
-| `.codex-attachments/` | 用户原附件，保留且不提交 |
-| `.gradle/`、`app/build/`、`build/` | 可重建的构建缓存/产物；按需回收 |
+| `app/src/main/`、`app/src/test/` | 应用源码、资源与回归测试 |
+| `docs/`、`docs/tasks/` | 当前规范、活跃任务；历史在 `docs/archive/`（按需） |
+| `tools/` | `verify.ps1` 构建校验与 `check_docs.py` 文档检查 |
+| `assets/`、`gradle/`、`keystore/` | 工程依赖资源、Gradle 包装器与签名配置 |
+| `outputs/`、`outputs/archive/` | 顶层仅留最新基线（`build12`/`build13`）；早期包在 `archive/` |
+| `work/`、`work/archive/` | 本机工具/参考/3.0.56 反编译；历史脚本与轮次在 `archive/` |
+| `work/tmp/<task-id>/` | 新任务可清理临时文件；收尾必须清理 |
+| `.codex-attachments/` | 用户原始附件，保留且不提交 |
 
-## 按需读取
+## 按需查阅（禁止作开局必读）
 
-- [新AI交接与Smartcam本机资料](docs/AI_HANDOFF.md)
-- [当前有效坑](docs/PITFALLS.md)
-- [开发/构建](docs/DEVELOPMENT.md) · [架构](docs/ARCHITECTURE.md)
-- 历史、测试日志、长分析只通过进度中的链接按需读取，不默认加载整套归档。
+- 规范与约束：[进度规范](docs/PROGRESS_RULES.md) · [需求边界](docs/REQUIREMENTS.md) · [协作规范](docs/COLLABORATION.md) · [有效坑表](docs/PITFALLS.md)
+- 开发与参考：[开发/构建](docs/DEVELOPMENT.md) · [架构定位](docs/ARCHITECTURE.md) · [本机资料与 Smartcam](docs/AI_HANDOFF.md) · [3.0.56 类映射](docs/SMARTCAM_V3.0.56_DIFF.md)
+- 历史报告、旧 `T01`–`T10` 任务与阶段快照均已归档至 `docs/archive/2026-11/`，仅按链接按需读取。
 
-`docs/`纳入Git；`work/`、`outputs/`是本机参考/证据/交付，不随新工作树或GitHub克隆复制。用户附件不混入提交。
-
-## 新AI开场模板
+## 新 AI 开场模板
 
 ```text
-项目：E:\GPT\EVCam，银河E5，屏幕2560×1600。
-先读 AGENTS.md、START_HERE.md、docs/PROGRESS_RULES.md、docs/STATUS.md。
-本任务范围：【填写】。并行修改先登记，建立独立工作树和codex/分支。
-有效改动/重要发现立即更新任务文档；每次结束核对时间戳、证据、待办。
-总览只留当前状态与最近5条，历史归档。未同步文档不得宣告完成。
+项目：E:\GPT\EVCam，银河 E5，2560×1600。
+开局只读：AGENTS.md → START_HERE.md → docs/STATUS.md → 本任务 docs/tasks/<task-id>.md。
+其余 docs/*（REQUIREMENTS/PITFALLS/DEVELOPMENT/SMARTCAM_V3.0.56_DIFF 等）按模块需要查阅。
+有效改动/重要发现及时同步任务文档与总览；结束运行 python tools/check_docs.py。
 ```

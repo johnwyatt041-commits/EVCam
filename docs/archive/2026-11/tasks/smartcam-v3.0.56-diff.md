@@ -14,7 +14,7 @@
 
 1. **录像/GL/预览解绑基干保持稳定**：`Lp13;`、`Lo13;`、`Lds2;`、`Llf4;` 保留 2560×1600 画布（`Lv33.c`）、`recorder-gl -8`、6 槽 FBO、40ms/25fps 节拍（`Lv33.h`）、`live-output -4`、`"video/avc"` `colorFormat=2130708361`、`1024×132` 水印（`Lp13.f`/`Lil.a` 去掉 `uMirror.y`）。`Lmo3;` 仍保留预览解绑 `m()` 与重绑 `C(Surface)`（`"detachPreview"` 因 R8 重命名消失而非移除）；`Ldo3;` 补耗时日志，Binder case `25` 扩为 19 字段 `Lrv3;`。
 2. **启动健壮性与恢复页**：`Lk13;` 新增 5 段配置签名 `G()`、外置存储 30 秒等待与录制中延迟生效，并接 `CameraRecoveryActivity`（`camera_recovery_page_enabled`）。
-3. **8 项重点新增/重构能力**（详表见 [SMARTCAM_V3.0.56_DIFF.md](../SMARTCAM_V3.0.56_DIFF.md)）：
+3. **8 项重点新增/重构能力**（详表见 [SMARTCAM_V3.0.56_DIFF.md](..\..\..\SMARTCAM_V3.0.56_DIFF.md)）：
    - 分段 MP4（`FRAGMENTED`，`androidx.media3.muxer` 2 秒片段 `2,000,000 us`）与启动 `.mp4.part` 恢复（`Ld02;` -> `Lyf3.b/g`）。
    - 设备 `usableSpace` 百分比配额（`Lk02;`/`Lfz2;`，预留 >=10% 或 10GB）并修复 `3.0.40` 删文件 `elapsedRealtime` 相减恒 0 缺陷（`Lk02.d()`）。
    - 独立悬浮预览窗（`Lqw2;` `FULLSCREEN`/`SIDEBAR`/`WINDOW`，`Low2.c` 叠加层，`SCREEN_OFF` 自动关闭）与 23 项 `Lsy0;` 外部控制指令。
@@ -26,8 +26,8 @@
 
 ## 交付、基线切换与清理
 
-- 差异报告：[docs/SMARTCAM_V3.0.56_DIFF.md](../SMARTCAM_V3.0.56_DIFF.md)；基础目录：[SMARTCAM_FEATURE_CATALOG.md](../SMARTCAM_FEATURE_CATALOG.md)（已加 3.0.56 切换说明）；交接索引：[AI_HANDOFF.md](../AI_HANDOFF.md)。
-- APK 副本与清单：`work/reference-apks/Smartcam-V3.0.56_11_14_15_39.apk`、[Smartcam-V3.0.56-manifest.json](../../work/reference-apks/Smartcam-V3.0.56-manifest.json)、[Smartcam-manifest.json](../../work/reference-apks/Smartcam-manifest.json)、[reference-apks/README.md](../../work/reference-apks/README.md)。
+- 差异报告：[docs/SMARTCAM_V3.0.56_DIFF.md](..\..\..\SMARTCAM_V3.0.56_DIFF.md)；基础目录：[SMARTCAM_FEATURE_CATALOG.md](../SMARTCAM_FEATURE_CATALOG.md)（已加 3.0.56 切换说明）；交接索引：[AI_HANDOFF.md](..\..\..\AI_HANDOFF.md)。
+- APK 副本与清单：`work/reference-apks/Smartcam-V3.0.56_11_14_15_39.apk`、[Smartcam-V3.0.56-manifest.json](..\..\..\..\work\reference-apks\Smartcam-V3.0.56-manifest.json)、[Smartcam-manifest.json](..\..\..\..\work\reference-apks\Smartcam-manifest.json)、[reference-apks/README.md](..\..\..\..\work\reference-apks\README.md)。
 - 清理与留存：已删除 `work/reference-apks/Smartcam-V3.0.40_11_04_02_02.apk` 与临时目录 `work/tmp/smartcam-v3.0.56-diff/`；`work/smartcam-analysis/` 反编译证据留存不删。
 
 ## V3.0.56 运行时服务与对 EVCam 11150014 静态开销对照

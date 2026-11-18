@@ -1,6 +1,6 @@
 # 用户要求与边界
 
-更新日期：2026-11-15 00:20:29 +08:00，时区 Asia/Hong_Kong。以下来自用户在本项目对话中的明确要求；变更时记录新决定及原因。
+更新日期：2026-11-18 08:52:00 +08:00，时区 Asia/Hong_Kong。以下来自用户在本项目对话中的明确要求；变更时记录新决定及原因。
 
 ## 设备与目标
 
@@ -34,13 +34,13 @@
 - 用户要求先整改当前卡顿问题，再交付 EVCam 原架构与 Smartcam 思路的两个 APK。
 - A 保留日常三路独立文件；B 日常三路合成单视频，飞书四路继续独立文件。B 是明确标识的实验变体，不改变正式版默认需求。
 - 两版共用整改、相同包名与签名，顺序覆盖安装以保留配置；不新增两套并行常驻摄像头任务。B 可能降低合成尺寸，须披露实际分辨率和清晰度代价。
-- 实现与试录方法见 [A/B 测试说明](RECORDING_AB_TEST.md)，不能将离线验证当成已解决实车卡顿。
+- 实现与试录方法见 [A/B 测试说明](archive/2026-11/RECORDING_AB_TEST.md)，不能将离线验证当成已解决实车卡顿。
 
 ## 已授权精简
 
-- 不需要鱼眼矫正、预览矫正及图像调节（保留主/副屏偏移旋转用的 `BlindSpotCorrection`）。
+- 不需要鱼眼矫正与预览矫正（`AppFeatures.FISHEYE_CORRECTION = false`，2026-11-18 用户再次确认保持关闭；保留主/副屏偏移旋转用的 `BlindSpotCorrection` 及 `3.2` 画面亮度/对比度/饱和度/镜像/边缘裁剪与总开关旁路）。
 - 停用与本次用途无关的钉钉、Telegram、心跳图片、远程监管/Longview、车门联动、自定义按键、模拟信号等运行时入口/任务。
-- **2026-11-14 23:24 用户确认，2026-11-15 已实施离线验证**：测试前正式从代码中物理移除上述已停用功能及钉钉 SDK、打开 R8（`isMinifyEnabled = true`）、补充 Glide 退场/低内存释放，并按**方案 3-稳妥**优化 `EglSurfaceEncoder` 时间水印（复用画笔、`texSubImage2D`、共享秒级格式化），B 版合成管道暂不动；**保留**局域网扫码传文件（`FileTransferServer`/`QrCodeGenerator`）、飞书复用的 `VideoThumbnailExtractor`、`io.grpc`（E5 VHAL 转向灯），以及全部 HUD 双路径（`SECONDARY_DISPLAY` 与 `NETWORK_STREAMING` 暂不动）。HUD依赖的旧配置访问器、无障碍保活心跳继续保留；实车仍待验证，结果见[任务](tasks/ab-test-preoptimization.md)。
+- **2026-11-14 23:24 用户确认，2026-11-15 已实施离线验证**：测试前正式从代码中物理移除上述已停用功能及钉钉 SDK、打开 R8（`isMinifyEnabled = true`）、补充 Glide 退场/低内存释放，并按**方案 3-稳妥**优化 `EglSurfaceEncoder` 时间水印（复用画笔、`texSubImage2D`、共享秒级格式化），B 版合成管道暂不动；**保留**局域网扫码传文件（`FileTransferServer`/`QrCodeGenerator`）、飞书复用的 `VideoThumbnailExtractor`、`io.grpc`（E5 VHAL 转向灯），以及全部 HUD 双路径（`SECONDARY_DISPLAY` 与 `NETWORK_STREAMING`，2026-11-18 再次确认 ESP32/浏览器投屏保留不动）。HUD依赖的旧配置访问器、无障碍保活心跳继续保留；实车仍待验证，结果见[任务](archive/2026-11/tasks/ab-test-preoptimization.md)。
 - 两个个人宣传二维码、联系方式和打赏入口不要。保留功能所需的二维码传输、必要使用提示及 GPL 许可证。
 
 ## 界面
@@ -68,6 +68,6 @@
 ## 2026-11-15 融合 Smartcam V3.0.56 重构总蓝图边界
 
 - 用户确定继续以 **EVCam** 为底座迭代，吸收 Smartcam V3.0.56 UI/交互与可用功能，同时避开 SC 双进程后台重驻、6 槽 `2560×1600` RGBA 大缓存、20ms 僵硬网格与未显示画面空取流，且保留 EVCam 飞书远程与双 HUD（`EVCC` + `ESP32`）能力。
-- 完整 10 个分步任务包（`T01`–`T10`，含难度/优先级、遗留移除项、不学习功能清单与严格跨对话接力纪律）见 [EVCAM_SMARTCAM_REFACTOR_PLAN.md](EVCAM_SMARTCAM_REFACTOR_PLAN.md)。
+- 完整 10 个分步任务包（`T01`–`T10`，含难度/优先级、遗留移除项、不学习功能清单与严格跨对话接力纪律）见 [EVCAM_SMARTCAM_REFACTOR_PLAN.md](archive/2026-11/EVCAM_SMARTCAM_REFACTOR_PLAN.md)（均已在 `build01`–`build12`/`build13` 离线收官）。
 - 用户已定稿决策：1）帧率/丢帧策略选 **方案 A**（隐屏停绘停流 + 保留录像目标帧率/可选预览限帧 + 真实时间戳，废除 `Lf9` 20ms 网格）；2）飞书远程若启用 **仅在 P 档时加载，关闭或其他档位时彻底断连**（停止心跳与重连定时器）。
 - 各模块先经用户明确点名授权后再逐包推进，每次改码前必须先核实 SC 底层实现与 EC 现行可优化路径，禁止一次性大改或越权扩改。
