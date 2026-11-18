@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-19 01:16:00 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已完成包 A–E 整合提交 `55cd486` 并导出 **`build14`** A/B Release APK 至 `outputs/` 供上车实测；GitHub 远端最新仍为 **`build13`**）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-19 02:31:36 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已完成 `1.6.6-test-11190207` 默认车模替换与 SAF 导入修复并同步推至 fork `codex/e5-recording-startup-fix`；GitHub Releases 仍以 **`build13`** Pre-release 为准）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；`HEAD` 为 `55cd486`（含 `904e500` `W1` 与包 A–E 全部修改，工作区干净，未推送） |
-| 本地交付 | **`build14`：`1.6.6-test-11190102`**（`versionCode = 83`，A `6,752,914` B / B `6,769,298` B，已签过 `apksigner` 含 `libvhal_decoder.so`）；`outputs/` 顶层留 `build13` + `build14`（`build12` 移入 `outputs/archive/`） |
-| GitHub | `johnwyatt041-commits/EVCam` 远端最新仍为 `build13` Pre-release（`8ef5b36`）；`55cd486` 与 `build14` 尚未推送/发布 |
-| 离线与模拟器验证 | `tools\verify.ps1` 通过（双风味 `468` 测 `0` 失败、`assembleDebug`/`assembleRelease` 成功）；双风味 Lint `0 errors`（`2076` warnings）；`emulator-5556` 已全覆盖包 A–E（`1600×900` & `2560×1600`） |
-| 实车状态 | `build01`–`build14`、`W1`、包 A（VHAL 倒车流）、包 B（四路拼接/方向盘转角）、包 C（EVCC/转向灯实流）、包 D（D 档弹出/独立水印）与包 E（车机实屏 `wm density` 与触控体感）均**尚未上车实测** |
+| 分支与提交 | `codex/e5-recording-startup-fix`（包含 `W1`、`build14` 包 A–E 与 `1.6.6-test-11190207` 车模/SAF 导入提交，以 Git 为准） |
+| 本地交付 | `outputs/` 顶层留 `build13` + **`build14`**（`1.6.6-test-11190102`）；最新 `1.6.6-test-11190207` A/B Release APK 位于 `app/build/outputs/apk/{independent,composite}/release/` |
+| GitHub | `johnwyatt041-commits/EVCam` 的 `codex/e5-recording-startup-fix` 同步最新代码，Releases 页尚未单独创建新 Pre-release（仍为 `build13`） |
+| 离线与模拟器验证 | `1.6.6-test-11190207` 通过双风味 `470` 测 `0` 失败、Lint `0 errors`（`2076` warnings）、Release A/B 编译与 `apksigner` 校验；`emulator-5556` 已实测新默认车模与 `OpenDocument`/Download 导入 |
+| 实车状态 | `build01`–`build14`、`1.6.6-test-11190207` 车模/导入、包 A（VHAL 倒车流）、包 B（四路拼接/转角）、包 C（EVCC/转向灯）、包 D（D 档/水印）与包 E（实屏触控）均**尚未上车实测** |
 
 ## 当前结论与确认边界
 
@@ -23,16 +23,16 @@
 
 ## 下一步
 
-1. 安装 `outputs/` 下 **`build14`**（独立版 A / 共存版 B 先后覆盖，切勿并行）在银河 E5 实车按 [build13 验收清单](archive/2026-11/tasks/build12-e5-acceptance-and-lint-cleanup.md) 联测包 A–E 全部实车项。
-2. 实车验证通过后再按需推送 `codex/e5-recording-startup-fix` 与发布 GitHub Pre-release（`build14`）。
+1. 如需车机直接下载新版本，按需将 `1.6.6-test-11190207` 封包导出至 `outputs/` 并发布新 Pre-release；或先使用本地构建的 `app/build/outputs/apk/{independent,composite}/release/` 核验默认车模与 SAF 导入后上车按 [build13 验收清单](archive/2026-11/tasks/build12-e5-acceptance-and-lint-cleanup.md) 联测。
+2. 结合实车情况决定是否优化 `P019`（设置页切 `A/D` 主线程同步关闭相机卡顿）。
 
 ## 最近更新（最多5条）
 
+- 2026-11-19 02:31:36 +08:00 | 默认车模替换、SAF 导入修复与提交推送 | 写入用户银河 E5 透明车模为默认资源并修 360 GL `GL_ONE` 预乘混合，补 `OpenDocument` 与弹窗提示解决无存储权限/Toast 抑制下按钮无反应（`1.6.6-test-11190207`：470 测 0 失败、0 Lint error、`emulator-5556` 实测通过，同步提交并推送 fork 分支） | [包 B 任务](tasks/fix-pack-b-preview-and-mode-d.md) · [P020](PITFALLS.md)
 - 2026-11-19 01:16:00 +08:00 | build14 提交与封包导出 | 提交包 A–E 整合 `55cd486` 并构建核验导出 `build14`（`1.6.6-test-11190102` / `versionCode = 83`）A/B Release APK 与映射至 `outputs/`（`build12` 移入 `archive/`），待实车测试 | [包 A](tasks/fix-pack-a-crashes-and-reverse-signal.md) · [包 D](tasks/fix-pack-d-recorder-settings-and-watermark.md)
 - 2026-11-19 01:08:00 +08:00 | 包 D 模拟器复测与整包验收 | 在 `emulator-5556` 完成包 D `1600×900` & `2560×1600`（标准/大号、深/浅色）UI 与边界实测并清场；`1.6.6-test-11190102`（`versionCode = 83`）通过 `verify.ps1` `468` 测 `0` 失败、双风味 `0` Lint error 及 `check_docs.py` | [包 D 任务](tasks/fix-pack-d-recorder-settings-and-watermark.md)
 - 2026-11-18 23:29:00 +08:00 | 包 E 实现与双分辨率验收 | 完成 `5` 档 `w`/`h` 缩放资源、原地“标准/车机大号(1.16f)”切换、外观/补盲/配置广场防溢出与回看单行筛选（`1.6.6-test-11182319`），`468` 测 `0` 失败、双风味 `0` Lint error 及 `emulator-5556` `1600×900` + `2560×1600` 全通过 | [包 E 任务](tasks/fix-pack-e-headunit-ui-scaling.md)
 - 2026-11-18 18:48:14 +08:00 | 包 C 实现与模拟器验收 | 完成 `4.1`/`4.2`（去状态栏动效、屏幕前置与平铺、2560×1600 可视化拖拽、分路旋转/四边裁切、保留 ESP32），`460` 测 `0` 失败、双风味 `0` Lint error 及 `emulator-5556` `1600×900`/`2560×1600`+深浅主题通过 | [包 C 任务](tasks/fix-pack-c-blindspot-refactor.md)
-- 2026-11-18 16:48:00 +08:00 | 包 B 实现与模拟器验收 | 完成 `1.1`~`1.7`（`MODE_D`、去重胶囊、画内缩放裁剪、碰撞让位、`360 A` 视场/对比度、`SingleCamera` 同线程阻塞修复），`448` 测 0 失败、双风味 `0` Lint error 及 `emulator-5556` `2560×1600`/`1600×900` 全通过（4 路/实车方向盘待实测） | [包 B 任务](tasks/fix-pack-b-preview-and-mode-d.md)
 
 ## 13 个 Build 与归档按需索引
 

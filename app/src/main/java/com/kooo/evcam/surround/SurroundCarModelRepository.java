@@ -1,5 +1,8 @@
 package com.kooo.evcam.surround;
 
+import android.content.ContentResolver;
+import android.content.Context;
+import android.database.Cursor;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
@@ -10,22 +13,27 @@ import android.graphics.Path;
 import android.graphics.RadialGradient;
 import android.graphics.RectF;
 import android.graphics.Shader;
+import android.net.Uri;
+import android.provider.OpenableColumns;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.kooo.evcam.AppConfig;
+import com.kooo.evcam.R;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
 /**
- * 纯离线银河 E5 俯视车模仓库（内置矢量绘制 E5 车模 + 本地 Download PNG 导入校验，彻底移除任何云端车模库请求）。
+ * 纯离线银河 E5 俯视车模仓库（内置高精度 E5 俯视车模资源 + Canvas 矢量兜底 + 本地/SAF PNG 导入校验，彻底移除任何云端车模库请求）。
  */
 public final class SurroundCarModelRepository {
 
@@ -51,9 +59,15 @@ public final class SurroundCarModelRepository {
     private SurroundCarModelRepository() {
     }
 
-    /** 加载当前生效的离线车模 Bitmap（若自定义 PNG 不可读则自动回退内置 E5 俯视车模）。 */
+    /** 加载当前生效的离线车模 Bitmap（无 Context 时回退 Canvas 矢量车模）。 */
     @NonNull
     public static Bitmap loadActiveCarModelBitmap(@NonNull AppConfig config) {
+        return loadActiveCarModelBitmap(null, config);
+    }
+
+    /** 加载当前生效的离线车模 Bitmap（优先加载自定义 PNG，其次内置 E5 默认图片资源，最后矢量兜底）。 */
+    @NonNull
+    public static Bitmap loadActiveCarModelBitmap(@Nullable Context context, @NonNull AppConfig config) {
         if (AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG.equals(config.getSurroundCarModelSource())) {
             String path = config.getSurroundCustomCarModelPath();
             if (!path.isEmpty()) {
@@ -64,6 +78,16 @@ public final class SurroundCarModelRepository {
                         return decoded;
                     }
                 }
+            }
+        }
+        if (context != null) {
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inScaled = false;
+            opts.inPreferredConfig = Bitmap.Config.ARGB_8888;
+            Bitmap builtInRes = BitmapFactory.decodeResource(
+                    context.getResources(), R.drawable.e5_car_model_default, opts);
+            if (builtInRes != null) {
+                return builtInRes;
             }
         }
         return createBuiltInE5CarBitmap(360, 820);
@@ -96,30 +120,110 @@ public final class SurroundCarModelRepository {
         if (len <= PNG_MAGIC.length || len > MAX_CAR_MODEL_PNG_BYTES) {
             return new ImportResult(false, "车模 PNG 大小需在 1B ~ 4MB 之间", null);
         }
-        if (!hasValidPngSignature(sourceFile)) {
+        try (FileInputStream in = new FileInputStream(sourceFile)) {
+            return importCustomCarModelStream(in, sourceFile.getName(), internalDestDir);
+        } catch (IOException e) {
+            return new ImportResult(false, "读取本地车模失败：" + e.getMessage(), null);
+        }
+    }
+
+    /** 通过系统文件选择器 (SAF Uri) 校验并离线导入透明 PNG 车模。 */
+    @NonNull
+    public static ImportResult importCustomCarModelPng(@NonNull Context context,
+                                                       @NonNull Uri sourceUri,
+                                                       @NonNull File internalDestDir) {
+        ContentResolver resolver = context.getContentResolver();
+        String displayName = queryDisplayName(resolver, sourceUri);
+        try (InputStream in = resolver.openInputStream(sourceUri)) {
+            if (in == null) {
+                return new ImportResult(false, "无法打开所选车模文件", null);
+            }
+            return importCustomCarModelStream(in, displayName, internalDestDir);
+        } catch (IOException e) {
+            return new ImportResult(false, "读取所选车模失败：" + e.getMessage(), null);
+        }
+    }
+
+    @NonNull
+    static ImportResult importCustomCarModelStream(@NonNull InputStream in,
+                                                   @NonNull String displayName,
+                                                   @NonNull File internalDestDir) throws IOException {
+        byte[] bytes = readBoundedBytes(in, MAX_CAR_MODEL_PNG_BYTES);
+        if (bytes == null) {
+            return new ImportResult(false, "车模 PNG 大小需在 1B ~ 4MB 之间", null);
+        }
+        return importCustomCarModelBytes(bytes, displayName, internalDestDir);
+    }
+
+    @NonNull
+    static ImportResult importCustomCarModelBytes(@NonNull byte[] bytes,
+                                                  @NonNull String displayName,
+                                                  @NonNull File internalDestDir) {
+        if (bytes.length <= PNG_MAGIC.length || bytes.length > MAX_CAR_MODEL_PNG_BYTES) {
+            return new ImportResult(false, "车模 PNG 大小需在 1B ~ 4MB 之间", null);
+        }
+        if (!isValidPngSignatureBytes(bytes)) {
             return new ImportResult(false, "文件不是有效的透明 PNG 图片", null);
         }
         BitmapFactory.Options bounds = new BitmapFactory.Options();
         bounds.inJustDecodeBounds = true;
-        BitmapFactory.decodeFile(sourceFile.getAbsolutePath(), bounds);
-        if (bounds.outWidth <= 32 || bounds.outHeight <= 32) {
-            return new ImportResult(false, "图片分辨率过小，无法作为车模使用", null);
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.length, bounds);
+        int width = bounds.outWidth;
+        int height = bounds.outHeight;
+        if (width == 0 && height == 0) {
+            int[] ihdr = parsePngIhdrDimensions(bytes);
+            if (ihdr != null) {
+                width = ihdr[0];
+                height = ihdr[1];
+            }
+        }
+        if (width <= 32 || height <= 32) {
+            return new ImportResult(false, "图片分辨率过小或格式损坏，无法作为车模使用", null);
         }
         if (!internalDestDir.exists() && !internalDestDir.mkdirs()) {
             return new ImportResult(false, "无法创建本地车模缓存目录", null);
         }
         File destFile = new File(internalDestDir, "custom_e5_car_model.png");
-        try (FileInputStream in = new FileInputStream(sourceFile);
-             FileOutputStream out = new FileOutputStream(destFile)) {
-            byte[] buf = new byte[8192];
-            int n;
-            while ((n = in.read(buf)) > 0) {
-                out.write(buf, 0, n);
-            }
-            return new ImportResult(true, "已离线导入车模：" + sourceFile.getName(), destFile.getAbsolutePath());
+        try (FileOutputStream out = new FileOutputStream(destFile)) {
+            out.write(bytes);
+            return new ImportResult(true, "已离线导入车模：" + displayName, destFile.getAbsolutePath());
         } catch (IOException e) {
             return new ImportResult(false, "保存本地车模失败：" + e.getMessage(), null);
         }
+    }
+
+    @Nullable
+    private static byte[] readBoundedBytes(@NonNull InputStream in, long maxBytes) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        long total = 0L;
+        int n;
+        while ((n = in.read(chunk)) > 0) {
+            total += n;
+            if (total > maxBytes) {
+                return null;
+            }
+            buffer.write(chunk, 0, n);
+        }
+        return buffer.toByteArray();
+    }
+
+    @NonNull
+    private static String queryDisplayName(@NonNull ContentResolver resolver, @NonNull Uri uri) {
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) {
+                    String name = cursor.getString(idx);
+                    if (name != null && !name.trim().isEmpty()) {
+                        return name.trim();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        String segment = uri.getLastPathSegment();
+        return (segment != null && !segment.trim().isEmpty()) ? segment.trim() : "custom_car_model.png";
     }
 
     public static boolean isValidPngSignatureBytes(@Nullable byte[] header) {
@@ -132,6 +236,28 @@ public final class SurroundCarModelRepository {
             }
         }
         return true;
+    }
+
+    @Nullable
+    static int[] parsePngIhdrDimensions(@Nullable byte[] bytes) {
+        if (!isValidPngSignatureBytes(bytes) || bytes.length < 24) {
+            return null;
+        }
+        if (bytes[12] != 'I' || bytes[13] != 'H' || bytes[14] != 'D' || bytes[15] != 'R') {
+            return null;
+        }
+        int w = ((bytes[16] & 0xFF) << 24)
+                | ((bytes[17] & 0xFF) << 16)
+                | ((bytes[18] & 0xFF) << 8)
+                | (bytes[19] & 0xFF);
+        int h = ((bytes[20] & 0xFF) << 24)
+                | ((bytes[21] & 0xFF) << 16)
+                | ((bytes[22] & 0xFF) << 8)
+                | (bytes[23] & 0xFF);
+        if (w <= 0 || h <= 0) {
+            return null;
+        }
+        return new int[]{w, h};
     }
 
     /**
@@ -236,16 +362,6 @@ public final class SurroundCarModelRepository {
         return f.getName().toLowerCase(Locale.US).endsWith(".png")
                 && f.length() > PNG_MAGIC.length
                 && f.length() <= MAX_CAR_MODEL_PNG_BYTES;
-    }
-
-    private static boolean hasValidPngSignature(@NonNull File f) {
-        byte[] header = new byte[PNG_MAGIC.length];
-        try (FileInputStream fis = new FileInputStream(f)) {
-            int n = fis.read(header);
-            return n == PNG_MAGIC.length && isValidPngSignatureBytes(header);
-        } catch (IOException ignored) {
-            return false;
-        }
     }
 
     @Nullable

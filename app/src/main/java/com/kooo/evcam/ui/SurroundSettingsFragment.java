@@ -1,10 +1,15 @@
 package com.kooo.evcam.ui;
 
+import android.content.ActivityNotFoundException;
 import android.content.Context;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.graphics.drawable.GradientDrawable;
+import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -14,6 +19,8 @@ import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
@@ -84,6 +91,32 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private TextView tvCarModelStatus;
     private Button btnCarModelBuiltin;
     private Button btnCarModelImportPng;
+    @Nullable
+    private String loadedCarModelSignature;
+
+    private final ActivityResultLauncher<String[]> carModelPngPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                Context ctx = getContext();
+                if (uri == null || ctx == null) {
+                    return;
+                }
+                File internalDir = new File(ctx.getFilesDir(), "surround");
+                SurroundCarModelRepository.ImportResult result =
+                        SurroundCarModelRepository.importCustomCarModelPng(ctx, uri, internalDir);
+                applyCarModelImportResult(ctx, result);
+            });
+
+    private final ActivityResultLauncher<String[]> calibrationJsonPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocument(), uri -> {
+                Context ctx = getContext();
+                if (uri == null || ctx == null) {
+                    return;
+                }
+                File internalDir = new File(ctx.getFilesDir(), "surround");
+                SurroundCalibrationManager.ImportResult result =
+                        SurroundCalibrationManager.importCalibrationUri(ctx, uri, internalDir);
+                applyCalibrationImportResult(ctx, result);
+            });
 
     @Nullable
     @Override
@@ -241,7 +274,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnCalibBuiltin.setOnClickListener(v -> {
             appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_BUILTIN);
             notifyHostSurroundChanged();
-            refreshCalibrationAndModelUi(requireContext());
+            refreshCalibrationAndModelUi(requireContext(), false);
         });
         btnCalibImportLocal.setOnClickListener(v -> showLocalCalibrationPicker());
 
@@ -294,7 +327,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnCarModelBuiltin.setOnClickListener(v -> {
             appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_E5_BUILTIN);
             notifyHostSurroundChanged();
-            refreshCalibrationAndModelUi(requireContext());
+            refreshCalibrationAndModelUi(requireContext(), true);
         });
         btnCarModelImportPng.setOnClickListener(v -> showLocalCarModelPngPicker());
     }
@@ -387,7 +420,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
 
             refreshGroundDimensionTexts();
             switchGuidanceEnabled.setChecked(appConfig.isPreviewGuidanceEnabled());
-            refreshCalibrationAndModelUi(ctx);
+            refreshCalibrationAndModelUi(ctx, false);
         } finally {
             bindingUi = false;
         }
@@ -405,7 +438,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         tvGroundFrontExtValue.setText("车头视野延伸：" + appConfig.getSurroundGroundFrontExtensionCm() + " cm（0–100）");
     }
 
-    private void refreshCalibrationAndModelUi(@NonNull Context ctx) {
+    private void refreshCalibrationAndModelUi(@NonNull Context ctx, boolean forceReloadCarBitmap) {
         boolean customCalib = AppConfig.SURROUND_CALIBRATION_E5_CUSTOM.equals(appConfig.getSurroundCalibrationSource())
                 && !appConfig.getSurroundCustomCalibrationPath().isEmpty();
         tvCalibrationStatus.setText(customCalib
@@ -414,16 +447,24 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         applyOptionButtonState(btnCalibBuiltin, ctx, !customCalib);
         applyOptionButtonState(btnCalibImportLocal, ctx, customCalib);
 
-        boolean customCar = AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG.equals(appConfig.getSurroundCarModelSource())
-                && !appConfig.getSurroundCustomCarModelPath().isEmpty();
+        String carSource = appConfig.getSurroundCarModelSource();
+        String customCarPath = appConfig.getSurroundCustomCarModelPath();
+        boolean customCar = AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG.equals(carSource)
+                && !customCarPath.isEmpty();
         tvCarModelStatus.setText(customCar
                 ? "当前车模：本地导入 PNG 车模"
                 : "当前车模：银河 E5 内置车模");
         applyOptionButtonState(btnCarModelBuiltin, ctx, !customCar);
         applyOptionButtonState(btnCarModelImportPng, ctx, customCar);
 
-        Bitmap previewBmp = SurroundCarModelRepository.loadActiveCarModelBitmap(appConfig);
-        ivCarModelPreview.setImageBitmap(previewBmp);
+        String signature = carSource + "|" + customCarPath;
+        if (forceReloadCarBitmap
+                || !signature.equals(loadedCarModelSignature)
+                || ivCarModelPreview.getDrawable() == null) {
+            Bitmap previewBmp = SurroundCarModelRepository.loadActiveCarModelBitmap(ctx, appConfig);
+            ivCarModelPreview.setImageBitmap(previewBmp);
+            loadedCarModelSignature = signature;
+        }
     }
 
     private void showLocalCalibrationPicker() {
@@ -432,7 +473,9 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         List<File> candidates = SurroundCalibrationManager.findCalibrationCandidates(downloadDir);
         if (candidates.isEmpty()) {
-            Toast.makeText(ctx, "Download 目录下未找到可导入的 E5 calibration.json", Toast.LENGTH_LONG).show();
+            launchDocumentPicker(ctx, calibrationJsonPickerLauncher,
+                    new String[]{"application/json", "text/plain", "*/*"},
+                    "E5 calibration.json");
             return;
         }
         String[] labels = new String[candidates.size()];
@@ -449,14 +492,11 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
                     File internalDir = new File(ctx.getFilesDir(), "surround");
                     SurroundCalibrationManager.ImportResult result =
                             SurroundCalibrationManager.importCalibrationFile(selected, internalDir);
-                    if (result.success && result.importedFilePath != null) {
-                        appConfig.setSurroundCustomCalibrationPath(result.importedFilePath);
-                        appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
-                        notifyHostSurroundChanged();
-                        refreshCalibrationAndModelUi(ctx);
-                    }
-                    Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+                    applyCalibrationImportResult(ctx, result);
                 })
+                .setNeutralButton("系统文件选择器", (d, w) -> launchDocumentPicker(ctx, calibrationJsonPickerLauncher,
+                        new String[]{"application/json", "text/plain", "*/*"},
+                        "E5 calibration.json"))
                 .setNegativeButton("取消", null)
                 .show();
     }
@@ -467,7 +507,10 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         List<File> candidates = SurroundCarModelRepository.findCustomPngCandidates(downloadDir);
         if (candidates.isEmpty()) {
-            Toast.makeText(ctx, "Download 目录下未找到透明 PNG 车模文件（需 ≤ 4MB）", Toast.LENGTH_LONG).show();
+            // Android 11+ 未授予「所有文件访问」时 Download 目录无法直接列举，回退系统 SAF 文件选择器（免权限）
+            launchDocumentPicker(ctx, carModelPngPickerLauncher,
+                    new String[]{"image/png", "image/*"},
+                    "透明 PNG 车模");
             return;
         }
         String[] labels = new String[candidates.size()];
@@ -481,16 +524,89 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
                     File internalDir = new File(ctx.getFilesDir(), "surround");
                     SurroundCarModelRepository.ImportResult result =
                             SurroundCarModelRepository.importCustomCarModelPng(selected, internalDir);
-                    if (result.success && result.importedFilePath != null) {
-                        appConfig.setSurroundCustomCarModelPath(result.importedFilePath);
-                        appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG);
-                        notifyHostSurroundChanged();
-                        refreshCalibrationAndModelUi(ctx);
-                    }
-                    Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+                    applyCarModelImportResult(ctx, result);
                 })
+                .setNeutralButton("系统文件选择器", (d, w) -> launchDocumentPicker(ctx, carModelPngPickerLauncher,
+                        new String[]{"image/png", "image/*"},
+                        "透明 PNG 车模"))
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void launchDocumentPicker(@NonNull Context ctx,
+                                      @NonNull ActivityResultLauncher<String[]> launcher,
+                                      @NonNull String[] mimeTypes,
+                                      @NonNull String targetLabel) {
+        try {
+            launcher.launch(mimeTypes);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            showMissingPickerOrPermissionDialog(ctx, targetLabel);
+        }
+    }
+
+    private void showMissingPickerOrPermissionDialog(@NonNull Context ctx, @NonNull String targetLabel) {
+        boolean needAllFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
+                && !Environment.isExternalStorageManager();
+        String message = needAllFiles
+                ? "Download 目录下未扫描到可用" + targetLabel + "（Android 11+ 未授予「所有文件访问」权限时无法直接读取 Download 目录），且当前系统未提供文件选择器。\n\n请先授予文件访问权限并将文件放入 Download 目录。"
+                : "Download 目录下未找到可用" + targetLabel + "，且当前系统未提供文件选择器。\n\n请将文件放入 Download 目录后重试。";
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("无法打开文件选择")
+                .setMessage(message)
+                .setNegativeButton("取消", null);
+        if (needAllFiles) {
+            builder.setPositiveButton("去授予文件权限", (d, w) -> openAllFilesAccessSettings(ctx));
+        }
+        builder.show();
+    }
+
+    private void openAllFilesAccessSettings(@NonNull Context ctx) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                    Uri.parse("package:" + ctx.getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (Exception ignored) {
+                Toast.makeText(ctx, "请在系统设置中授予 EVCam 文件访问权限", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void applyCalibrationImportResult(@NonNull Context ctx,
+                                              @NonNull SurroundCalibrationManager.ImportResult result) {
+        if (result.success && result.importedFilePath != null) {
+            appConfig.setSurroundCustomCalibrationPath(result.importedFilePath);
+            appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
+            notifyHostSurroundChanged();
+            refreshCalibrationAndModelUi(ctx, false);
+            Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+        } else {
+            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle("校准文件导入失败")
+                    .setMessage(result.message)
+                    .setPositiveButton("确定", null)
+                    .show();
+        }
+    }
+
+    private void applyCarModelImportResult(@NonNull Context ctx,
+                                           @NonNull SurroundCarModelRepository.ImportResult result) {
+        if (result.success && result.importedFilePath != null) {
+            appConfig.setSurroundCustomCarModelPath(result.importedFilePath);
+            appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG);
+            notifyHostSurroundChanged();
+            refreshCalibrationAndModelUi(ctx, true);
+            Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
+        } else {
+            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle("车模导入失败")
+                    .setMessage(result.message)
+                    .setPositiveButton("确定", null)
+                    .show();
+        }
     }
 
     private void applyOptionButtonState(@Nullable Button button, @NonNull Context context, boolean selected) {

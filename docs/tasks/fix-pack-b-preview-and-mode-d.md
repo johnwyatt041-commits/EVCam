@@ -1,10 +1,10 @@
 # 包 B：主预览布局 + 模式 D + 360 A 排版精调
 
-最后更新：2026-11-18 16:48:00 +08:00
-最后核对：2026-11-18 16:48:00 +08:00
+最后更新：2026-11-19 02:31:36 +08:00
+最后核对：2026-11-19 02:31:36 +08:00
 任务/执行者：fix-pack-b-preview-and-mode-d / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-版本：`1.6.6-test-11181639`（未封包提交）
+版本：`1.6.6-test-11190207`（已提交并推送 fork 分支，本地已构建 A/B Release APK）
 状态：已完成代码与单测/Lint/双分辨率模拟器回归（待上车四路+方向盘转角实测）
 当前结论：包 B 需求（`1.1`~`1.7`）已全部落地并通过双风味 `448` 项 JVM 单测（0 失败）、双风味 Lint（0 errors）、Debug/Release APK 编译与 `emulator-5556`（2 路模拟相机）`2560×1600` & `1600×900` 全流程视觉/logcat 验证；模拟器 2 路与静态转角限制外的四路实车相机拼接与实车方向盘转角流（`SurroundSteeringAngleSource` APVP `40005` / AOSP `0x11600209`）待上车验收。
 
@@ -45,10 +45,12 @@
 
 ## 最近更新
 
-- 2026-11-18 16:48:00 +08:00 | 完成包 B 实现与模拟器全项验收 | 完成 `1.1`~`1.7`（`MODE_D`、去重胶囊、画内裁剪、碰撞换位、`360 A` 比例及切回不黑屏），`1.6.6-test-11181639` 通过 `448` 单测、双风味 `0` Lint error 与 `emulator-5556` 双分辨率实测并完成清理 | [fix-pack-b-preview-and-mode-d.md](fix-pack-b-preview-and-mode-d.md)
+- 2026-11-19 02:27:29 +08:00 | 写入用户车模默认图并修复本地导入无响应 | 内置 `drawable-nodpi/e5_car_model_default.png`（504×1024）并修 `SurroundGlRenderer` `GL_ONE` 混合；补 SAF `OpenDocument` 与弹窗反馈解决无存储权限/Toast 抑制下按钮“点不了”问题（`1.6.6-test-11190207`：双风味 `470` 测 0 失败、0 Lint error、`emulator-5556` 360 A/SAF/Download 导入全通过） | [P020](../PITFALLS.md)
+- 2026-11-19 01:35:22 +08:00 | 模拟器初测反馈排查（4.1 切 A/D 卡顿 & 车模图来源） | 核实设置 4.1 切 A/D 卡顿为主线程 `closeCamera()`（`P019`）；默认车模纯离线绘制，上车不联网加载 | [P019](../PITFALLS.md)
+- 2026-11-18 16:48:00 +08:00 | 完成包 B 实现与模拟器全项验收 | 完成 `1.1`~`1.7`（`MODE_D`、去重胶囊、画内裁剪、碰撞换位、`360 A` 比例及切回不黑屏），`1.6.6-test-11181639` 通过 `448` 单测、双风味 `0` Lint error 与 `emulator-5556` 双分辨率实测 | [fix-pack-b-preview-and-mode-d.md](fix-pack-b-preview-and-mode-d.md)
 - 2026-11-18 15:40:00 +08:00 | 补全模式 D 与包 B 规格 | 补全 `1.1`~`1.7` 与模式 D 规格并同步附图 | [fix-pack-b-preview-and-mode-d.md](fix-pack-b-preview-and-mode-d.md)
 - 2026-11-18 15:33:46 +08:00 | 基线取证 | 完成 `emulator-5556` 现状截图与 `SingleCamera` 阻塞根因定位 | [fix-pack-b-preview-and-mode-d.md](fix-pack-b-preview-and-mode-d.md)
 
 ## 下一步
 
-1. 继续按序开展 [包 C（补盲重构）](fix-pack-c-blindspot-refactor.md)、[包 D（设置与水印）](fix-pack-d-recorder-settings-and-watermark.md) 与 [包 E（车机缩放收口）](fix-pack-e-headunit-ui-scaling.md)，或在包 B 后按需求封包上车联合实测。
+1. 决定是否将 `1.6.6-test-11190207` 提交并封包更新 `outputs/` 后上车实测（并确认是否优化 `P019`）。

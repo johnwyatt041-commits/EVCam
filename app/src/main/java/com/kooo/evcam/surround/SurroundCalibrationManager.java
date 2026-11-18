@@ -1,5 +1,11 @@
 package com.kooo.evcam.surround;
 
+import android.content.ContentResolver;
+import android.content.Context;
+import android.database.Cursor;
+import android.net.Uri;
+import android.provider.OpenableColumns;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -11,10 +17,12 @@ import com.google.gson.JsonSyntaxException;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -236,6 +244,38 @@ public final class SurroundCalibrationManager {
         }
         try {
             String raw = readUtf8File(sourceFile);
+            return importCalibrationRaw(raw, sourceFile.getName(), internalDestDir);
+        } catch (IOException e) {
+            return new ImportResult(false, "读取/保存标定文件失败：" + e.getMessage(), null);
+        }
+    }
+
+    /** 通过系统文件选择器 (SAF Uri) 验证并导入本地 E5 `calibration.json`。 */
+    @NonNull
+    public static ImportResult importCalibrationUri(@NonNull Context context,
+                                                    @NonNull Uri sourceUri,
+                                                    @NonNull File internalDestDir) {
+        ContentResolver resolver = context.getContentResolver();
+        String displayName = queryDisplayName(resolver, sourceUri);
+        try (InputStream in = resolver.openInputStream(sourceUri)) {
+            if (in == null) {
+                return new ImportResult(false, "无法打开所选标定文件", null);
+            }
+            String raw = readBoundedUtf8(in, MAX_CALIBRATION_FILE_BYTES);
+            if (raw == null) {
+                return new ImportResult(false, "标定文件大小超限（需 <= 2MB）", null);
+            }
+            return importCalibrationRaw(raw, displayName, internalDestDir);
+        } catch (IOException e) {
+            return new ImportResult(false, "读取/保存标定文件失败：" + e.getMessage(), null);
+        }
+    }
+
+    @NonNull
+    private static ImportResult importCalibrationRaw(@NonNull String raw,
+                                                     @NonNull String displayName,
+                                                     @NonNull File internalDestDir) {
+        try {
             parseCalibrationJson(raw, 206, 530, 0);
             if (!internalDestDir.exists() && !internalDestDir.mkdirs()) {
                 return new ImportResult(false, "无法创建本地标定目录", null);
@@ -244,12 +284,49 @@ public final class SurroundCalibrationManager {
             try (FileOutputStream fos = new FileOutputStream(destFile)) {
                 fos.write(raw.getBytes(StandardCharsets.UTF_8));
             }
-            return new ImportResult(true, "已导入本地 E5 校准：" + sourceFile.getName(), destFile.getAbsolutePath());
+            return new ImportResult(true, "已导入本地 E5 校准：" + displayName, destFile.getAbsolutePath());
         } catch (IllegalArgumentException e) {
             return new ImportResult(false, "E5 标定 JSON 校验失败：" + e.getMessage(), null);
         } catch (IOException e) {
             return new ImportResult(false, "读取/保存标定文件失败：" + e.getMessage(), null);
         }
+    }
+
+    @Nullable
+    private static String readBoundedUtf8(@NonNull InputStream in, long maxBytes) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        long total = 0L;
+        int n;
+        while ((n = in.read(chunk)) > 0) {
+            total += n;
+            if (total > maxBytes) {
+                return null;
+            }
+            buffer.write(chunk, 0, n);
+        }
+        if (total == 0L) {
+            return null;
+        }
+        return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+    }
+
+    @NonNull
+    private static String queryDisplayName(@NonNull ContentResolver resolver, @NonNull Uri uri) {
+        try (Cursor cursor = resolver.query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (idx >= 0) {
+                    String name = cursor.getString(idx);
+                    if (name != null && !name.trim().isEmpty()) {
+                        return name.trim();
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        String segment = uri.getLastPathSegment();
+        return (segment != null && !segment.trim().isEmpty()) ? segment.trim() : "calibration.json";
     }
 
     @Nullable

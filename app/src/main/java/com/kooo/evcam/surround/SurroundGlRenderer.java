@@ -286,7 +286,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             this.wheelsCollapsed = appConfig.isSurroundWheelsCollapsed();
             this.stretchRoadViews = appConfig.isSurroundStretchRoadViews();
             this.guidanceEnabled = appConfig.isPreviewGuidanceEnabled();
-            this.pendingCarBitmap = SurroundCarModelRepository.loadActiveCarModelBitmap(appConfig);
+            this.pendingCarBitmap = SurroundCarModelRepository.loadActiveCarModelBitmap(context, appConfig);
             this.birdMeshDirty.set(true);
             this.roadMeshDirty.set(true);
             this.carBitmapDirty.set(true);
@@ -507,10 +507,10 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             drawGuidanceBatch(birdGuidanceBuffer, birdGuidanceCounts);
         }
 
-        // 叠绘离线 E5 俯视车模纹理
+        // 叠绘离线 E5 俯视车模纹理（BitmapFactory / Canvas 均输出预乘 Alpha，需用 GL_ONE 避免二次乘 Alpha 变暗）
         if (carProgram != 0 && carTextureId != 0 && carQuadBuffer != null) {
             GLES20.glEnable(GLES20.GL_BLEND);
-            GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
+            GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
             GLES20.glUseProgram(carProgram);
             GLES20.glActiveTexture(GLES20.GL_TEXTURE4);
             GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, carTextureId);

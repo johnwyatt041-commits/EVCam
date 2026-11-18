@@ -108,4 +108,32 @@ public class SurroundCalibrationAndGuidanceTest {
         assertTrue(SurroundCarModelRepository.isValidPngSignatureBytes(validPngHeader));
         assertFalse(SurroundCarModelRepository.isValidPngSignatureBytes(fakeJpgHeader));
     }
+
+    @Test
+    public void defaultCarModelResourceExistsAndImportStreamValidatesPngDimensions() throws Exception {
+        File defaultPng = new File("src/main/res/drawable-nodpi/e5_car_model_default.png");
+        if (!defaultPng.isFile()) {
+            defaultPng = new File("app/src/main/res/drawable-nodpi/e5_car_model_default.png");
+        }
+        assertTrue("Built-in default car model PNG resource must exist", defaultPng.isFile());
+        byte[] defaultBytes = Files.readAllBytes(defaultPng.toPath());
+        assertTrue(defaultBytes.length > 0 && defaultBytes.length <= SurroundCarModelRepository.MAX_CAR_MODEL_PNG_BYTES);
+        assertTrue(SurroundCarModelRepository.isValidPngSignatureBytes(defaultBytes));
+        int[] dims = SurroundCarModelRepository.parsePngIhdrDimensions(defaultBytes);
+        assertNotNull(dims);
+        assertEquals(504, dims[0]);
+        assertEquals(1024, dims[1]);
+
+        File tmpDir = Files.createTempDirectory("evcam_car_model_test").toFile();
+        File destDir = new File(tmpDir, "surround");
+        SurroundCarModelRepository.ImportResult ok = SurroundCarModelRepository.importCustomCarModelBytes(
+                defaultBytes, "my_e5.png", destDir);
+        assertTrue(ok.success);
+        assertNotNull(ok.importedFilePath);
+        assertTrue(new File(ok.importedFilePath).isFile());
+
+        SurroundCarModelRepository.ImportResult rejected = SurroundCarModelRepository.importCustomCarModelBytes(
+                new byte[]{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09}, "bad.png", destDir);
+        assertFalse(rejected.success);
+    }
 }
