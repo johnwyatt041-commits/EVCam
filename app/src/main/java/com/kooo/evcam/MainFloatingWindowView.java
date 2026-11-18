@@ -14,6 +14,8 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
 
+import com.kooo.evcam.blindspot.BlindSpotDisplayUtils;
+import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
@@ -53,7 +55,7 @@ public class MainFloatingWindowView extends FrameLayout {
     private static final int TOUCH_SLOP = 20; // 移动超过此距离取消长按检测
     private final Runnable longPressRunnable = () -> isDragEnabled = true;
 
-    private BlindSpotStatusBarView statusBar;
+    private String activeBlindSpotSlot = null;
     private TurnSignalArrowView turnSignalArrowView;
 
     public MainFloatingWindowView(Context context) {
@@ -76,9 +78,7 @@ public class MainFloatingWindowView extends FrameLayout {
         LayoutInflater.from(getContext()).inflate(layoutRes, this);
         textureView = findViewById(R.id.secondary_texture_view);
 
-        statusBar = findViewById(R.id.blind_spot_status_bar);
         turnSignalArrowView = findViewById(R.id.turn_signal_arrow_view);
-        applyStatusBarStyle();
 
         // 圆角裁切 - 30dp
         final float cornerRadius = 30 * getContext().getResources().getDisplayMetrics().density;
@@ -307,7 +307,15 @@ public class MainFloatingWindowView extends FrameLayout {
                     saveW = params.height;
                     saveH = params.width;
                 }
-                appConfig.setMainFloatingBounds(params.x, params.y, saveW, saveH);
+                if (activeBlindSpotSlot != null) {
+                    int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
+                    appConfig.setBlindSpotPlacement(
+                            activeBlindSpotSlot,
+                            BlindSpotPlacement.fromPixels(
+                                    params.x, params.y, saveW, saveH, screenSize[0], screenSize[1]));
+                } else {
+                    appConfig.setMainFloatingBounds(params.x, params.y, saveW, saveH);
+                }
                 return true;
         }
         return true;
@@ -410,7 +418,7 @@ public class MainFloatingWindowView extends FrameLayout {
         if (attachedOverlay != null) {
             attachedOverlay.updateLayout();
         } else if (windowManager != null) {
-            updateWindowLayoutSafely();
+            windowManager.updateViewLayout(this, params);
         }
     }
 
@@ -418,16 +426,33 @@ public class MainFloatingWindowView extends FrameLayout {
         FloatingWindowDisplayHelper.revealNow(this, getActiveWindowManager(), params);
     }
 
+    public void setBlindSpotActiveSlot(String slot) {
+        this.activeBlindSpotSlot = slot != null ? BlindSpotPlacement.normalizeSlot(slot) : null;
+        updateLayout();
+    }
+
     /**
      * 更新主屏悬浮窗布局
      */
     public void updateLayout() {
-        params.x = appConfig.getMainFloatingX();
-        params.y = appConfig.getMainFloatingY();
-        params.width = appConfig.getMainFloatingWidth();
-        params.height = appConfig.getMainFloatingHeight();
+        if (activeBlindSpotSlot != null) {
+            int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
+            int[] bounds = appConfig.getBlindSpotPlacementPixels(
+                    activeBlindSpotSlot, screenSize[0], screenSize[1]);
+            params.x = bounds[0];
+            params.y = bounds[1];
+            params.width = bounds[2];
+            params.height = bounds[3];
+        } else {
+            params.x = appConfig.getMainFloatingX();
+            params.y = appConfig.getMainFloatingY();
+            params.width = appConfig.getMainFloatingWidth();
+            params.height = appConfig.getMainFloatingHeight();
+        }
         try {
-            updateWindowLayoutSafely();
+            if (getParent() != null) {
+                updateWindowLayoutSafely();
+            }
         } catch (Exception e) {
             AppLog.e(TAG, "Error updating main floating window layout: " + e.getMessage());
         }
@@ -514,17 +539,27 @@ public class MainFloatingWindowView extends FrameLayout {
     public void applyTransformNow() {
         String cameraPos = desiredCameraPos != null ? desiredCameraPos : appConfig.getMainFloatingCamera();
 
-        // 矫正旋转更接近竖屏时，悬浮窗宽高互换，让画面自然填满不裁切
-        int correctionRotation = 0;
-        if (appConfig.isBlindSpotCorrectionEnabled() && cameraPos != null) {
-            correctionRotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
+        int targetW;
+        int targetH;
+        if (activeBlindSpotSlot != null) {
+            int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
+            int[] bounds = appConfig.getBlindSpotPlacementPixels(
+                    activeBlindSpotSlot, screenSize[0], screenSize[1]);
+            targetW = bounds[2];
+            targetH = bounds[3];
+            isCurrentlySwapped = false;
+        } else {
+            int correctionRotation = 0;
+            if (appConfig.isBlindSpotCorrectionEnabled() && cameraPos != null) {
+                correctionRotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
+            }
+            int baseW = appConfig.getMainFloatingWidth();
+            int baseH = appConfig.getMainFloatingHeight();
+            boolean shouldSwap = BlindSpotCorrection.isCloserToPortrait(correctionRotation);
+            isCurrentlySwapped = shouldSwap;
+            targetW = shouldSwap ? baseH : baseW;
+            targetH = shouldSwap ? baseW : baseH;
         }
-        int baseW = appConfig.getMainFloatingWidth();
-        int baseH = appConfig.getMainFloatingHeight();
-        boolean shouldSwap = BlindSpotCorrection.isCloserToPortrait(correctionRotation);
-        isCurrentlySwapped = shouldSwap;
-        int targetW = shouldSwap ? baseH : baseW;
-        int targetH = shouldSwap ? baseW : baseH;
 
         // 用户正在拖动缩放时，不覆盖 params，以免打断手势
         if (!isResizing) {
@@ -589,27 +624,6 @@ public class MainFloatingWindowView extends FrameLayout {
             retryBindRunnable = null;
         }
         retryBindCount = 0;
-    }
-
-    private void applyStatusBarStyle() {
-        if (statusBar == null) return;
-        int style = appConfig.getBlindSpotStatusBarStyle();
-        if (style == BlindSpotStatusBarView.STYLE_OFF) {
-            statusBar.setVisibility(View.GONE);
-        } else {
-            statusBar.setVisibility(View.VISIBLE);
-            statusBar.setAnimationStyle(style);
-            statusBar.setEffectColor(appConfig.getBlindSpotStatusBarColor());
-            int alpha = (int) (appConfig.getBlindSpotStatusBarBgOpacity() / 100f * 255);
-            statusBar.setBackgroundColor(android.graphics.Color.argb(alpha, 0x1A, 0x1A, 0x1A));
-        }
-    }
-
-    public void updateStatusLabel(String cameraPos) {
-        if (statusBar != null) {
-            applyStatusBarStyle();
-            statusBar.setDirection(cameraPos);
-        }
     }
 
     /**

@@ -117,62 +117,80 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="12sp" />
 
-                <HorizontalScrollView
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="12dp"
-                    android:scrollbars="none">
+                    android:orientation="vertical">
 
-                    <LinearLayout
-                        android:layout_width="wrap_content"
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="horizontal">
+                        android:layout_marginBottom="8dp"
+                        android:scrollbars="none">
 
-                        <Button
-                            android:id="@+id/btn_save_current_snapshot"
+                        <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginEnd="8dp"
-                            android:text="保存当前为快照"
-                            android:backgroundTint="@color/button_accent"
-                            android:textColor="@color/ui_on_accent" />
+                            android:orientation="horizontal">
 
-                        <Button
-                            android:id="@+id/btn_export_json_file"
+                            <Button
+                                android:id="@+id/btn_save_current_snapshot"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="8dp"
+                                android:text="保存当前为快照"
+                                android:backgroundTint="@color/button_accent"
+                                android:textColor="@color/ui_on_accent" />
+
+                            <Button
+                                android:id="@+id/btn_export_json_file"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="8dp"
+                                android:text="导出 JSON 文件"
+                                android:backgroundTint="@color/button_background"
+                                android:textColor="@color/button_text" />
+
+                            <Button
+                                android:id="@+id/btn_copy_json_clipboard"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="复制配置 JSON"
+                                android:backgroundTint="@color/button_background"
+                                android:textColor="@color/button_text" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none">
+
+                        <LinearLayout
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginEnd="8dp"
-                            android:text="导出 JSON 文件"
-                            android:backgroundTint="@color/button_background"
-                            android:textColor="@color/button_text" />
+                            android:orientation="horizontal">
 
-                        <Button
-                            android:id="@+id/btn_copy_json_clipboard"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginEnd="8dp"
-                            android:text="复制配置 JSON"
-                            android:backgroundTint="@color/button_background"
-                            android:textColor="@color/button_text" />
+                            <Button
+                                android:id="@+id/btn_import_json_file"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginEnd="8dp"
+                                android:text="导入 JSON 文件"
+                                android:backgroundTint="@color/button_background"
+                                android:textColor="@color/button_text" />
 
-                        <Button
-                            android:id="@+id/btn_import_json_file"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginEnd="8dp"
-                            android:text="导入 JSON 文件"
-                            android:backgroundTint="@color/button_background"
-                            android:textColor="@color/button_text" />
-
-                        <Button
-                            android:id="@+id/btn_import_json_paste"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="粘贴 JSON 导入"
-                            android:backgroundTint="@color/button_background"
-                            android:textColor="@color/button_text" />
-                    </LinearLayout>
-                </HorizontalScrollView>
+                            <Button
+                                android:id="@+id/btn_import_json_paste"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="粘贴 JSON 导入"
+                                android:backgroundTint="@color/button_background"
+                                android:textColor="@color/button_text" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+                </LinearLayout>
             </LinearLayout>
 
             <!-- 筛选与关键词检索 -->

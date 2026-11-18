@@ -19,6 +19,9 @@ public final class VehicleSignalSnapshot {
 
         /** 按 AOSP VehicleGear 标准值解析。 */
         public static Gear fromVhalValue(int rawValue) {
+            if (rawValue < 0) {
+                return UNKNOWN;
+            }
             switch (rawValue) {
                 case 0x0000:
                     return UNKNOWN;
@@ -31,6 +34,9 @@ public final class VehicleSignalSnapshot {
                 case 0x0008:
                     return DRIVE;
                 default:
+                    if ((rawValue & 0x0002) != 0 && (rawValue & 0x0004) == 0) {
+                        return REVERSE;
+                    }
                     if ((rawValue & 0x0004) != 0) {
                         return PARK;
                     }

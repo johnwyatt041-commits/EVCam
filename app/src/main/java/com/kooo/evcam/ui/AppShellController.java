@@ -4,6 +4,7 @@ import android.content.Context;
 import android.content.pm.PackageManager;
 import android.content.res.ColorStateList;
 import android.graphics.drawable.Drawable;
+import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -63,6 +64,7 @@ public final class AppShellController {
     private boolean fullscreenPreview;
     private boolean floatingWindowActive;
     private int lastSysTopInset;
+    private float currentUiScale = 1.0f;
     private PreviewMode activePreviewMode = PreviewMode.MODE_B;
     @Nullable
     private Consumer<Boolean> fullscreenListener;
@@ -105,8 +107,13 @@ public final class AppShellController {
                 if (f.getId() == R.id.fragment_container) {
                     normalizeHeader(v);
                 }
+                float scale = UiScaleController.getSavedScaleFactor(activity);
+                UiScaleHelper.applyScaleToViewTree(v, scale);
+                if (f instanceof UiScaleController.ScaleAware) {
+                    ((UiScaleController.ScaleAware) f).onUiScaleApplied(scale);
+                }
             }
-        }, false);
+        }, true);
         fragments.addOnBackStackChangedListener(this::updateHeader);
     }
 
@@ -139,6 +146,7 @@ public final class AppShellController {
         back.setOnClickListener(v -> onBack.run());
         preview.setOnClickListener(v -> togglePreview.run());
         refreshTheme(activity, isActivityNight());
+        applyUiScale(UiScaleController.getSavedScaleFactor(activity));
         updateHeader();
     }
 
@@ -162,6 +170,10 @@ public final class AppShellController {
         View btnC = shell.findViewById(R.id.ui_mode_c);
         if (btnC != null) {
             btnC.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_C));
+        }
+        View btnD = shell.findViewById(R.id.ui_mode_d);
+        if (btnD != null) {
+            btnD.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_D));
         }
         View btnFullscreen = shell.findViewById(R.id.ui_fullscreen_toggle);
         if (btnFullscreen != null) {
@@ -189,8 +201,9 @@ public final class AppShellController {
         applyPreviewModeColors(activity);
     }
 
-    private void scaleNavDrawable(TextView item) {
-        int iconSize = activity.getResources().getDimensionPixelSize(R.dimen.ui_nav_icon_size);
+    private void scaleNavDrawable(@Nullable TextView item) {
+        if (item == null) return;
+        int iconSize = UiScaleHelper.dimPx(activity, R.dimen.ui_nav_icon_size, currentUiScale);
         Drawable[] icons = item.getCompoundDrawables();
         for (Drawable icon : icons) {
             if (icon != null) icon.setBounds(0, 0, iconSize, iconSize);
@@ -201,20 +214,12 @@ public final class AppShellController {
     private void applySystemBarInsets() {
         View rail = shell.findViewById(R.id.ui_rail);
         View topBar = shell.findViewById(R.id.ui_top_bar);
-        final int railTop = rail.getPaddingTop();
-        final int railBottom = rail.getPaddingBottom();
-        final int topBarHeight = topBar.getLayoutParams().height;
-        final int topBarTop = topBar.getPaddingTop();
 
         ViewCompat.setOnApplyWindowInsetsListener(shell, (v, insets) -> {
             androidx.core.graphics.Insets sys = insets.getInsets(
                     WindowInsetsCompat.Type.statusBars() | WindowInsetsCompat.Type.navigationBars());
             lastSysTopInset = sys.top;
-            rail.setPadding(rail.getPaddingLeft(), railTop + sys.top, rail.getPaddingRight(), railBottom);
-            if (topBar.getLayoutParams() != null && topBarHeight > 0) {
-                topBar.getLayoutParams().height = topBarHeight + sys.top;
-            }
-            topBar.setPadding(topBar.getPaddingLeft(), topBarTop + sys.top, topBar.getPaddingRight(), topBar.getPaddingBottom());
+            applyShellBarInsets(rail, topBar);
             v.setPadding(sys.left, v.getPaddingTop(), sys.right, sys.bottom);
             applyContentTopInset();
             return new WindowInsetsCompat.Builder(insets)
@@ -222,6 +227,188 @@ public final class AppShellController {
                     .build();
         });
         ViewCompat.requestApplyInsets(shell);
+    }
+
+    private void applyShellBarInsets(@Nullable View rail, @Nullable View topBar) {
+        if (rail != null) {
+            int railPad = UiScaleHelper.dimPx(activity, R.dimen.ui_rail_padding, currentUiScale);
+            rail.setPadding(railPad, railPad + lastSysTopInset, railPad, railPad);
+        }
+        if (topBar != null) {
+            int barPadH = UiScaleHelper.dimPx(activity, R.dimen.ui_page_padding, currentUiScale);
+            topBar.setPadding(barPadH, lastSysTopInset, barPadH, topBar.getPaddingBottom());
+            ViewGroup.LayoutParams lp = topBar.getLayoutParams();
+            int targetH = UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_height, currentUiScale) + lastSysTopInset;
+            if (lp != null && lp.height != targetH) {
+                lp.height = targetH;
+                topBar.setLayoutParams(lp);
+            }
+        }
+    }
+
+    /**
+     * 原地应用菜单与按钮缩放倍率：重算左栏宽度/条目/图标/字号、顶栏高度/按钮/字号，
+     * 以及主界面操作按钮与角落快捷胶囊尺寸，不重建 Activity。
+     */
+    public void applyUiScale(float scaleFactor) {
+        this.currentUiScale = UiScaleHelper.normalizeScale(scaleFactor);
+        float s = this.currentUiScale;
+        float density = activity.getResources().getDisplayMetrics().density;
+
+        View rail = shell.findViewById(R.id.ui_rail);
+        View topBar = shell.findViewById(R.id.ui_top_bar);
+        if (rail != null && rail.getLayoutParams() != null) {
+            int targetRailW = UiScaleHelper.dimPx(activity, R.dimen.ui_rail_width, s);
+            if (rail.getLayoutParams().width != targetRailW) {
+                rail.getLayoutParams().width = targetRailW;
+                rail.requestLayout();
+            }
+        }
+        applyShellBarInsets(rail, topBar);
+
+        TextView railBrand = shell.findViewById(R.id.ui_rail_brand);
+        if (railBrand != null) {
+            UiScaleHelper.applyTextViewMetrics(
+                    railBrand,
+                    UiScaleHelper.dimFloat(activity, R.dimen.ui_nav_text_size, s),
+                    UiScaleHelper.dimPx(activity, R.dimen.ui_rail_brand_height, s),
+                    0,
+                    0,
+                    railBrand.getPaddingLeft(),
+                    railBrand.getPaddingTop());
+        }
+
+        applyRailNavItemMetrics(shell.findViewById(R.id.ui_nav_record_toggle), false,
+                UiScaleHelper.dimPx(activity, R.dimen.ui_nav_gap, s));
+        for (int i = 0; i < buttons.length; i++) {
+            int navId = buttons[i];
+            boolean isFooter = (navId == R.id.ui_nav_settings);
+            int marginBottom = (navId == R.id.ui_nav_feishu)
+                    ? 0
+                    : UiScaleHelper.dimPx(activity, R.dimen.ui_nav_gap, s);
+            applyRailNavItemMetrics(shell.findViewById(navId), isFooter, marginBottom);
+        }
+        applyRailNavItemMetrics(shell.findViewById(R.id.ui_nav_exit), true,
+                Math.round(4f * density * s));
+
+        TextView versionView = shell.findViewById(R.id.ui_rail_version);
+        if (versionView != null) {
+            versionView.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                    UiScaleHelper.dimFloat(activity, R.dimen.ui_rail_version_text_size, s));
+        }
+
+        if (topBar != null) {
+            title.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                    UiScaleHelper.dimFloat(activity, R.dimen.ui_top_bar_title_text_size, s));
+            setMarginEnd(title, UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_group_gap, s));
+
+            TextView barStatus = topBar.findViewById(R.id.ui_recording_status);
+            if (barStatus != null) {
+                barStatus.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                        UiScaleHelper.dimFloat(activity, R.dimen.ui_top_bar_status_text_size, s));
+                setMarginEnd(barStatus, UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_group_gap, s));
+            }
+
+            int groupGap = UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_group_gap, s);
+            int btnGap = UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_button_gap, s);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_back), groupGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_edit_layout), groupGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_a), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_b), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_c), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_d), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_fullscreen_toggle), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_floating_window_toggle), groupGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_preview_toggle), -1);
+        }
+
+        View content = shell.findViewById(R.id.ui_content);
+        if (content != null) {
+            View mainView = content.findViewById(R.id.main);
+            if (mainView != null) {
+                int mainPadH = UiScaleHelper.dimPx(activity, R.dimen.ui_page_padding, s);
+                mainView.setPadding(mainPadH, mainView.getPaddingTop(), mainPadH, mainView.getPaddingBottom());
+            }
+            int actionHeight = UiScaleHelper.dimPx(activity, R.dimen.ui_main_action_button_height, s);
+            int actionPadH = UiScaleHelper.dimPx(activity, R.dimen.ui_button_padding_h, s);
+            float actionTextPx = UiScaleHelper.dimFloat(activity, R.dimen.ui_button_text_size, s);
+
+            Button btnTakePhoto = content.findViewById(R.id.btn_take_photo);
+            if (btnTakePhoto != null) {
+                int minW = UiScaleHelper.dimPx(activity, R.dimen.ui_button_min_width, s);
+                UiScaleHelper.applyTextViewMetrics(btnTakePhoto, actionTextPx, actionHeight, actionHeight, minW, actionPadH, 0);
+                setMarginEnd(btnTakePhoto, Math.round(10f * density * s));
+            }
+            Button btnStartRecord = content.findViewById(R.id.btn_start_record);
+            if (btnStartRecord != null) {
+                int minW = UiScaleHelper.dimPx(activity, R.dimen.ui_main_action_button_min_width, s);
+                UiScaleHelper.applyTextViewMetrics(btnStartRecord, actionTextPx, actionHeight, actionHeight, minW, actionPadH, 0);
+            }
+
+            View cornerGroup = content.findViewById(R.id.ui_shortcut_corner_nav_group);
+            if (cornerGroup != null) {
+                int groupH = UiScaleHelper.dimPx(activity, R.dimen.ui_corner_shortcut_height, s);
+                int groupPadH = Math.round(6f * density * s);
+                cornerGroup.setPadding(groupPadH, cornerGroup.getPaddingTop(), groupPadH, cornerGroup.getPaddingBottom());
+                ViewGroup.LayoutParams glp = cornerGroup.getLayoutParams();
+                if (glp != null && glp.height != groupH) {
+                    glp.height = groupH;
+                    cornerGroup.setLayoutParams(glp);
+                }
+                int itemH = UiScaleHelper.dimPx(activity, R.dimen.ui_corner_shortcut_item_height, s);
+                int itemPadH = Math.round(10f * density * s);
+                float pillTextPx = UiScaleHelper.dimFloat(activity, R.dimen.ui_pill_text_size, s);
+                UiScaleHelper.applyTextViewMetrics(cornerGroup.findViewById(R.id.btn_shortcut_back),
+                        pillTextPx, itemH, itemH, 0, itemPadH, 0);
+                UiScaleHelper.applyTextViewMetrics(cornerGroup.findViewById(R.id.btn_shortcut_settings),
+                        pillTextPx, itemH, itemH, 0, itemPadH, 0);
+            }
+        }
+    }
+
+    private void applyRailNavItemMetrics(@Nullable TextView item, boolean isFooter, int marginBottomPx) {
+        if (item == null) return;
+        float s = currentUiScale;
+        int minH = UiScaleHelper.dimPx(activity,
+                isFooter ? R.dimen.ui_nav_footer_height : R.dimen.ui_nav_height, s);
+        int padH = UiScaleHelper.dimPx(activity, R.dimen.ui_nav_padding, s);
+        int padV = UiScaleHelper.dimPx(activity, R.dimen.ui_nav_padding_v, s);
+        float textPx = UiScaleHelper.dimFloat(activity, R.dimen.ui_nav_text_size, s);
+        UiScaleHelper.applyTextViewMetrics(item, textPx, ViewGroup.LayoutParams.WRAP_CONTENT, minH, 0, padH, padV);
+        item.setCompoundDrawablePadding(UiScaleHelper.dimPx(activity, R.dimen.ui_nav_icon_gap, s));
+        ViewGroup.LayoutParams lp = item.getLayoutParams();
+        if (lp instanceof ViewGroup.MarginLayoutParams) {
+            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+            if (mlp.bottomMargin != marginBottomPx) {
+                mlp.bottomMargin = marginBottomPx;
+                item.setLayoutParams(mlp);
+            }
+        }
+        scaleNavDrawable(item);
+    }
+
+    private void applyTopBarButtonMetrics(@Nullable View view, int marginEndPx) {
+        if (!(view instanceof TextView)) return;
+        float s = currentUiScale;
+        int btnH = UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_button_height, s);
+        int padH = UiScaleHelper.dimPx(activity, R.dimen.ui_top_bar_button_padding_h, s);
+        float textPx = UiScaleHelper.dimFloat(activity, R.dimen.ui_top_bar_button_text_size, s);
+        UiScaleHelper.applyTextViewMetrics((TextView) view, textPx, btnH, btnH, 0, padH, 0);
+        if (marginEndPx >= 0) {
+            setMarginEnd(view, marginEndPx);
+        }
+    }
+
+    private static void setMarginEnd(@Nullable View view, int marginEndPx) {
+        if (view == null) return;
+        ViewGroup.LayoutParams lp = view.getLayoutParams();
+        if (lp instanceof ViewGroup.MarginLayoutParams) {
+            ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+            if (mlp.getMarginEnd() != marginEndPx) {
+                mlp.setMarginEnd(marginEndPx);
+                view.setLayoutParams(mlp);
+            }
+        }
     }
 
     private void applyContentTopInset() {
@@ -482,6 +669,8 @@ public final class AppShellController {
                 activePreviewMode == PreviewMode.MODE_B);
         styleShellToggle(shell.findViewById(R.id.ui_mode_c), themedContext,
                 activePreviewMode == PreviewMode.MODE_C);
+        styleShellToggle(shell.findViewById(R.id.ui_mode_d), themedContext,
+                activePreviewMode == PreviewMode.MODE_D);
         Button fullscreenBtn = shell.findViewById(R.id.ui_fullscreen_toggle);
         if (fullscreenBtn != null) {
             fullscreenBtn.setText(fullscreenPreview ? "退出全屏" : "全屏");

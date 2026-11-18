@@ -3,6 +3,10 @@ package com.kooo.evcam;
 import android.content.Context;
 import android.content.SharedPreferences;
 
+import androidx.annotation.Nullable;
+
+import com.kooo.evcam.blindspot.BlindSpotCorrectionMath;
+import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.blindspot.CameraMirrorPolicy;
 import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.camera.ImageAdjustmentConfig;
@@ -151,9 +155,10 @@ public class AppConfig implements CameraMirrorPolicy.Store {
                  // 悬浮模拟按钮Y
 
     // 补盲悬浮窗动效
-    private static final String KEY_BLIND_SPOT_STATUS_BAR_STYLE = "blind_spot_status_bar_style";             // 状态栏动效样式 (0=关, 1-5=五种动效)
-    private static final String KEY_BLIND_SPOT_STATUS_BAR_COLOR = "blind_spot_status_bar_color";             // 状态栏动效颜色 (ARGB int)
-    private static final String KEY_BLIND_SPOT_STATUS_BAR_BG_OPACITY = "blind_spot_status_bar_bg_opacity";   // 状态栏底色不透明度 0-100
+    private static final String KEY_BLIND_SPOT_USE_SAME_SIDE = "blind_spot_use_same_side_position";
+    private static final String KEY_BLIND_SPOT_RAIN_NIGHT = "blind_spot_rain_night_enabled";
+    private static final String KEY_BLIND_SPOT_PLACEMENT_PREFIX = "blind_spot_placement_";
+    private static final String KEY_BLIND_SPOT_DISPLAY_TARGET = "blind_spot_editor_display_target"; // -1=主屏, >=0/PICK_ID=副屏或EVCC
 
     // 主屏悬浮窗比例锁定
     private static final String KEY_MAIN_FLOATING_ASPECT_RATIO_LOCKED = "main_floating_aspect_ratio_locked";
@@ -183,11 +188,14 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String KEY_VIDEO_IMAGE_SATURATION_PERCENT = "video_image_saturation_percent";
     private static final String KEY_VIDEO_IMAGE_CROP_PREFIX = "video_image_crop_percent_";
 
-    // T05: 3.3 显示（4模块水印 + 位置 + 样式）
+    // T05/包D: 3.3 显示（独立水印开关 + 自定义文字 + 位置 + 样式）
     private static final String KEY_WATERMARK_CUSTOM_TEXT_ENABLED = "watermark_custom_text_enabled";
     private static final String KEY_WATERMARK_CUSTOM_TEXT = "watermark_custom_text";
     private static final String KEY_WATERMARK_SPEED_ENABLED = "watermark_speed_enabled";
     private static final String KEY_WATERMARK_GEAR_TURN_ENABLED = "watermark_gear_turn_enabled";
+    private static final String KEY_WATERMARK_GEAR_ENABLED = "watermark_gear_enabled";
+    private static final String KEY_WATERMARK_TURN_SIGNAL_ENABLED = "watermark_turn_signal_enabled";
+    private static final String KEY_WATERMARK_INDEPENDENT_MIGRATED = "watermark_independent_switches_migrated";
     private static final String KEY_VIDEO_WATERMARK_POSITION = "video_watermark_position";
     private static final String KEY_VIDEO_WATERMARK_STYLE = "video_watermark_style";
 
@@ -1787,6 +1795,10 @@ public class AppConfig implements CameraMirrorPolicy.Store {
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "translate_x"), 0.0f)
                 .putFloat(getBlindSpotCorrectionKey(cameraPos, "translate_y"), 0.0f)
                 .putInt(getBlindSpotCorrectionKey(cameraPos, "rotation"), 0)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_left"), 0.0f)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_top"), 0.0f)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_right"), 0.0f)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_bottom"), 0.0f)
                 .putBoolean(getBlindSpotCorrectionKey(cameraPos, "mirror_h"), false)
                 .putBoolean(getBlindSpotCorrectionKey(cameraPos, "mirror_v"), false)
                 .apply();
@@ -2086,42 +2098,28 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         return prefs.getInt(KEY_TURN_SIGNAL_FLOATING_ROTATION, 0);
     }
 
+    public void resetTurnSignalFloatingBounds() {
+        prefs.edit()
+                .putInt(KEY_TURN_SIGNAL_FLOATING_X, 200)
+                .putInt(KEY_TURN_SIGNAL_FLOATING_Y, 200)
+                .putInt(KEY_TURN_SIGNAL_FLOATING_WIDTH, 480)
+                .putInt(KEY_TURN_SIGNAL_FLOATING_HEIGHT, 320)
+                .putInt(KEY_TURN_SIGNAL_FLOATING_ROTATION, 0)
+                .apply();
+    }
+
     // ==================== 桌面悬浮模拟按钮配置相关方法 ====================
 
-    public void setBlindSpotStatusBarStyle(int style) {
-        prefs.edit().putInt(KEY_BLIND_SPOT_STATUS_BAR_STYLE, style).apply();
+    // ==================== 补盲可视化位置与分方向四边裁切配置（Package C） ====================
+
+    public static final int BLIND_SPOT_DISPLAY_MAIN = -1;
+
+    public int getBlindSpotEditorDisplayTarget() {
+        return prefs.getInt(KEY_BLIND_SPOT_DISPLAY_TARGET, BLIND_SPOT_DISPLAY_MAIN);
     }
 
-    /**
-     * @return 0=关闭, 1=序贯灯段, 2=流光彗尾, 3=波纹扩散, 4=呼吸渐变填充, 5=箭头涟漪
-     */
-    public int getBlindSpotStatusBarStyle() {
-        return prefs.getInt(KEY_BLIND_SPOT_STATUS_BAR_STYLE, 1);
-    }
-
-    public void setBlindSpotStatusBarColor(int color) {
-        prefs.edit().putInt(KEY_BLIND_SPOT_STATUS_BAR_COLOR, color).apply();
-    }
-
-    /**
-     * @return ARGB color for status bar effect. Default: amber 0xFFFFBF40
-     */
-    public int getBlindSpotStatusBarColor() {
-        return prefs.getInt(KEY_BLIND_SPOT_STATUS_BAR_COLOR, 0xFFFFBF40);
-    }
-
-    /**
-     * @param opacity 0-100, 0=完全透明, 100=完全不透明
-     */
-    public void setBlindSpotStatusBarBgOpacity(int opacity) {
-        prefs.edit().putInt(KEY_BLIND_SPOT_STATUS_BAR_BG_OPACITY, opacity).apply();
-    }
-
-    /**
-     * @return 0-100, default 31 (约 31% 不透明)
-     */
-    public int getBlindSpotStatusBarBgOpacity() {
-        return prefs.getInt(KEY_BLIND_SPOT_STATUS_BAR_BG_OPACITY, 31);
+    public void setBlindSpotEditorDisplayTarget(int displayId) {
+        prefs.edit().putInt(KEY_BLIND_SPOT_DISPLAY_TARGET, displayId).apply();
     }
 
     // ==================== 时间角标配置相关方法 ====================
@@ -2136,11 +2134,32 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     }
 
     public boolean isVehicleStatusWatermarkEnabled() {
-        return prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false);
+        if (isWatermarkIndependentStorageActive()) {
+            return prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, false)
+                    || prefs.getBoolean(KEY_WATERMARK_GEAR_ENABLED, false)
+                    || prefs.getBoolean(KEY_WATERMARK_TURN_SIGNAL_ENABLED, false);
+        }
+        if (!prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false)) {
+            return false;
+        }
+        return prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, true)
+                || prefs.getBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, true);
     }
 
     public void setVehicleStatusWatermarkEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_VEHICLE_STATUS_WATERMARK, enabled).apply();
+        if (!enabled) {
+            writeIndependentWatermarkSwitches(false, false, false);
+            return;
+        }
+        if (!isWatermarkSpeedEnabled() && !isWatermarkGearEnabled() && !isWatermarkTurnSignalEnabled()) {
+            writeIndependentWatermarkSwitches(true, true, true);
+        } else {
+            writeIndependentWatermarkSwitches(
+                    isWatermarkSpeedEnabled(),
+                    isWatermarkGearEnabled(),
+                    isWatermarkTurnSignalEnabled()
+            );
+        }
     }
     
     /**
@@ -3389,9 +3408,14 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public static final String START_PAGE_PLAYBACK = "playback";
     public static final String START_PAGE_SETTINGS = "settings";
 
+    public static final String UI_SCALE_STANDARD = "standard";
+    public static final String UI_SCALE_LARGE = "large";
+    public static final float UI_SCALE_LARGE_MULTIPLIER = 1.16f;
+
     private static final String KEY_DEFAULT_START_PAGE = "default_start_page";
     private static final String KEY_CONFIRM_DOOR_EXIT = "confirm_door_exit";
     private static final String KEY_DOOR_EXIT_DELAY_SECONDS = "door_exit_delay_seconds";
+    private static final String KEY_UI_SCALE_MODE = "ui_scale_mode";
     public static final int DEFAULT_DOOR_EXIT_DELAY_SECONDS = 5;
 
     /** 规范化启动页标识，未知值回退到默认「记录仪」。 */
@@ -3441,11 +3465,36 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         AppLog.d(TAG, "下车退出确认倒计时已设置: " + normalized + "s");
     }
 
+    /** 菜单与按钮缩放档位：standard（标准自适应）或 large（车机大号）。 */
+    public static String normalizeUiScaleMode(@Nullable String mode) {
+        return UI_SCALE_LARGE.equals(mode) ? UI_SCALE_LARGE : UI_SCALE_STANDARD;
+    }
+
+    /** 菜单与按钮缩放倍率。 */
+    public static float getUiScaleMultiplier(@Nullable String mode) {
+        return UI_SCALE_LARGE.equals(normalizeUiScaleMode(mode)) ? UI_SCALE_LARGE_MULTIPLIER : 1.0f;
+    }
+
+    public String getUiScaleMode() {
+        return normalizeUiScaleMode(prefs.getString(KEY_UI_SCALE_MODE, UI_SCALE_STANDARD));
+    }
+
+    public void setUiScaleMode(@Nullable String mode) {
+        String normalized = normalizeUiScaleMode(mode);
+        prefs.edit().putString(KEY_UI_SCALE_MODE, normalized).apply();
+        AppLog.d(TAG, "菜单与按钮缩放档位已设置: " + normalized);
+    }
+
+    public float getUiScaleMultiplier() {
+        return getUiScaleMultiplier(getUiScaleMode());
+    }
+
     // ==================== T03 多模式主预览与快捷键配置 ====================
 
     public static final String PREVIEW_MODE_B = "mode_b";
     public static final String PREVIEW_MODE_C = "mode_c";
     public static final String PREVIEW_MODE_A = "mode_a"; // T07：360 全景 + 分视角模式
+    public static final String PREVIEW_MODE_D = "mode_d"; // Pack B：双视角（左前/后手动 + 右方向盘联动左/右）
 
     public static final String CORNER_NAV_AUTO = "auto";     // 仅沉浸全屏显示
     public static final String CORNER_NAV_ALWAYS = "always"; // 始终显示
@@ -3454,14 +3503,21 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String KEY_PREVIEW_MODE = "t03_preview_mode";
     private static final String KEY_CORNER_NAV_MODE = "t03_corner_nav_mode";
     private static final String KEY_VIEW_SHORTCUTS_ENABLED = "t03_view_shortcuts_enabled";
+    private static final String KEY_PREVIEW_SLOT_FILL_PREFIX = "preview_slot_fill_";
+    private static final String KEY_PREVIEW_SLOT_ZOOM_PREFIX = "preview_slot_zoom_";
+    private static final String KEY_PREVIEW_SLOT_PAN_X_PREFIX = "preview_slot_pan_x_";
+    private static final String KEY_PREVIEW_SLOT_PAN_Y_PREFIX = "preview_slot_pan_y_";
 
-    /** 规范化主预览模式；T07 激活模式 A（360 全景），与模式 B/C 并列可选。 */
+    /** 规范化主预览模式；与模式 A/B/C/D 并列可选。 */
     public static String normalizePreviewMode(String mode) {
         if (PREVIEW_MODE_A.equals(mode)) {
             return PREVIEW_MODE_A;
         }
         if (PREVIEW_MODE_C.equals(mode)) {
             return PREVIEW_MODE_C;
+        }
+        if (PREVIEW_MODE_D.equals(mode)) {
+            return PREVIEW_MODE_D;
         }
         return PREVIEW_MODE_B;
     }
@@ -3474,6 +3530,59 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         String normalized = normalizePreviewMode(mode);
         prefs.edit().putString(KEY_PREVIEW_MODE, normalized).apply();
         AppLog.d(TAG, "主预览模式已设置: " + normalized);
+    }
+
+    private static String slotTransformKey(String prefix, String modeKey, String cameraKey) {
+        String safeMode = normalizePreviewMode(modeKey);
+        String safeCam = cameraKey != null ? cameraKey : "front";
+        return prefix + safeMode + "_" + safeCam;
+    }
+
+    public boolean isPreviewSlotFillContainer(String modeKey, String cameraKey) {
+        return prefs.getBoolean(slotTransformKey(KEY_PREVIEW_SLOT_FILL_PREFIX, modeKey, cameraKey), true);
+    }
+
+    public void setPreviewSlotFillContainer(String modeKey, String cameraKey, boolean fillContainer) {
+        prefs.edit().putBoolean(slotTransformKey(KEY_PREVIEW_SLOT_FILL_PREFIX, modeKey, cameraKey), fillContainer).apply();
+    }
+
+    public float getPreviewSlotZoom(String modeKey, String cameraKey) {
+        float val = prefs.getFloat(slotTransformKey(KEY_PREVIEW_SLOT_ZOOM_PREFIX, modeKey, cameraKey), 1.0f);
+        if (!Float.isFinite(val)) return 1.0f;
+        return Math.max(0.5f, Math.min(3.0f, val));
+    }
+
+    public void setPreviewSlotZoom(String modeKey, String cameraKey, float zoom) {
+        float safe = Float.isFinite(zoom) ? Math.max(0.5f, Math.min(3.0f, zoom)) : 1.0f;
+        prefs.edit().putFloat(slotTransformKey(KEY_PREVIEW_SLOT_ZOOM_PREFIX, modeKey, cameraKey), safe).apply();
+    }
+
+    public float getPreviewSlotPanX(String modeKey, String cameraKey) {
+        float val = prefs.getFloat(slotTransformKey(KEY_PREVIEW_SLOT_PAN_X_PREFIX, modeKey, cameraKey), 0f);
+        return Float.isFinite(val) ? Math.max(-0.5f, Math.min(0.5f, val)) : 0f;
+    }
+
+    public float getPreviewSlotPanY(String modeKey, String cameraKey) {
+        float val = prefs.getFloat(slotTransformKey(KEY_PREVIEW_SLOT_PAN_Y_PREFIX, modeKey, cameraKey), 0f);
+        return Float.isFinite(val) ? Math.max(-0.5f, Math.min(0.5f, val)) : 0f;
+    }
+
+    public void setPreviewSlotPan(String modeKey, String cameraKey, float panX, float panY) {
+        float sx = Float.isFinite(panX) ? Math.max(-0.5f, Math.min(0.5f, panX)) : 0f;
+        float sy = Float.isFinite(panY) ? Math.max(-0.5f, Math.min(0.5f, panY)) : 0f;
+        prefs.edit()
+                .putFloat(slotTransformKey(KEY_PREVIEW_SLOT_PAN_X_PREFIX, modeKey, cameraKey), sx)
+                .putFloat(slotTransformKey(KEY_PREVIEW_SLOT_PAN_Y_PREFIX, modeKey, cameraKey), sy)
+                .apply();
+    }
+
+    public void resetPreviewSlotTransform(String modeKey, String cameraKey) {
+        prefs.edit()
+                .remove(slotTransformKey(KEY_PREVIEW_SLOT_FILL_PREFIX, modeKey, cameraKey))
+                .remove(slotTransformKey(KEY_PREVIEW_SLOT_ZOOM_PREFIX, modeKey, cameraKey))
+                .remove(slotTransformKey(KEY_PREVIEW_SLOT_PAN_X_PREFIX, modeKey, cameraKey))
+                .remove(slotTransformKey(KEY_PREVIEW_SLOT_PAN_Y_PREFIX, modeKey, cameraKey))
+                .apply();
     }
 
     /** 规范化左上角「返回 / 设置」悬浮快捷键显示策略，未知值回退到「仅全屏显示」。 */
@@ -3868,7 +3977,27 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         editor.apply();
     }
 
-    // ==================== T05: 3.3 显示（4模块水印 + 位置 + 样式） ====================
+    // ==================== T05/包D: 3.3 显示（4项独立水印 + 自定义文字 + 位置 + 样式） ====================
+
+    private boolean isWatermarkIndependentStorageActive() {
+        return prefs.getBoolean(KEY_WATERMARK_INDEPENDENT_MIGRATED, false)
+                || prefs.contains(KEY_WATERMARK_GEAR_ENABLED)
+                || prefs.contains(KEY_WATERMARK_TURN_SIGNAL_ENABLED);
+    }
+
+    private void writeIndependentWatermarkSwitches(boolean speed, boolean gear, boolean turnSignal) {
+        SharedPreferences.Editor editor = prefs.edit();
+        if (editor == null) {
+            return;
+        }
+        editor.putBoolean(KEY_WATERMARK_INDEPENDENT_MIGRATED, true)
+                .putBoolean(KEY_WATERMARK_SPEED_ENABLED, speed)
+                .putBoolean(KEY_WATERMARK_GEAR_ENABLED, gear)
+                .putBoolean(KEY_WATERMARK_TURN_SIGNAL_ENABLED, turnSignal)
+                .putBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, gear || turnSignal)
+                .putBoolean(KEY_VEHICLE_STATUS_WATERMARK, speed || gear || turnSignal)
+                .apply();
+    }
 
     public boolean isWatermarkCustomTextEnabled() {
         return prefs.getBoolean(KEY_WATERMARK_CUSTOM_TEXT_ENABLED, false);
@@ -3887,19 +4016,47 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     }
 
     public boolean isWatermarkSpeedEnabled() {
-        return prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, true);
+        if (isWatermarkIndependentStorageActive()) {
+            return prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, false);
+        }
+        return prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false)
+                && prefs.getBoolean(KEY_WATERMARK_SPEED_ENABLED, true);
     }
 
     public void setWatermarkSpeedEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_WATERMARK_SPEED_ENABLED, enabled).apply();
+        writeIndependentWatermarkSwitches(enabled, isWatermarkGearEnabled(), isWatermarkTurnSignalEnabled());
+    }
+
+    public boolean isWatermarkGearEnabled() {
+        if (isWatermarkIndependentStorageActive()) {
+            return prefs.getBoolean(KEY_WATERMARK_GEAR_ENABLED, false);
+        }
+        return prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false)
+                && prefs.getBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, true);
+    }
+
+    public void setWatermarkGearEnabled(boolean enabled) {
+        writeIndependentWatermarkSwitches(isWatermarkSpeedEnabled(), enabled, isWatermarkTurnSignalEnabled());
+    }
+
+    public boolean isWatermarkTurnSignalEnabled() {
+        if (isWatermarkIndependentStorageActive()) {
+            return prefs.getBoolean(KEY_WATERMARK_TURN_SIGNAL_ENABLED, false);
+        }
+        return prefs.getBoolean(KEY_VEHICLE_STATUS_WATERMARK, false)
+                && prefs.getBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, true);
+    }
+
+    public void setWatermarkTurnSignalEnabled(boolean enabled) {
+        writeIndependentWatermarkSwitches(isWatermarkSpeedEnabled(), isWatermarkGearEnabled(), enabled);
     }
 
     public boolean isWatermarkGearTurnEnabled() {
-        return prefs.getBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, true);
+        return isWatermarkGearEnabled() || isWatermarkTurnSignalEnabled();
     }
 
     public void setWatermarkGearTurnEnabled(boolean enabled) {
-        prefs.edit().putBoolean(KEY_WATERMARK_GEAR_TURN_ENABLED, enabled).apply();
+        writeIndependentWatermarkSwitches(isWatermarkSpeedEnabled(), enabled, enabled);
     }
 
     public String getWatermarkPosition() {
@@ -3921,13 +4078,13 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     }
 
     public VehicleStatusWatermark.WatermarkOptions getWatermarkOptions() {
-        boolean vehicleEnabled = isVehicleStatusWatermarkEnabled();
         return new VehicleStatusWatermark.WatermarkOptions(
                 isTimestampWatermarkEnabled(),
                 isWatermarkCustomTextEnabled(),
                 getWatermarkCustomText(),
-                vehicleEnabled && isWatermarkSpeedEnabled(),
-                vehicleEnabled && isWatermarkGearTurnEnabled(),
+                isWatermarkSpeedEnabled(),
+                isWatermarkGearEnabled(),
+                isWatermarkTurnSignalEnabled(),
                 VehicleStatusWatermark.Position.fromKey(getWatermarkPosition()),
                 VehicleStatusWatermark.Style.fromKey(getWatermarkStyle())
         );
@@ -3979,10 +4136,11 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         return RecordingSoundPlayer.MODE_NONE;
     }
 
-    // ==================== T06: 3.1 车辆状态规则 / 保摄像头恢复 / R-D 换挡自动弹出 & 10. E5 信号预设 ====================
+    // ==================== T06/包D: 3.1 车辆状态规则 / 保摄像头恢复 / 前进档（D 档）自动弹出 & 10. E5 信号预设 ====================
 
     private static final String KEY_KEEP_CAMERA_CONNECTED = "keep_camera_connected";
     private static final String KEY_CAMERA_RECOVERY_ENABLED = "camera_recovery_page_enabled";
+    // 保留旧 key 名称以兼容已有用户偏好与 E5 配置广场快照，语义已收敛为仅前进档（D 档）触发
     private static final String KEY_RD_SHIFT_AUTO_POPUP_ENABLED = "rd_shift_auto_popup_enabled";
     private static final String KEY_RD_SHIFT_POPUP_SECONDS = "rd_shift_popup_seconds";
     private static final String KEY_VEHICLE_TRIGGER_RULES_JSON = "vehicle_trigger_rules_json";
@@ -4016,7 +4174,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     public void setRdShiftAutoPopupEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_RD_SHIFT_AUTO_POPUP_ENABLED, enabled).apply();
-        AppLog.d(TAG, "R/D 换挡自动弹出记录仪开关: " + enabled);
+        AppLog.d(TAG, "前进档（D 档）自动弹出记录仪开关: " + enabled);
     }
 
     public int getRdShiftPopupSeconds() {
@@ -4027,7 +4185,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public void setRdShiftPopupSeconds(int seconds) {
         int normalized = GearShiftPopupCoordinator.normalizePopupSeconds(seconds);
         prefs.edit().putInt(KEY_RD_SHIFT_POPUP_SECONDS, normalized).apply();
-        AppLog.d(TAG, "R/D 换挡弹出自动退后台秒数: " + normalized + "s");
+        AppLog.d(TAG, "前进档（D 档）弹出自动退后台秒数: " + normalized + "s");
     }
 
     public java.util.List<VehicleTriggerRule> getVehicleTriggerRules() {
@@ -4402,6 +4560,159 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     public void setSurroundCustomCarModelPath(String path) {
         prefs.edit().putString(KEY_SURROUND_CUSTOM_CAR_MODEL_PATH, path != null ? path : "").apply();
+    }
+
+    // ==================== 补盲可视化拖拽位置 & 分方向四边裁切（Package C） ====================
+
+    public boolean isBlindSpotUseSameSidePosition() {
+        return prefs.getBoolean(KEY_BLIND_SPOT_USE_SAME_SIDE, false);
+    }
+
+    public void setBlindSpotUseSameSidePosition(boolean useSame) {
+        setBlindSpotUseSameSidePosition(useSame, BlindSpotPlacement.SLOT_LEFT);
+    }
+
+    public void setBlindSpotUseSameSidePosition(boolean useSame, String activeSlot) {
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_USE_SAME_SIDE, useSame).apply();
+        if (useSame) {
+            String sourceSlot = BlindSpotPlacement.isNormalSideSlot(activeSlot)
+                    ? BlindSpotPlacement.normalizeSlot(activeSlot)
+                    : BlindSpotPlacement.SLOT_LEFT;
+            String opposite = BlindSpotPlacement.oppositeNormalSideSlot(sourceSlot);
+            if (opposite != null) {
+                saveBlindSpotPlacementRaw(opposite, getBlindSpotPlacement(sourceSlot));
+            }
+        }
+    }
+
+    public boolean isRainNightBlindSpotEnabled() {
+        return prefs.getBoolean(KEY_BLIND_SPOT_RAIN_NIGHT, false);
+    }
+
+    public void setRainNightBlindSpotEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_RAIN_NIGHT, enabled).apply();
+    }
+
+    private String placementKey(String slot, String field) {
+        return KEY_BLIND_SPOT_PLACEMENT_PREFIX + BlindSpotPlacement.normalizeSlot(slot) + "_" + field;
+    }
+
+    private void saveBlindSpotPlacementRaw(String slot, BlindSpotPlacement.RectRatio rect) {
+        BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSlot(slot);
+        BlindSpotPlacement.RectRatio safe = rect != null ? rect : def;
+        prefs.edit()
+                .putFloat(placementKey(slot, "x"), safe.x)
+                .putFloat(placementKey(slot, "y"), safe.y)
+                .putFloat(placementKey(slot, "w"), safe.width)
+                .putFloat(placementKey(slot, "h"), safe.height)
+                .apply();
+    }
+
+    public BlindSpotPlacement.RectRatio getBlindSpotPlacement(String slot) {
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSlot(normSlot);
+        float x = prefs.getFloat(placementKey(normSlot, "x"), def.x);
+        float y = prefs.getFloat(placementKey(normSlot, "y"), def.y);
+        float w = prefs.getFloat(placementKey(normSlot, "w"), def.width);
+        float h = prefs.getFloat(placementKey(normSlot, "h"), def.height);
+        return new BlindSpotPlacement.RectRatio(x, y, w, h);
+    }
+
+    public void setBlindSpotPlacement(String slot, BlindSpotPlacement.RectRatio rect) {
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        BlindSpotPlacement.RectRatio safe = rect != null ? rect : BlindSpotPlacement.defaultForSlot(normSlot);
+        saveBlindSpotPlacementRaw(normSlot, safe);
+        if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
+            String opposite = BlindSpotPlacement.oppositeNormalSideSlot(normSlot);
+            if (opposite != null) {
+                saveBlindSpotPlacementRaw(opposite, safe);
+            }
+        }
+    }
+
+    public void resetBlindSpotPlacement(String slot) {
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSlot(normSlot);
+        saveBlindSpotPlacementRaw(normSlot, def);
+        if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
+            String opposite = BlindSpotPlacement.oppositeNormalSideSlot(normSlot);
+            if (opposite != null) {
+                saveBlindSpotPlacementRaw(opposite, def);
+            }
+        }
+    }
+
+    public void resetAllBlindSpotPlacements() {
+        for (String slot : BlindSpotPlacement.ALL_SLOTS) {
+            saveBlindSpotPlacementRaw(slot, BlindSpotPlacement.defaultForSlot(slot));
+        }
+    }
+
+    /** 解析主屏对应方向/槽位在目标像素分辨率下的 [x, y, width, height]。 */
+    public int[] getBlindSpotPlacementPixels(String slotOrCameraPos, int displayWidthPx, int displayHeightPx) {
+        String resolvedSlot = BlindSpotPlacement.resolveSlotForCamera(
+                slotOrCameraPos, isRainNightBlindSpotEnabled());
+        return getBlindSpotPlacement(resolvedSlot).toPixelBounds(displayWidthPx, displayHeightPx);
+    }
+
+    public float getBlindSpotCorrectionCropLeft(String cameraPos) {
+        return getBlindSpotCorrectionEdgeCrop(cameraPos).left;
+    }
+
+    public float getBlindSpotCorrectionCropTop(String cameraPos) {
+        return getBlindSpotCorrectionEdgeCrop(cameraPos).top;
+    }
+
+    public float getBlindSpotCorrectionCropRight(String cameraPos) {
+        return getBlindSpotCorrectionEdgeCrop(cameraPos).right;
+    }
+
+    public float getBlindSpotCorrectionCropBottom(String cameraPos) {
+        return getBlindSpotCorrectionEdgeCrop(cameraPos).bottom;
+    }
+
+    public BlindSpotCorrectionMath.EdgeCrop getBlindSpotCorrectionEdgeCrop(String cameraPos) {
+        float l = prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "crop_left"), 0f);
+        float t = prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "crop_top"), 0f);
+        float r = prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "crop_right"), 0f);
+        float b = prefs.getFloat(getBlindSpotCorrectionKey(cameraPos, "crop_bottom"), 0f);
+        return new BlindSpotCorrectionMath.EdgeCrop(l, t, r, b);
+    }
+
+    public void setBlindSpotCorrectionEdgeCrop(String cameraPos, BlindSpotCorrectionMath.EdgeCrop crop) {
+        BlindSpotCorrectionMath.EdgeCrop safe = crop != null
+                ? crop
+                : new BlindSpotCorrectionMath.EdgeCrop(0f, 0f, 0f, 0f);
+        prefs.edit()
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_left"), safe.left)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_top"), safe.top)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_right"), safe.right)
+                .putFloat(getBlindSpotCorrectionKey(cameraPos, "crop_bottom"), safe.bottom)
+                .apply();
+    }
+
+    public void setBlindSpotCorrectionCropLeft(String cameraPos, float ratio) {
+        BlindSpotCorrectionMath.EdgeCrop cur = getBlindSpotCorrectionEdgeCrop(cameraPos);
+        setBlindSpotCorrectionEdgeCrop(cameraPos,
+                new BlindSpotCorrectionMath.EdgeCrop(ratio, cur.top, cur.right, cur.bottom));
+    }
+
+    public void setBlindSpotCorrectionCropTop(String cameraPos, float ratio) {
+        BlindSpotCorrectionMath.EdgeCrop cur = getBlindSpotCorrectionEdgeCrop(cameraPos);
+        setBlindSpotCorrectionEdgeCrop(cameraPos,
+                new BlindSpotCorrectionMath.EdgeCrop(cur.left, ratio, cur.right, cur.bottom));
+    }
+
+    public void setBlindSpotCorrectionCropRight(String cameraPos, float ratio) {
+        BlindSpotCorrectionMath.EdgeCrop cur = getBlindSpotCorrectionEdgeCrop(cameraPos);
+        setBlindSpotCorrectionEdgeCrop(cameraPos,
+                new BlindSpotCorrectionMath.EdgeCrop(cur.left, cur.top, ratio, cur.bottom));
+    }
+
+    public void setBlindSpotCorrectionCropBottom(String cameraPos, float ratio) {
+        BlindSpotCorrectionMath.EdgeCrop cur = getBlindSpotCorrectionEdgeCrop(cameraPos);
+        setBlindSpotCorrectionEdgeCrop(cameraPos,
+                new BlindSpotCorrectionMath.EdgeCrop(cur.left, cur.top, cur.right, ratio));
     }
 
 }

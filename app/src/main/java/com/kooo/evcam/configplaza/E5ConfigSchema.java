@@ -250,6 +250,34 @@ public final class E5ConfigSchema {
             normalized.put(spec.key, parsed);
         }
 
+        if (section == E5ConfigSection.RECORDING) {
+            boolean hasNewIndependent = valuesObj.has("watermark_gear_enabled")
+                    || valuesObj.has("watermark_turn_signal_enabled");
+            if (!hasNewIndependent && valuesObj.has("vehicle_status_watermark")) {
+                boolean legacyMaster = Boolean.TRUE.equals(normalized.get("vehicle_status_watermark"));
+                boolean legacySpeed = valuesObj.has("watermark_speed_enabled")
+                        ? Boolean.TRUE.equals(normalized.get("watermark_speed_enabled"))
+                        : true;
+                boolean legacyGearTurn = valuesObj.has("watermark_gear_turn_enabled")
+                        ? Boolean.TRUE.equals(normalized.get("watermark_gear_turn_enabled"))
+                        : true;
+                normalized.put("watermark_speed_enabled", legacyMaster && legacySpeed);
+                normalized.put("watermark_gear_enabled", legacyMaster && legacyGearTurn);
+                normalized.put("watermark_turn_signal_enabled", legacyMaster && legacyGearTurn);
+                normalized.put("watermark_gear_turn_enabled", legacyMaster && legacyGearTurn);
+            } else if (hasNewIndependent) {
+                boolean s = Boolean.TRUE.equals(normalized.get("watermark_speed_enabled"));
+                boolean g = Boolean.TRUE.equals(normalized.get("watermark_gear_enabled"));
+                boolean t = Boolean.TRUE.equals(normalized.get("watermark_turn_signal_enabled"));
+                if (!valuesObj.has("watermark_gear_turn_enabled")) {
+                    normalized.put("watermark_gear_turn_enabled", g || t);
+                }
+                if (!valuesObj.has("vehicle_status_watermark")) {
+                    normalized.put("vehicle_status_watermark", s || g || t);
+                }
+            }
+        }
+
         String crossErr = validateSectionInvariants(section, normalized, warnings);
         if (crossErr != null) {
             return ValidationResult.fail(crossErr);
@@ -410,10 +438,12 @@ public final class E5ConfigSchema {
         Map<String, FieldSpec> appearance = new LinkedHashMap<>();
         reg(appearance, "theme_mode", FieldType.STRING, UiThemeController.ThemeMode.FOLLOW_SYSTEM.key,
                 enumSet("follow_system", "dark", "light"));
+        reg(appearance, "ui_scale_mode", FieldType.STRING, AppConfig.UI_SCALE_STANDARD,
+                enumSet(AppConfig.UI_SCALE_STANDARD, AppConfig.UI_SCALE_LARGE));
         reg(appearance, "default_start_page", FieldType.STRING, AppConfig.START_PAGE_RECORDING,
                 enumSet(AppConfig.START_PAGE_RECORDING, AppConfig.START_PAGE_PLAYBACK, AppConfig.START_PAGE_SETTINGS));
         reg(appearance, "preview_mode", FieldType.STRING, AppConfig.PREVIEW_MODE_B,
-                enumSet(AppConfig.PREVIEW_MODE_A, AppConfig.PREVIEW_MODE_B, AppConfig.PREVIEW_MODE_C));
+                enumSet(AppConfig.PREVIEW_MODE_A, AppConfig.PREVIEW_MODE_B, AppConfig.PREVIEW_MODE_C, AppConfig.PREVIEW_MODE_D));
         reg(appearance, "preview_presentation", FieldType.STRING, PreviewPresentation.SIDEBAR.getKey(),
                 enumSet(PreviewPresentation.SIDEBAR.getKey(), PreviewPresentation.FULLSCREEN.getKey(), PreviewPresentation.WINDOW.getKey()));
         reg(appearance, "corner_nav_mode", FieldType.STRING, AppConfig.CORNER_NAV_AUTO,
@@ -449,6 +479,8 @@ public final class E5ConfigSchema {
                 defaultPanesList(PreviewLayoutModel.PRESET_MODE_C_FRONT), paneRect16Validator());
         reg(camera, "mode_c_show_left", FieldType.BOOLEAN, true, null);
         reg(camera, "mode_c_show_right", FieldType.BOOLEAN, true, null);
+        reg(camera, "mode_d_panes", FieldType.FLOAT_ARRAY_16,
+                defaultPanesList(PreviewLayoutModel.PRESET_MODE_D_DUAL), paneRect16Validator());
         root.put(E5ConfigSection.CAMERA_MAPPING, camera);
 
         // 3. recording
@@ -494,8 +526,10 @@ public final class E5ConfigSchema {
         }
         reg(recording, "timestamp_watermark_enabled", FieldType.BOOLEAN, false, null);
         reg(recording, "vehicle_status_watermark", FieldType.BOOLEAN, false, null);
-        reg(recording, "watermark_speed_enabled", FieldType.BOOLEAN, true, null);
-        reg(recording, "watermark_gear_turn_enabled", FieldType.BOOLEAN, true, null);
+        reg(recording, "watermark_speed_enabled", FieldType.BOOLEAN, false, null);
+        reg(recording, "watermark_gear_turn_enabled", FieldType.BOOLEAN, false, null);
+        reg(recording, "watermark_gear_enabled", FieldType.BOOLEAN, false, null);
+        reg(recording, "watermark_turn_signal_enabled", FieldType.BOOLEAN, false, null);
         reg(recording, "watermark_custom_text_enabled", FieldType.BOOLEAN, false, null);
         reg(recording, "watermark_custom_text", FieldType.STRING, "", maxLength(VehicleStatusWatermark.MAX_CUSTOM_TEXT_LENGTH));
         reg(recording, "video_watermark_position", FieldType.STRING, VehicleStatusWatermark.Position.BOTTOM_RIGHT.name(),
@@ -554,9 +588,7 @@ public final class E5ConfigSchema {
         reg(blindSpot, "t04_blind_spot_suppress_on_360", FieldType.BOOLEAN, true, null);
         reg(blindSpot, "avm_avoidance_enabled", FieldType.BOOLEAN, false, null);
         reg(blindSpot, "avm_avoidance_activity", FieldType.STRING, "com.geely.avm_app.AvmRenderActivity", maxLength(128));
-        reg(blindSpot, "blind_spot_status_bar_style", FieldType.INT, 1, intRange(0, 5));
-        reg(blindSpot, "blind_spot_status_bar_color", FieldType.INT, 0xFFFFBF40, null);
-        reg(blindSpot, "blind_spot_status_bar_bg_opacity", FieldType.INT, 31, intRange(0, 100));
+        reg(blindSpot, "blind_spot_use_same_side_position", FieldType.BOOLEAN, false, null);
         reg(blindSpot, "blind_spot_correction_enabled", FieldType.BOOLEAN, false, null);
         for (String pos : CAMERA_POSITIONS) {
             reg(blindSpot, "blind_spot_correction_" + pos + "_scale_x", FieldType.FLOAT, 1.0f, floatRange(0.1f, 3.0f));
@@ -564,6 +596,10 @@ public final class E5ConfigSchema {
             reg(blindSpot, "blind_spot_correction_" + pos + "_translate_x", FieldType.FLOAT, 0.0f, floatRange(-1.0f, 1.0f));
             reg(blindSpot, "blind_spot_correction_" + pos + "_translate_y", FieldType.FLOAT, 0.0f, floatRange(-1.0f, 1.0f));
             reg(blindSpot, "blind_spot_correction_" + pos + "_rotation", FieldType.INT, 0, intRange(0, 359));
+            reg(blindSpot, "blind_spot_correction_" + pos + "_crop_left", FieldType.FLOAT, 0.0f, floatRange(0.0f, 0.45f));
+            reg(blindSpot, "blind_spot_correction_" + pos + "_crop_top", FieldType.FLOAT, 0.0f, floatRange(0.0f, 0.45f));
+            reg(blindSpot, "blind_spot_correction_" + pos + "_crop_right", FieldType.FLOAT, 0.0f, floatRange(0.0f, 0.45f));
+            reg(blindSpot, "blind_spot_correction_" + pos + "_crop_bottom", FieldType.FLOAT, 0.0f, floatRange(0.0f, 0.45f));
         }
         for (String target : MIRROR_TARGET_KEYS) {
             for (String pos : CAMERA_POSITIONS) {

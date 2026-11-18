@@ -21,6 +21,75 @@ public final class PreviewTransformHelper {
     private PreviewTransformHelper() {
     }
 
+    public static Matrix buildSlotMatrix(
+            int viewWidth,
+            int viewHeight,
+            int bufferWidth,
+            int bufferHeight,
+            float rotationDegrees,
+            boolean fillContainer,
+            float userZoom,
+            float userPanXFraction,
+            float userPanYFraction,
+            CameraMirrorPolicy.ResolvedMirror mirror) {
+        Matrix matrix = new Matrix();
+        if (viewWidth <= 0 || viewHeight <= 0) {
+            return matrix;
+        }
+        float centerX = viewWidth / 2f;
+        float centerY = viewHeight / 2f;
+        int bw = bufferWidth > 0 ? bufferWidth : viewWidth;
+        int bh = bufferHeight > 0 ? bufferHeight : viewHeight;
+
+        android.graphics.RectF viewRect = new android.graphics.RectF(0f, 0f, viewWidth, viewHeight);
+        android.graphics.RectF bufferRect = new android.graphics.RectF(0f, 0f, bw, bh);
+        bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
+        matrix.setRectToRect(viewRect, bufferRect, Matrix.ScaleToFit.FILL);
+
+        if (mirror != null && (mirror.physicalH || mirror.physicalV)) {
+            matrix.postScale(
+                    mirror.physicalH ? -1f : 1f,
+                    mirror.physicalV ? -1f : 1f,
+                    centerX,
+                    centerY
+            );
+        }
+
+        if (rotationDegrees != 0f) {
+            matrix.postRotate(rotationDegrees, centerX, centerY);
+        }
+
+        int normRot = (((int) Math.round(rotationDegrees)) % 360 + 360) % 360;
+        boolean swapAxes = (normRot == 90 || normRot == 270);
+        float effW = swapAxes ? bh : bw;
+        float effH = swapAxes ? bw : bh;
+
+        float baseScale = fillContainer
+                ? Math.max((float) viewWidth / effW, (float) viewHeight / effH)
+                : Math.min((float) viewWidth / effW, (float) viewHeight / effH);
+        float safeZoom = Float.isFinite(userZoom) ? Math.max(0.5f, Math.min(3.0f, userZoom)) : 1.0f;
+        float finalScale = baseScale * safeZoom;
+        if (finalScale != 1f) {
+            matrix.postScale(finalScale, finalScale, centerX, centerY);
+        }
+
+        if (mirror != null && (mirror.outputH || mirror.outputV)) {
+            matrix.postScale(
+                    mirror.outputH ? -1f : 1f,
+                    mirror.outputV ? -1f : 1f,
+                    centerX,
+                    centerY
+            );
+        }
+
+        float safePanX = Float.isFinite(userPanXFraction) ? Math.max(-0.5f, Math.min(0.5f, userPanXFraction)) : 0f;
+        float safePanY = Float.isFinite(userPanYFraction) ? Math.max(-0.5f, Math.min(0.5f, userPanYFraction)) : 0f;
+        if (safePanX != 0f || safePanY != 0f) {
+            matrix.postTranslate(safePanX * viewWidth, safePanY * viewHeight);
+        }
+        return matrix;
+    }
+
     /**
      * 纯 Matrix 计算入口，便于无 Android 视图依赖的 JVM 单元测试验证旋转与双镜像合成顺序。
      */

@@ -71,6 +71,8 @@
         "vehicle_status_watermark": true,
         "watermark_speed_enabled": true,
         "watermark_gear_turn_enabled": true,
+        "watermark_gear_enabled": true,
+        "watermark_turn_signal_enabled": true,
         "watermark_custom_text_enabled": false,
         "video_watermark_position": "BOTTOM_RIGHT",
         "video_watermark_style": "CARD",

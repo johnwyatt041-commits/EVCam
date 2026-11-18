@@ -9,8 +9,8 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 /**
- * 覆盖 T06 R/D 换挡自动弹出记录仪与 X 秒后自动退后台状态机：
- * 首次快照不抢焦点、250ms 去抖、用户原本在前台不踢回后台、交互接管取消自动退后台。
+ * 覆盖 T06/包D 前进档（D 档）自动弹出记录仪与 X 秒后自动退后台状态机：
+ * 首次快照不抢焦点、250ms 去抖、仅 D 档触发（R 档不触发）、用户原本在前台不踢回后台、交互接管取消自动退后台。
  */
 public class GearShiftPopupCoordinatorTest {
 
@@ -85,7 +85,7 @@ public class GearShiftPopupCoordinatorTest {
     }
 
     @Test
-    public void launchesOnStableRdShiftAndAutoReturnsAfterConfiguredSeconds() {
+    public void launchesOnlyOnStableDriveShiftAndIgnoresReverse() {
         FakeHarness host = new FakeHarness();
         GearShiftPopupCoordinator coordinator =
                 new GearShiftPopupCoordinator(host, 250L, host.clock, host.scheduler);
@@ -96,10 +96,16 @@ public class GearShiftPopupCoordinatorTest {
         host.advanceBy(1000L);
         assertEquals(0, host.launchCount);
 
-        // 经 P -> R 经过 250ms 去抖后弹出前台，并在 5 秒后自动退后台
+        // 经 P -> R 经过完整去抖也不触发弹出（3.1 仅前进档 D 档弹出，不含倒车档 R）
         coordinator.onRawGear(VehicleSignalSnapshot.Gear.PARK);
         host.advanceBy(300L);
         coordinator.onRawGear(VehicleSignalSnapshot.Gear.REVERSE);
+        host.advanceBy(1000L);
+        assertEquals(0, host.launchCount);
+        assertFalse(coordinator.isAutoPopupActive());
+
+        // 从 R -> D 经过 250ms 去抖后弹出前台，并在 5 秒后自动退后台
+        coordinator.onRawGear(VehicleSignalSnapshot.Gear.DRIVE);
         host.advanceBy(249L);
         assertEquals(0, host.launchCount);
 
@@ -114,9 +120,9 @@ public class GearShiftPopupCoordinatorTest {
         assertEquals(1, host.moveBackgroundCount);
         assertFalse(coordinator.isAutoPopupActive());
 
-        // UNKNOWN 断连重连回 R 不重复弹窗
+        // UNKNOWN 断连重连回 D 不重复弹窗
         coordinator.onRawGear(VehicleSignalSnapshot.Gear.UNKNOWN);
-        coordinator.onRawGear(VehicleSignalSnapshot.Gear.REVERSE);
+        coordinator.onRawGear(VehicleSignalSnapshot.Gear.DRIVE);
         host.advanceBy(500L);
         assertEquals(1, host.launchCount);
     }
@@ -136,11 +142,11 @@ public class GearShiftPopupCoordinatorTest {
         assertEquals(0, host.launchCount);
         assertEquals(0, host.moveBackgroundCount);
 
-        // 场景 B：后台自动弹出 R 挡后，用户在倒计时内操作切页 -> 解除自动退后台
+        // 场景 B：后台自动弹出 D 挡后，用户在倒计时内操作切页 -> 解除自动退后台
         host.inForeground = false;
         coordinator.onRawGear(VehicleSignalSnapshot.Gear.PARK);
         host.advanceBy(300L);
-        coordinator.onRawGear(VehicleSignalSnapshot.Gear.REVERSE);
+        coordinator.onRawGear(VehicleSignalSnapshot.Gear.DRIVE);
         host.advanceBy(300L);
         assertEquals(1, host.launchCount);
         assertTrue(coordinator.isAutoPopupActive());

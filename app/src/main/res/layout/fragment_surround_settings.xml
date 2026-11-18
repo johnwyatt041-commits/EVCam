@@ -120,7 +120,13 @@
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_surround_mode_c"
                                 style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
                                 android:text="三路大屏 (模式 C)" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_surround_mode_d"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:text="双视转向 (模式 D)" />
                         </LinearLayout>
                     </HorizontalScrollView>
 
@@ -312,13 +318,13 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="显示右上角视角切换按键"
+                                android:text="显示画内视角/手动切换按键"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="控制画面内「前视 / 后视 / 随档位」与轮位切换按键显隐"
+                                android:text="与外观设置同步，控制 360 A 视角/轮位按钮及模式 C/D 画内手动「前/后」按钮"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                         </LinearLayout>

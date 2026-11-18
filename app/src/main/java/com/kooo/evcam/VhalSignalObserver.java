@@ -136,6 +136,12 @@ public class VhalSignalObserver {
 
     // 上一次的转向灯状态，避免重复回调
     private int lastSignalState = -1;
+    private long lastBatchDiagUptimeMs = 0L;
+    private long lastGearDiagUptimeMs = 0L;
+    private int lastLoggedGearProp = 0;
+    private int lastLoggedGearArea = 0;
+    private int lastLoggedGearAvail = Integer.MIN_VALUE;
+    private Integer lastLoggedGearIntVal = null;
 
          // 副驾门
       // 左后门
@@ -413,6 +419,7 @@ public class VhalSignalObserver {
      * 处理一批属性值更新（由 native 层解码）
      */
     private void processPropertyBatch(byte[] data) {
+        logBatchDiagnostics(data);
         com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().onRawBatch(data);
         if (running) {
             PropertyListener primary = propertyListener;
@@ -457,6 +464,47 @@ public class VhalSignalObserver {
                     currentSpeed = Float.intBitsToFloat(p1);
                     break;
             }
+        }
+    }
+
+    private void logBatchDiagnostics(byte[] data) {
+        if (data == null || data.length == 0) {
+            return;
+        }
+        final long nowUptime = android.os.SystemClock.uptimeMillis();
+        final int[] propCount = {0};
+        com.kooo.evcam.vehicle.VhalProtoBatchReader.parseBatch(data,
+                (propId, areaId, availability, timestamp, intValue, floatValue) -> {
+                    propCount[0]++;
+                    com.kooo.evcam.vehicle.VehicleSignalCategory category =
+                            com.kooo.evcam.vehicle.VehicleSignalCategory.classifyPropertyId(propId);
+                    if (category == com.kooo.evcam.vehicle.VehicleSignalCategory.GEAR) {
+                        boolean changed = propId != lastLoggedGearProp
+                                || areaId != lastLoggedGearArea
+                                || availability != lastLoggedGearAvail
+                                || !java.util.Objects.equals(intValue, lastLoggedGearIntVal);
+                        if (changed || nowUptime - lastGearDiagUptimeMs >= 10_000L) {
+                            lastGearDiagUptimeMs = nowUptime;
+                            lastLoggedGearProp = propId;
+                            lastLoggedGearArea = areaId;
+                            lastLoggedGearAvail = availability;
+                            lastLoggedGearIntVal = intValue;
+                            com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear decoded =
+                                    (availability == 0 && intValue != null)
+                                            ? com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear.fromVhalValue(intValue)
+                                            : com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear.UNKNOWN;
+                            AppLog.i(TAG, "VHAL 挡位诊断: prop="
+                                    + com.kooo.evcam.vehicle.VehicleSignalCategory.formatPropertyId(propId)
+                                    + ", area=" + areaId
+                                    + ", avail=" + availability
+                                    + ", raw=" + intValue
+                                    + ", parsed=" + decoded);
+                        }
+                    }
+                });
+        if (nowUptime - lastBatchDiagUptimeMs >= 15_000L) {
+            lastBatchDiagUptimeMs = nowUptime;
+            AppLog.d(TAG, "VHAL batch 心跳: bytes=" + data.length + ", props=" + propCount[0]);
         }
     }
 

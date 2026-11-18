@@ -28,7 +28,7 @@ import java.util.List;
  * <ul>
  *     <li>统一订阅 {@link VehicleSignalHub} 4 类核心快照；按需持有 {@link RecordingVehicleSource.Lease} 保活。</li>
  *     <li>驱动 {@link VehicleRuleEngine} 评估自定义/默认规则、5 秒防误退启动保护与开门确认弹窗分流。</li>
- *     <li>驱动 {@link GearShiftPopupCoordinator} 处理 R/D 换挡自动弹出记录仪并在 X 秒后自动退后台。</li>
+ *     <li>驱动 {@link GearShiftPopupCoordinator} 处理前进档（D 档）自动弹出记录仪并在 X 秒后自动退后台。</li>
  *     <li>驱动 {@link CameraRecoveryCoordinator} 处理 3.1 后台 5s×3 重连与有门槛前台拉起恢复。</li>
  * </ul>
  */
@@ -89,7 +89,7 @@ public final class VehicleAutomationCoordinator {
                         return;
                     }
                     if (!WakeUpHelper.hasOverlayPermission(ctx)) {
-                        AppLog.w(TAG, "R/D 换挡自动弹出跳过：缺少悬浮窗后台弹出权限");
+                        AppLog.w(TAG, "前进档（D 档）自动弹出跳过：缺少悬浮窗后台弹出权限");
                         return;
                     }
                     WakeUpHelper.launchForGearShiftPopup(ctx);
@@ -251,6 +251,9 @@ public final class VehicleAutomationCoordinator {
     private volatile WeakReference<UiHost> uiHostRef = new WeakReference<>(null);
     private volatile long uiForegroundSinceUptimeMs = 0L;
     private volatile boolean started = false;
+    private volatile long lastSignalDiagLogUptimeMs = 0L;
+    @NonNull
+    private volatile VehicleSignalSnapshot.Gear lastLoggedGear = VehicleSignalSnapshot.Gear.UNKNOWN;
     @Nullable
     private RecordingVehicleSource.Lease signalLease;
 
@@ -284,15 +287,44 @@ public final class VehicleAutomationCoordinator {
         );
         cameraRecoveryCoordinator.setConfig(config.isKeepCameraConnectedEnabled(), config.isCameraRecoveryEnabled());
 
-        boolean needsVhalLease = config.isVhalGrpcTriggerMode()
-                && (config.hasActiveVehicleTriggerRules()
-                || config.isRdShiftAutoPopupEnabled()
-                || config.isReversePreviewEnabled());
+        boolean hasActiveRules = config.hasActiveVehicleTriggerRules();
+        boolean rdPopup = config.isRdShiftAutoPopupEnabled();
+        boolean reversePreview = config.isReversePreviewEnabled();
+        String previewMode = config.getPreviewMode();
+        boolean foregroundGearPreview = getUiHost() != null
+                && AppConfig.PREVIEW_MODE_A.equals(previewMode);
+        boolean needsVhalLease = shouldAcquireVhalLease(
+                config.isCarSignalManagerTriggerMode(),
+                hasActiveRules,
+                rdPopup,
+                reversePreview,
+                foregroundGearPreview
+        );
         if (needsVhalLease && signalLease == null) {
             signalLease = RecordingVehicleSource.acquire();
+            AppLog.i(TAG, "启动 VHAL 信号租约 (blindSpot=" + config.isBlindSpotGlobalEnabled()
+                    + ", triggerMode=" + config.getTurnSignalTriggerMode()
+                    + ", reversePreview=" + reversePreview
+                    + ", rdPopup=" + rdPopup
+                    + ", activeRules=" + hasActiveRules
+                    + ", previewMode=" + previewMode + ")");
         } else if (!needsVhalLease && signalLease != null) {
             signalLease.close();
             signalLease = null;
+            AppLog.i(TAG, "释放 VHAL 信号租约 (triggerMode=" + config.getTurnSignalTriggerMode()
+                    + ", reversePreview=" + reversePreview
+                    + ", rdPopup=" + rdPopup
+                    + ", activeRules=" + hasActiveRules
+                    + ", previewMode=" + previewMode + ")");
+        } else if (!needsVhalLease) {
+            long now = SystemClock.uptimeMillis();
+            if (now - lastSignalDiagLogUptimeMs >= 15_000L) {
+                lastSignalDiagLogUptimeMs = now;
+                AppLog.d(TAG, "未请求 VHAL 租约 (triggerMode=" + config.getTurnSignalTriggerMode()
+                        + ", reversePreview=" + reversePreview
+                        + ", rdPopup=" + rdPopup
+                        + ", activeRules=" + hasActiveRules + ")");
+            }
         }
 
         if (!started) {
@@ -305,8 +337,21 @@ public final class VehicleAutomationCoordinator {
         }
     }
 
+    /** 判断当前配置是否需要拉起 VHAL gRPC 信号采集（不因未开补盲或切 logcat 转向而阻断档位/倒车）。 */
+    public static boolean shouldAcquireVhalLease(boolean isCarSignalManagerMode,
+                                                 boolean hasActiveRules,
+                                                 boolean rdShiftAutoPopup,
+                                                 boolean reversePreview,
+                                                 boolean foregroundGearPreview) {
+        if (isCarSignalManagerMode) {
+            return false;
+        }
+        return hasActiveRules || rdShiftAutoPopup || reversePreview || foregroundGearPreview;
+    }
+
     public synchronized void stop() {
         started = false;
+        lastLoggedGear = VehicleSignalSnapshot.Gear.UNKNOWN;
         mainHandler.removeCallbacks(ruleDelayTickRunnable);
         VehicleSignalHub.getInstance().removeListener(hubListener);
         if (signalLease != null) {
@@ -320,10 +365,15 @@ public final class VehicleAutomationCoordinator {
     }
 
     public void attachUiHost(@NonNull UiHost host) {
+        attachUiHost(null, host);
+    }
+
+    public void attachUiHost(@Nullable Context context, @NonNull UiHost host) {
         uiHostRef = new WeakReference<>(host);
         uiForegroundSinceUptimeMs = SystemClock.uptimeMillis();
-        if (appContext != null) {
-            startOrReload(appContext);
+        Context targetCtx = context != null ? context.getApplicationContext() : appContext;
+        if (targetCtx != null) {
+            startOrReload(targetCtx);
         }
     }
 
@@ -346,6 +396,9 @@ public final class VehicleAutomationCoordinator {
             uiHostRef = new WeakReference<>(null);
             gearPopupCoordinator.notifyUiMovedToBackground();
             reversePreviewCoordinator.notifyUiMovedToBackground();
+            if (appContext != null) {
+                startOrReload(appContext);
+            }
         }
     }
 
@@ -384,6 +437,17 @@ public final class VehicleAutomationCoordinator {
     private void onSignalSnapshotOnMain(@NonNull VehicleSignalSnapshot snapshot) {
         if (!started || appContext == null || !AppLifecycleState.canRunBackgroundServices(appContext)) {
             return;
+        }
+        if (snapshot.gear != lastLoggedGear) {
+            AppLog.i(TAG, "车辆挡位变化: " + lastLoggedGear + " -> " + snapshot.gear
+                    + ", speed=" + snapshot.speedKmh + "km/h");
+            lastLoggedGear = snapshot.gear;
+        } else {
+            long now = SystemClock.uptimeMillis();
+            if (now - lastSignalDiagLogUptimeMs >= 15_000L) {
+                lastSignalDiagLogUptimeMs = now;
+                AppLog.d(TAG, "信号心跳: gear=" + snapshot.gear + ", speed=" + snapshot.speedKmh);
+            }
         }
         gearPopupCoordinator.onSnapshot(snapshot);
         reversePreviewCoordinator.onSnapshot(snapshot);

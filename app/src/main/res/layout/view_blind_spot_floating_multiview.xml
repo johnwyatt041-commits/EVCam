@@ -11,14 +11,6 @@
         android:layout_height="match_parent"
         android:layout_gravity="center" />
 
-    <!-- 状态栏 -->
-    <com.kooo.evcam.BlindSpotStatusBarView
-        android:id="@+id/blind_spot_status_bar"
-        android:layout_width="match_parent"
-        android:layout_height="30dp"
-        android:layout_gravity="top"
-        android:background="#501A1A1A" />
-
     <!-- 设置模式下的保存按钮容器 -->
     <LinearLayout
         android:id="@+id/layout_save_config"

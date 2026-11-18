@@ -645,8 +645,6 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:text="保存并应用"
-                android:textSize="16sp"
-                android:minHeight="48dp"
                 android:backgroundTint="@color/button_background"
                 android:textColor="@color/button_text"
                 android:layout_marginTop="8dp"

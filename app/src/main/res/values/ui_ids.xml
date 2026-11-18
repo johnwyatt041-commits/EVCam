@@ -32,4 +32,10 @@
     <item
         name="tag_main_preview_matrix_managed"
         type="id" />
+    <item
+        name="ui_scale_base_metrics"
+        type="id" />
+    <item
+        name="ui_scale_applied_factor"
+        type="id" />
 </resources>

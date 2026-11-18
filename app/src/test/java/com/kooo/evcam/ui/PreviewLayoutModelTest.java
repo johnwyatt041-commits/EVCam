@@ -136,4 +136,53 @@ public class PreviewLayoutModelTest {
         assertEquals(1f, solo.panes[PreviewLayoutModel.BACK].width, EPSILON);
         assertEquals(1f, solo.panes[PreviewLayoutModel.BACK].height, EPSILON);
     }
+
+    @Test public void modeDDefaultIsFiftyFiftyDualAndSyncsPairedSlots() {
+        PreviewLayoutModel model = new PreviewLayoutModel(PreviewLayoutModel.PRESET_MODE_D_DUAL);
+        PreviewLayoutModel.EffectiveLayout frontLeft = model.computeEffectiveModeD(
+                PreviewLayoutModel.FRONT, PreviewLayoutModel.LEFT);
+        assertTrue(frontLeft.visible[PreviewLayoutModel.FRONT]);
+        assertFalse(frontLeft.visible[PreviewLayoutModel.BACK]);
+        assertTrue(frontLeft.visible[PreviewLayoutModel.LEFT]);
+        assertFalse(frontLeft.visible[PreviewLayoutModel.RIGHT]);
+        assertEquals(0f, frontLeft.panes[PreviewLayoutModel.FRONT].x, EPSILON);
+        assertEquals(0.5f, frontLeft.panes[PreviewLayoutModel.FRONT].width, EPSILON);
+        assertEquals(0.5f, frontLeft.panes[PreviewLayoutModel.LEFT].x, EPSILON);
+        assertEquals(0.5f, frontLeft.panes[PreviewLayoutModel.LEFT].width, EPSILON);
+
+        model.move(PreviewLayoutModel.FRONT, 0.25f, 0f);
+        model.syncPairedSlot(PreviewLayoutModel.FRONT, PreviewLayoutModel.BACK);
+        assertEquals(0.25f, model.pane(PreviewLayoutModel.BACK).x, EPSILON);
+
+        PreviewLayoutModel.EffectiveLayout backRight = model.computeEffectiveModeD(
+                PreviewLayoutModel.BACK, PreviewLayoutModel.RIGHT);
+        assertFalse(backRight.visible[PreviewLayoutModel.FRONT]);
+        assertTrue(backRight.visible[PreviewLayoutModel.BACK]);
+        assertFalse(backRight.visible[PreviewLayoutModel.LEFT]);
+        assertTrue(backRight.visible[PreviewLayoutModel.RIGHT]);
+    }
+
+    @Test public void dragMoveAndResizeWithCollisionPreventAnyOverlap() {
+        PreviewLayoutModel model = new PreviewLayoutModel(PreviewLayoutModel.PRESET_MODE_D_DUAL);
+        boolean[] active = {true, true, false, false}; // LEFT & FRONT
+        model.move(PreviewLayoutModel.FRONT, 0f, 0f);
+        model.resize(PreviewLayoutModel.FRONT, 0.5f, 1f);
+        model.move(PreviewLayoutModel.LEFT, 0.5f, 0f);
+        model.resize(PreviewLayoutModel.LEFT, 0.5f, 1f);
+        float[] origin = model.snapshot();
+
+        // Drag FRONT across the center over LEFT -> LEFT should swap to FRONT's left/origin without overlapping.
+        model.movePaneWithCollision(PreviewLayoutModel.FRONT, 0.52f, 0f, active, origin);
+        assertTrue(model.pane(PreviewLayoutModel.FRONT).x > 0.35f);
+        assertTrue(model.pane(PreviewLayoutModel.LEFT).x < model.pane(PreviewLayoutModel.FRONT).x);
+
+        PreviewLayoutModel.Pane[] panes = {
+                model.pane(0), model.pane(1), model.pane(2), model.pane(3)
+        };
+        assertFalse(PreviewLayoutModel.hasAnyOverlap(panes, active));
+
+        // Attempting to grow LEFT into FRONT should clamp before overlapping.
+        model.resizePaneWithCollision(PreviewLayoutModel.LEFT, 0.9f, 1f, active);
+        assertFalse(PreviewLayoutModel.hasAnyOverlap(panes, active));
+    }
 }

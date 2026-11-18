@@ -4,11 +4,11 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 /**
- * R/D 换挡自动弹出记录仪并在 X 秒后自动退后台的状态机（纯 Java，无 Android UI 依赖）。
+ * 前进档（D 档）自动弹出记录仪并在 X 秒后自动退后台的状态机（纯 Java，无 Android UI 依赖）。
  * <ul>
  *     <li>首次连上信号快照仅建立基线，不抢前台。</li>
  *     <li>250ms 挡位去抖，防止 P->R->N->D 换挡过程抖动连发。</li>
- *     <li>仅当目标挡位稳定为 R/D 且与上次稳定触发挡位不同，且当前不在非自动弹出前台会话中时触发。</li>
+ *     <li>仅当目标挡位稳定为前进档（D 档）且与上次稳定触发挡位不同，且当前不在非自动弹出前台会话中时触发（R 档倒车不触发）。</li>
  *     <li>自动弹出期间一旦检测到用户主动操作（切页/编辑/手动取消），立即解除自动退后台接管。</li>
  * </ul>
  */
@@ -246,9 +246,8 @@ public final class GearShiftPopupCoordinator {
         if (!enabled || previous == target) {
             return CommitOutcome.NONE;
         }
-        boolean isTargetRd = target == VehicleSignalSnapshot.Gear.REVERSE
-                || target == VehicleSignalSnapshot.Gear.DRIVE;
-        if (!isTargetRd) {
+        boolean isTargetDrive = target == VehicleSignalSnapshot.Gear.DRIVE;
+        if (!isTargetDrive) {
             return CommitOutcome.NONE;
         }
 

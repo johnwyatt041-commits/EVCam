@@ -5,18 +5,31 @@ import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Outline;
 import android.graphics.Paint;
+import android.graphics.Typeface;
 import android.util.AttributeSet;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.MotionEvent;
+import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import android.view.ViewParent;
+import android.widget.FrameLayout;
+import android.widget.TextView;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
+
+import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.R;
 
+import java.util.EnumMap;
+import java.util.Map;
+
 /**
- * Repositions and clips the same four TextureView parents across Mode B / Mode C.
+ * Repositions and clips the same four TextureView parents across Mode B / Mode C / Mode D.
  * Hides non-active panes with View.GONE instead of detaching views so SurfaceTexture recreation stays clean.
  */
 public final class EditablePreviewLayout extends ViewGroup {
@@ -25,37 +38,111 @@ public final class EditablePreviewLayout extends ViewGroup {
         void onEffectiveVisibilityChanged(boolean[] visibleMask);
     }
 
+    public interface OnTransformInvalidatedListener {
+        void onPreviewTransformsInvalidated();
+    }
+
+    public interface OnEditorSelectionListener {
+        void onSelectedPaneChanged(int selectedPaneIndex);
+    }
+
+    private static final class ModeStorageSpec {
+        final String savedKey;
+        final String legacySavedKey;
+        final String panePrefix;
+        final String legacyPanePrefix;
+        final String orderPrefix;
+        final String legacyOrderPrefix;
+        final int defaultPreset;
+
+        ModeStorageSpec(String savedKey, String legacySavedKey,
+                        String panePrefix, String legacyPanePrefix,
+                        String orderPrefix, String legacyOrderPrefix,
+                        int defaultPreset) {
+            this.savedKey = savedKey;
+            this.legacySavedKey = legacySavedKey;
+            this.panePrefix = panePrefix;
+            this.legacyPanePrefix = legacyPanePrefix;
+            this.orderPrefix = orderPrefix;
+            this.legacyOrderPrefix = legacyOrderPrefix;
+            this.defaultPreset = defaultPreset;
+        }
+    }
+
     private static final float CORNER_RADIUS_DP = 16f;
     private static final float GAP_DP = 12f;
+    private static final String[] SLOT_KEYS = {"front", "back", "left", "right"};
 
-    private final PreviewLayoutModel modeBModel = new PreviewLayoutModel(PreviewLayoutModel.PRESET_MODE_B_THREE_COL);
-    private final PreviewLayoutModel modeCModel = new PreviewLayoutModel(PreviewLayoutModel.PRESET_MODE_C_FRONT);
+    private static final EnumMap<PreviewMode, ModeStorageSpec> STORAGE_SPECS = new EnumMap<>(PreviewMode.class);
+
+    static {
+        STORAGE_SPECS.put(PreviewMode.MODE_B, new ModeStorageSpec(
+                "b_saved", "saved", "b_pane_", "pane_", "b_order_", "order_",
+                PreviewLayoutModel.PRESET_MODE_B_THREE_COL));
+        STORAGE_SPECS.put(PreviewMode.MODE_C, new ModeStorageSpec(
+                "c_saved", null, "c_pane_", null, "c_order_", null,
+                PreviewLayoutModel.PRESET_MODE_C_FRONT));
+        STORAGE_SPECS.put(PreviewMode.MODE_D, new ModeStorageSpec(
+                "d_saved", null, "d_pane_", null, "d_order_", null,
+                PreviewLayoutModel.PRESET_MODE_D_DUAL));
+    }
+
+    private final EnumMap<PreviewMode, PreviewLayoutModel> modeModels = new EnumMap<>(PreviewMode.class);
     private final SharedPreferences preferences;
+    private final AppConfig appConfig;
     private final Paint border = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint handle = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final Paint arrow = new Paint(Paint.ANTI_ALIAS_FLAG);
     private final float density;
     private final float cornerRadiusPx;
+    private final ScaleGestureDetector pinchDetector;
 
     private final boolean[] modeBVisible = {true, true, true, true};
     private boolean modeCShowLeft = true;
     private boolean modeCShowRight = true;
     private PreviewMode currentMode = PreviewMode.MODE_B;
     private int modeCPrimaryIndex = PreviewLayoutModel.FRONT;
+    private int modeDLeftPrimaryIndex = PreviewLayoutModel.FRONT;
+    private int modeDRightSideIndex = PreviewLayoutModel.LEFT;
     private PreviewLayoutModel.EffectiveLayout effectiveLayout;
 
     private boolean editing;
+    private boolean cropEditMode;
     private boolean resizing;
     private int selected = -1;
     private float startX, startY, originalX, originalY, originalWidth, originalHeight;
+    private float startCropPanX, startCropPanY;
+    private float[] dragOriginSnapshot;
     private float[] beforeEditing;
     private boolean[] beforeEditingModeBVisible;
     private boolean beforeEditingCLeft;
     private boolean beforeEditingCRight;
     private int beforeEditingCPrimary = PreviewLayoutModel.FRONT;
+    private int beforeEditingDPrimary = PreviewLayoutModel.FRONT;
+    private int beforeEditingDRight = PreviewLayoutModel.LEFT;
     private int[] previousOrder;
+    private boolean[] beforeCropFill;
+    private float[] beforeCropZoom;
+    private float[] beforeCropPanX;
+    private float[] beforeCropPanY;
+
+    private boolean inFrameControlsVisible = true;
+    private boolean mainPreviewEnabled = true;
+    private final boolean[] cameraAvailable = {true, true, true, true};
+    private final TextView[] emptyCameraHints = new TextView[PreviewLayoutModel.PANE_COUNT];
+    private TextView btnMainFeedSwitch;
+
+    private final int[] lastPaneWidths = new int[PreviewLayoutModel.PANE_COUNT];
+    private final int[] lastPaneHeights = new int[PreviewLayoutModel.PANE_COUNT];
+
     @Nullable
     private OnStateChangeListener stateChangeListener;
+    @Nullable
+    private OnTransformInvalidatedListener transformInvalidatedListener;
+    @Nullable
+    private OnEditorSelectionListener editorSelectionListener;
+    @Nullable
+    private Runnable manualPrimaryToggleListener;
 
     private final ViewOutlineProvider paneOutlineProvider = new ViewOutlineProvider() {
         @Override
@@ -73,6 +160,11 @@ public final class EditablePreviewLayout extends ViewGroup {
         density = getResources().getDisplayMetrics().density;
         cornerRadiusPx = CORNER_RADIUS_DP * density;
         preferences = context.getSharedPreferences("e5_preview_layout_v1", Context.MODE_PRIVATE);
+        appConfig = new AppConfig(context);
+
+        for (Map.Entry<PreviewMode, ModeStorageSpec> e : STORAGE_SPECS.entrySet()) {
+            modeModels.put(e.getKey(), new PreviewLayoutModel(e.getValue().defaultPreset));
+        }
         loadSavedState();
 
         border.setColor(ContextCompat.getColor(context, R.color.button_accent));
@@ -81,24 +173,41 @@ public final class EditablePreviewLayout extends ViewGroup {
         arrow.setColor(ContextCompat.getColor(context, R.color.ui_on_accent));
         arrow.setStrokeWidth(2 * density);
         setWillNotDraw(false);
+
+        pinchDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            @Override
+            public boolean onScale(@NonNull ScaleGestureDetector detector) {
+                if (!editing || !cropEditMode || selected < 0) return false;
+                String camKey = cameraKeyForIndex(selected);
+                if (camKey == null) return false;
+                float nextZoom = appConfig.getPreviewSlotZoom(currentMode.key, camKey) * detector.getScaleFactor();
+                appConfig.setPreviewSlotZoom(currentMode.key, camKey, nextZoom);
+                notifyTransformInvalidated();
+                if (editorSelectionListener != null) {
+                    editorSelectionListener.onSelectedPaneChanged(selected);
+                }
+                return true;
+            }
+        });
+
         recomputeEffectiveLayout(false);
     }
 
     private void loadSavedState() {
-        // Load Mode B (prefer new b_* keys; migrate legacy T02 saved keys transparently).
-        if (preferences.getBoolean("b_saved", false)) {
-            restoreModel(modeBModel, "b_pane_");
-        } else if (preferences.getBoolean("saved", false)) {
-            restoreModel(modeBModel, "pane_");
+        for (Map.Entry<PreviewMode, ModeStorageSpec> entry : STORAGE_SPECS.entrySet()) {
+            ModeStorageSpec spec = entry.getValue();
+            PreviewLayoutModel model = modeModels.get(entry.getKey());
+            if (model == null) continue;
+            if (preferences.getBoolean(spec.savedKey, false)) {
+                restoreModel(model, spec.panePrefix);
+            } else if (spec.legacySavedKey != null && preferences.getBoolean(spec.legacySavedKey, false)) {
+                restoreModel(model, spec.legacyPanePrefix);
+            }
         }
         for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
             modeBVisible[i] = preferences.getBoolean("b_vis_" + i, true);
         }
         PreviewLayoutModel.normalizeVisibleAtLeastOne(modeBVisible, PreviewLayoutModel.FRONT);
-
-        if (preferences.getBoolean("c_saved", false)) {
-            restoreModel(modeCModel, "c_pane_");
-        }
         modeCShowLeft = preferences.getBoolean("c_vis_left", true);
         modeCShowRight = preferences.getBoolean("c_vis_right", true);
     }
@@ -123,12 +232,46 @@ public final class EditablePreviewLayout extends ViewGroup {
         this.stateChangeListener = listener;
     }
 
+    public void setOnTransformInvalidatedListener(@Nullable OnTransformInvalidatedListener listener) {
+        this.transformInvalidatedListener = listener;
+    }
+
+    public void setOnEditorSelectionListener(@Nullable OnEditorSelectionListener listener) {
+        this.editorSelectionListener = listener;
+    }
+
+    public void setOnManualPrimaryToggleListener(@Nullable Runnable listener) {
+        this.manualPrimaryToggleListener = listener;
+    }
+
+    public void setInFrameControlsVisible(boolean visible) {
+        if (this.inFrameControlsVisible == visible) return;
+        this.inFrameControlsVisible = visible;
+        syncMainFeedSwitchPill();
+    }
+
+    public void setCameraAvailable(@NonNull String cameraKey, boolean available) {
+        int idx = PreviewModeController.cameraKeyToIndex(cameraKey);
+        if (idx < 0 || idx >= PreviewLayoutModel.PANE_COUNT) return;
+        cameraAvailable[idx] = available;
+        syncCameraEmptyHint(idx);
+    }
+
+    public void setMainPreviewEnabled(boolean enabled) {
+        if (this.mainPreviewEnabled == enabled) return;
+        this.mainPreviewEnabled = enabled;
+        for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
+            syncCameraEmptyHint(i);
+        }
+    }
+
     @Override
     protected void onFinishInflate() {
         super.onFinishInflate();
         for (int i = 0; i < getChildCount(); i++) {
             configurePaneOutline(getChildAt(i));
         }
+        initInFrameOverlays();
         restoreOrderForMode(currentMode);
         recomputeEffectiveLayout(false);
     }
@@ -139,11 +282,102 @@ public final class EditablePreviewLayout extends ViewGroup {
         child.setClipToOutline(true);
     }
 
+    private void initInFrameOverlays() {
+        btnMainFeedSwitch = new TextView(getContext());
+        btnMainFeedSwitch.setBackgroundResource(R.drawable.preview_shortcut_pill);
+        btnMainFeedSwitch.setContentDescription("toggle_front_back_primary");
+        btnMainFeedSwitch.setTextColor(0xFFFFFFFF);
+        btnMainFeedSwitch.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.ui_pill_text_size));
+        btnMainFeedSwitch.setTypeface(null, Typeface.BOLD);
+        btnMainFeedSwitch.setGravity(Gravity.CENTER);
+        btnMainFeedSwitch.setMinHeight(
+                getResources().getDimensionPixelSize(R.dimen.ui_corner_shortcut_item_height));
+        int hp = getResources().getDimensionPixelSize(R.dimen.ui_pill_padding_h);
+        int vp = Math.round(6 * density);
+        btnMainFeedSwitch.setPadding(hp, vp, hp, vp);
+        btnMainFeedSwitch.setClickable(true);
+        btnMainFeedSwitch.setFocusable(true);
+        btnMainFeedSwitch.setOnClickListener(v -> {
+            if (manualPrimaryToggleListener != null) {
+                manualPrimaryToggleListener.run();
+            }
+        });
+        for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
+            syncCameraEmptyHint(i);
+        }
+    }
+
+    private void syncCameraEmptyHint(int idx) {
+        FrameLayout frame = findFrameByPaneIndex(idx);
+        if (frame == null) return;
+        TextView hint = emptyCameraHints[idx];
+        if (hint == null) {
+            hint = new TextView(getContext());
+            hint.setTextColor(0xFF94A3B8);
+            hint.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+            hint.setGravity(Gravity.CENTER);
+            hint.setText(defaultCameraLabel(idx) + "未接入信号");
+            hint.setPadding(Math.round(12 * density), Math.round(6 * density),
+                    Math.round(12 * density), Math.round(6 * density));
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER);
+            frame.addView(hint, lp);
+            emptyCameraHints[idx] = hint;
+        }
+        hint.setVisibility((mainPreviewEnabled && !cameraAvailable[idx]) ? View.VISIBLE : View.GONE);
+    }
+
+    private void syncMainFeedSwitchPill() {
+        if (btnMainFeedSwitch == null) return;
+        boolean needPill = (currentMode == PreviewMode.MODE_C || currentMode == PreviewMode.MODE_D)
+                && !editing && inFrameControlsVisible;
+        int primaryIdx = currentMode == PreviewMode.MODE_D ? modeDLeftPrimaryIndex : modeCPrimaryIndex;
+        FrameLayout targetFrame = needPill ? findFrameByPaneIndex(primaryIdx) : null;
+
+        ViewParent parent = btnMainFeedSwitch.getParent();
+        if (targetFrame == null || targetFrame.getVisibility() != View.VISIBLE) {
+            if (parent instanceof ViewGroup) {
+                ((ViewGroup) parent).removeView(btnMainFeedSwitch);
+            }
+            return;
+        }
+        if (parent != targetFrame) {
+            if (parent instanceof ViewGroup) {
+                ((ViewGroup) parent).removeView(btnMainFeedSwitch);
+            }
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM | Gravity.END);
+            int margin = Math.round(14 * density);
+            lp.setMargins(margin, margin, margin, margin);
+            targetFrame.addView(btnMainFeedSwitch, lp);
+        }
+        btnMainFeedSwitch.setText(primaryIdx == PreviewLayoutModel.BACK ? "后视 ⇄ 前视" : "前视 ⇄ 后视");
+        btnMainFeedSwitch.bringToFront();
+    }
+
+    @Nullable
+    private FrameLayout findFrameByPaneIndex(int targetIndex) {
+        for (int i = 0; i < getChildCount(); i++) {
+            View child = getChildAt(i);
+            if (child instanceof FrameLayout && paneIndex(child) == targetIndex) {
+                return (FrameLayout) child;
+            }
+        }
+        return null;
+    }
+
     private void restoreOrderForMode(PreviewMode mode) {
-        String orderPrefix = mode == PreviewMode.MODE_C ? "c_order_" : "b_order_";
-        boolean hasNewOrder = preferences.contains(orderPrefix + "0");
-        String effectivePrefix = hasNewOrder ? orderPrefix
-                : (mode == PreviewMode.MODE_B && preferences.getBoolean("saved", false) ? "order_" : null);
+        ModeStorageSpec spec = STORAGE_SPECS.get(mode);
+        if (spec == null) return;
+        boolean hasNew = preferences.contains(spec.orderPrefix + "0");
+        String effectivePrefix = hasNew ? spec.orderPrefix
+                : (spec.legacySavedKey != null && preferences.getBoolean(spec.legacySavedKey, false)
+                ? spec.legacyOrderPrefix : null);
         if (effectivePrefix == null) return;
         int[] order = new int[4];
         boolean[] seen = new boolean[4];
@@ -176,12 +410,38 @@ public final class EditablePreviewLayout extends ViewGroup {
         return PreviewLayoutModel.RIGHT;
     }
 
+    @Nullable
+    public static String cameraKeyForIndex(int index) {
+        if (index == PreviewLayoutModel.FRONT) return "front";
+        if (index == PreviewLayoutModel.BACK) return "back";
+        if (index == PreviewLayoutModel.LEFT) return "left";
+        if (index == PreviewLayoutModel.RIGHT) return "right";
+        return null;
+    }
+
+    @NonNull
+    public static String defaultCameraLabel(int index) {
+        if (index == PreviewLayoutModel.FRONT) return "前视";
+        if (index == PreviewLayoutModel.BACK) return "后视";
+        if (index == PreviewLayoutModel.LEFT) return "左侧";
+        if (index == PreviewLayoutModel.RIGHT) return "右侧";
+        return "未知";
+    }
+
     public PreviewMode getCurrentMode() {
         return currentMode;
     }
 
     public int getModeCPrimaryIndex() {
         return modeCPrimaryIndex;
+    }
+
+    public int getModeDLeftPrimaryIndex() {
+        return modeDLeftPrimaryIndex;
+    }
+
+    public int getModeDRightSideIndex() {
+        return modeDRightSideIndex;
     }
 
     public boolean[] getEffectiveVisibilityMask() {
@@ -195,6 +455,9 @@ public final class EditablePreviewLayout extends ViewGroup {
     }
 
     public boolean isPaneVisibleInMode(int index) {
+        if (currentMode == PreviewMode.MODE_D) {
+            return index == modeDLeftPrimaryIndex || index == modeDRightSideIndex;
+        }
         if (currentMode == PreviewMode.MODE_C) {
             if (index == PreviewLayoutModel.LEFT) return modeCShowLeft;
             if (index == PreviewLayoutModel.RIGHT) return modeCShowRight;
@@ -203,29 +466,54 @@ public final class EditablePreviewLayout extends ViewGroup {
         return index >= 0 && index < PreviewLayoutModel.PANE_COUNT && modeBVisible[index];
     }
 
-    /** Switch active preview mode and/or Mode C primary feed (front/back), recomputing layout and visibility. */
-    public void setPreviewState(@NonNull PreviewMode mode, int modeCPrimary) {
-        PreviewMode normalizedMode = (mode == PreviewMode.MODE_C) ? PreviewMode.MODE_C : PreviewMode.MODE_B;
-        int normalizedPrimary = (modeCPrimary == PreviewLayoutModel.BACK)
+    public void setPreviewState(@NonNull PreviewMode mode, int primaryIndex) {
+        setPreviewState(mode, primaryIndex, PreviewLayoutModel.LEFT);
+    }
+
+    /** Switch active preview mode and/or paired feeds (Mode C/D), recomputing layout and visibility. */
+    public void setPreviewState(@NonNull PreviewMode mode, int primaryIndex, int modeDRightSide) {
+        PreviewMode normalizedMode = STORAGE_SPECS.containsKey(mode) ? mode : PreviewMode.MODE_B;
+        int normalizedPrimary = (primaryIndex == PreviewLayoutModel.BACK)
                 ? PreviewLayoutModel.BACK : PreviewLayoutModel.FRONT;
+        int normalizedSide = (modeDRightSide == PreviewLayoutModel.RIGHT)
+                ? PreviewLayoutModel.RIGHT : PreviewLayoutModel.LEFT;
+
         if (editing && normalizedMode != currentMode) {
             finishEditing(false);
         }
         boolean modeChanged = currentMode != normalizedMode;
-        boolean primaryChanged = modeCPrimaryIndex != normalizedPrimary;
+        boolean primaryChanged = (normalizedMode == PreviewMode.MODE_D)
+                ? (modeDLeftPrimaryIndex != normalizedPrimary || modeDRightSideIndex != normalizedSide)
+                : (modeCPrimaryIndex != normalizedPrimary);
+
         currentMode = normalizedMode;
-        modeCPrimaryIndex = normalizedPrimary;
+        if (normalizedMode == PreviewMode.MODE_D) {
+            modeDLeftPrimaryIndex = normalizedPrimary;
+            modeDRightSideIndex = normalizedSide;
+        } else {
+            modeCPrimaryIndex = normalizedPrimary;
+        }
         if (modeChanged) {
             restoreOrderForMode(currentMode);
         }
         if (modeChanged || primaryChanged || effectiveLayout == null) {
             recomputeEffectiveLayout(true);
+            notifyTransformInvalidated();
         }
     }
 
     /** Toggles camera pane visibility in the current mode; Mode B guarantees at least one visible pane. */
     public boolean togglePaneVisibility(int index) {
         if (index < 0 || index >= PreviewLayoutModel.PANE_COUNT) return false;
+        if (currentMode == PreviewMode.MODE_D) {
+            if (index == PreviewLayoutModel.FRONT || index == PreviewLayoutModel.BACK) {
+                modeDLeftPrimaryIndex = index;
+            } else {
+                modeDRightSideIndex = index;
+            }
+            recomputeEffectiveLayout(true);
+            return true;
+        }
         if (currentMode == PreviewMode.MODE_C) {
             if (index == PreviewLayoutModel.LEFT) {
                 modeCShowLeft = !modeCShowLeft;
@@ -276,15 +564,18 @@ public final class EditablePreviewLayout extends ViewGroup {
     }
 
     private PreviewLayoutModel activeModel() {
-        return currentMode == PreviewMode.MODE_C ? modeCModel : modeBModel;
+        PreviewLayoutModel m = modeModels.get(currentMode);
+        return m != null ? m : modeModels.get(PreviewMode.MODE_B);
     }
 
     private void recomputeEffectiveLayout(boolean notify) {
-        if (currentMode == PreviewMode.MODE_C) {
-            effectiveLayout = modeCModel.computeEffectiveModeC(
+        if (currentMode == PreviewMode.MODE_D) {
+            effectiveLayout = activeModel().computeEffectiveModeD(modeDLeftPrimaryIndex, modeDRightSideIndex);
+        } else if (currentMode == PreviewMode.MODE_C) {
+            effectiveLayout = activeModel().computeEffectiveModeC(
                     modeCPrimaryIndex, modeCShowLeft, modeCShowRight);
         } else {
-            effectiveLayout = modeBModel.computeEffectiveModeB(modeBVisible);
+            effectiveLayout = activeModel().computeEffectiveModeB(modeBVisible);
         }
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
@@ -294,10 +585,21 @@ public final class EditablePreviewLayout extends ViewGroup {
                 child.setVisibility(desiredVisibility);
             }
         }
+        syncMainFeedSwitchPill();
         requestLayout();
         invalidate();
         if (notify && stateChangeListener != null) {
             stateChangeListener.onEffectiveVisibilityChanged(getEffectiveVisibilityMask());
+        }
+    }
+
+    private void notifyTransformInvalidated() {
+        if (transformInvalidatedListener != null) {
+            post(() -> {
+                if (transformInvalidatedListener != null) {
+                    transformInvalidatedListener.onPreviewTransformsInvalidated();
+                }
+            });
         }
     }
 
@@ -324,6 +626,7 @@ public final class EditablePreviewLayout extends ViewGroup {
     @Override
     protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
         int halfGap = Math.round((GAP_DP * 0.5f) * density);
+        boolean boundsChanged = false;
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
             if (child.getVisibility() == View.GONE) continue;
@@ -332,13 +635,53 @@ public final class EditablePreviewLayout extends ViewGroup {
                     ? effectiveLayout.panes[idx] : activeModel().pane(idx);
             int x = Math.round(pane.x * getWidth()) + halfGap;
             int y = Math.round(pane.y * getHeight()) + halfGap;
-            child.layout(x, y, x + child.getMeasuredWidth(), y + child.getMeasuredHeight());
+            int mw = child.getMeasuredWidth();
+            int mh = child.getMeasuredHeight();
+            child.layout(x, y, x + mw, y + mh);
             child.invalidateOutline();
+            if (lastPaneWidths[idx] != mw || lastPaneHeights[idx] != mh) {
+                lastPaneWidths[idx] = mw;
+                lastPaneHeights[idx] = mh;
+                boundsChanged = true;
+            }
+        }
+        if (boundsChanged && transformInvalidatedListener != null) {
+            post(() -> {
+                if (transformInvalidatedListener != null) {
+                    transformInvalidatedListener.onPreviewTransformsInvalidated();
+                }
+            });
         }
     }
 
     public boolean isEditing() {
         return editing;
+    }
+
+    public boolean isCropEditMode() {
+        return cropEditMode;
+    }
+
+    public void setCropEditMode(boolean cropMode) {
+        this.cropEditMode = cropMode;
+        if (cropMode && (selected < 0 || !isPaneVisibleInMode(selected))) {
+            selected = findFirstVisiblePane();
+        }
+        invalidate();
+        if (editorSelectionListener != null) {
+            editorSelectionListener.onSelectedPaneChanged(selected);
+        }
+    }
+
+    public int getSelectedPaneIndex() {
+        return selected;
+    }
+
+    private int findFirstVisiblePane() {
+        for (int idx = 0; idx < PreviewLayoutModel.PANE_COUNT; idx++) {
+            if (isPaneVisibleInMode(idx)) return idx;
+        }
+        return -1;
     }
 
     public void beginEditing() {
@@ -349,12 +692,30 @@ public final class EditablePreviewLayout extends ViewGroup {
         beforeEditingCLeft = modeCShowLeft;
         beforeEditingCRight = modeCShowRight;
         beforeEditingCPrimary = modeCPrimaryIndex;
+        beforeEditingDPrimary = modeDLeftPrimaryIndex;
+        beforeEditingDRight = modeDRightSideIndex;
         previousOrder = new int[getChildCount()];
         for (int i = 0; i < previousOrder.length; i++) {
             previousOrder[i] = paneIndex(getChildAt(i));
         }
+
+        beforeCropFill = new boolean[SLOT_KEYS.length];
+        beforeCropZoom = new float[SLOT_KEYS.length];
+        beforeCropPanX = new float[SLOT_KEYS.length];
+        beforeCropPanY = new float[SLOT_KEYS.length];
+        String modeKey = currentMode.key;
+        for (int i = 0; i < SLOT_KEYS.length; i++) {
+            String camKey = SLOT_KEYS[i];
+            beforeCropFill[i] = appConfig.isPreviewSlotFillContainer(modeKey, camKey);
+            beforeCropZoom[i] = appConfig.getPreviewSlotZoom(modeKey, camKey);
+            beforeCropPanX[i] = appConfig.getPreviewSlotPanX(modeKey, camKey);
+            beforeCropPanY[i] = appConfig.getPreviewSlotPanY(modeKey, camKey);
+        }
+
         editing = true;
-        selected = -1;
+        cropEditMode = false;
+        selected = findFirstVisiblePane();
+        syncMainFeedSwitchPill();
         invalidate();
     }
 
@@ -364,33 +725,53 @@ public final class EditablePreviewLayout extends ViewGroup {
             modeCShowLeft = true;
             modeCShowRight = true;
         }
-        selected = -1;
+        selected = findFirstVisiblePane();
         recomputeEffectiveLayout(true);
     }
 
     public void resetCurrentModeDefault() {
-        if (currentMode == PreviewMode.MODE_C) {
-            modeCModel.preset(PreviewLayoutModel.PRESET_MODE_C_FRONT);
-            modeCShowLeft = true;
-            modeCShowRight = true;
-        } else {
-            modeBModel.preset(PreviewLayoutModel.PRESET_MODE_B_THREE_COL);
+        ModeStorageSpec spec = STORAGE_SPECS.get(currentMode);
+        if (spec != null) {
+            activeModel().preset(spec.defaultPreset);
+        }
+        if (currentMode == PreviewMode.MODE_B) {
             for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
                 modeBVisible[i] = true;
             }
+        } else if (currentMode == PreviewMode.MODE_C) {
+            modeCShowLeft = true;
+            modeCShowRight = true;
         }
-        selected = -1;
+        selected = findFirstVisiblePane();
         if (!editing) {
             persistCurrentMode(false);
         }
         recomputeEffectiveLayout(true);
     }
 
+    public void resetSelectedSlotCrop() {
+        int target = (selected >= 0 && isPaneVisibleInMode(selected)) ? selected : findFirstVisiblePane();
+        if (target < 0) return;
+        String camKey = cameraKeyForIndex(target);
+        if (camKey == null) return;
+        appConfig.resetPreviewSlotTransform(currentMode.key, camKey);
+        notifyTransformInvalidated();
+    }
+
     public void finishEditing(boolean save) {
         if (!editing) return;
         if (save) {
             if (currentMode == PreviewMode.MODE_C) {
-                syncModeCPrimaryPair();
+                int inactive = modeCPrimaryIndex == PreviewLayoutModel.BACK
+                        ? PreviewLayoutModel.FRONT : PreviewLayoutModel.BACK;
+                activeModel().syncPairedSlot(modeCPrimaryIndex, inactive);
+            } else if (currentMode == PreviewMode.MODE_D) {
+                int inactiveLeft = modeDLeftPrimaryIndex == PreviewLayoutModel.BACK
+                        ? PreviewLayoutModel.FRONT : PreviewLayoutModel.BACK;
+                int inactiveRight = modeDRightSideIndex == PreviewLayoutModel.RIGHT
+                        ? PreviewLayoutModel.LEFT : PreviewLayoutModel.RIGHT;
+                activeModel().syncPairedSlot(modeDLeftPrimaryIndex, inactiveLeft);
+                activeModel().syncPairedSlot(modeDRightSideIndex, inactiveRight);
             }
             persistCurrentMode(true);
         } else {
@@ -401,48 +782,54 @@ public final class EditablePreviewLayout extends ViewGroup {
             modeCShowLeft = beforeEditingCLeft;
             modeCShowRight = beforeEditingCRight;
             modeCPrimaryIndex = beforeEditingCPrimary;
+            modeDLeftPrimaryIndex = beforeEditingDPrimary;
+            modeDRightSideIndex = beforeEditingDRight;
             applyOrder(previousOrder);
+
+            if (beforeCropFill != null) {
+                String modeKey = currentMode.key;
+                for (int i = 0; i < SLOT_KEYS.length; i++) {
+                    String camKey = SLOT_KEYS[i];
+                    appConfig.setPreviewSlotFillContainer(modeKey, camKey, beforeCropFill[i]);
+                    appConfig.setPreviewSlotZoom(modeKey, camKey, beforeCropZoom[i]);
+                    appConfig.setPreviewSlotPan(modeKey, camKey, beforeCropPanX[i], beforeCropPanY[i]);
+                }
+            }
         }
         editing = false;
+        cropEditMode = false;
+        dragOriginSnapshot = null;
         selected = -1;
         beforeEditing = null;
         beforeEditingModeBVisible = null;
+        beforeCropFill = null;
+        beforeCropZoom = null;
+        beforeCropPanX = null;
+        beforeCropPanY = null;
         previousOrder = null;
         recomputeEffectiveLayout(!save);
-    }
-
-    private void syncModeCPrimaryPair() {
-        int active = (modeCPrimaryIndex == PreviewLayoutModel.BACK)
-                ? PreviewLayoutModel.BACK : PreviewLayoutModel.FRONT;
-        int inactive = (active == PreviewLayoutModel.BACK)
-                ? PreviewLayoutModel.FRONT : PreviewLayoutModel.BACK;
-        PreviewLayoutModel.Pane src = modeCModel.pane(active);
-        modeCModel.move(inactive, 0f, 0f);
-        modeCModel.resize(inactive, src.width, src.height);
-        modeCModel.move(inactive, src.x, src.y);
+        notifyTransformInvalidated();
     }
 
     private void persistCurrentMode(boolean includeOrder) {
+        ModeStorageSpec spec = STORAGE_SPECS.get(currentMode);
+        if (spec == null) return;
         PreviewLayoutModel model = activeModel();
         float[] values = model.snapshot();
-        boolean isC = currentMode == PreviewMode.MODE_C;
-        String savedKey = isC ? "c_saved" : "b_saved";
-        String panePrefix = isC ? "c_pane_" : "b_pane_";
-        String orderPrefix = isC ? "c_order_" : "b_order_";
 
-        SharedPreferences.Editor editor = preferences.edit().putBoolean(savedKey, true);
+        SharedPreferences.Editor editor = preferences.edit().putBoolean(spec.savedKey, true);
         for (int i = 0; i < values.length; i++) {
-            editor.putFloat(panePrefix + i, values[i]);
+            editor.putFloat(spec.panePrefix + i, values[i]);
         }
         if (includeOrder) {
             for (int i = 0; i < getChildCount(); i++) {
-                editor.putInt(orderPrefix + i, paneIndex(getChildAt(i)));
+                editor.putInt(spec.orderPrefix + i, paneIndex(getChildAt(i)));
             }
         }
-        if (isC) {
+        if (currentMode == PreviewMode.MODE_C) {
             editor.putBoolean("c_vis_left", modeCShowLeft);
             editor.putBoolean("c_vis_right", modeCShowRight);
-        } else {
+        } else if (currentMode == PreviewMode.MODE_B) {
             for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
                 editor.putBoolean("b_vis_" + i, modeBVisible[i]);
             }
@@ -458,8 +845,56 @@ public final class EditablePreviewLayout extends ViewGroup {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (!editing) return super.onTouchEvent(event);
-        if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+        if (cropEditMode) {
+            return handleCropTouch(event);
+        }
+        return handleLayoutTouch(event);
+    }
+
+    private boolean handleCropTouch(MotionEvent event) {
+        pinchDetector.onTouchEvent(event);
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
+            int hit = findHitPaneIndex(event.getX(), event.getY());
+            if (hit >= 0) {
+                selected = hit;
+                String camKey = cameraKeyForIndex(selected);
+                if (camKey != null) {
+                    startCropPanX = appConfig.getPreviewSlotPanX(currentMode.key, camKey);
+                    startCropPanY = appConfig.getPreviewSlotPanY(currentMode.key, camKey);
+                }
+                startX = event.getX();
+                startY = event.getY();
+                if (editorSelectionListener != null) {
+                    editorSelectionListener.onSelectedPaneChanged(selected);
+                }
+                invalidate();
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_MOVE && event.getPointerCount() == 1
+                && selected >= 0 && !pinchDetector.isInProgress()) {
+            View child = findFrameByPaneIndex(selected);
+            String camKey = cameraKeyForIndex(selected);
+            if (child != null && child.getWidth() > 0 && child.getHeight() > 0 && camKey != null) {
+                float dxFrac = (event.getX() - startX) / child.getWidth();
+                float dyFrac = (event.getY() - startY) / child.getHeight();
+                appConfig.setPreviewSlotPan(currentMode.key, camKey, startCropPanX + dxFrac, startCropPanY + dyFrac);
+                notifyTransformInvalidated();
+            }
+            return true;
+        }
+        if (action == MotionEvent.ACTION_UP) {
+            performClick();
+        }
+        return true;
+    }
+
+    private boolean handleLayoutTouch(MotionEvent event) {
+        int action = event.getActionMasked();
+        if (action == MotionEvent.ACTION_DOWN) {
             selected = -1;
+            dragOriginSnapshot = null;
             for (int i = getChildCount() - 1; i >= 0; i--) {
                 View child = getChildAt(i);
                 if (child.getVisibility() != View.VISIBLE) continue;
@@ -468,9 +903,11 @@ public final class EditablePreviewLayout extends ViewGroup {
                     selected = paneIndex(child);
                     resizing = event.getX() >= child.getRight() - 48 * density
                             && event.getY() >= child.getBottom() - 48 * density;
+                    PreviewLayoutModel model = activeModel();
+                    dragOriginSnapshot = model.snapshot();
                     PreviewLayoutModel.Pane pane = (effectiveLayout != null)
                             ? effectiveLayout.panes[selected]
-                            : activeModel().pane(selected);
+                            : model.pane(selected);
                     originalX = pane.x;
                     originalY = pane.y;
                     originalWidth = pane.width;
@@ -481,38 +918,54 @@ public final class EditablePreviewLayout extends ViewGroup {
                     break;
                 }
             }
+            if (editorSelectionListener != null) {
+                editorSelectionListener.onSelectedPaneChanged(selected);
+            }
             invalidate();
             return true;
         }
-        if (event.getActionMasked() == MotionEvent.ACTION_MOVE
-                && selected >= 0 && getWidth() > 0 && getHeight() > 0) {
+        if (action == MotionEvent.ACTION_MOVE && selected >= 0 && getWidth() > 0 && getHeight() > 0) {
             float dx = (event.getX() - startX) / getWidth();
             float dy = (event.getY() - startY) / getHeight();
             PreviewLayoutModel model = activeModel();
+            boolean[] mask = getEffectiveVisibilityMask();
             if (resizing) {
-                model.move(selected, 0f, 0f);
-                model.resize(selected, originalWidth + dx, originalHeight + dy);
-                model.move(selected, originalX, originalY);
+                model.resizePaneWithCollision(selected, originalWidth + dx, originalHeight + dy, mask);
             } else {
-                model.move(selected, 0f, 0f);
-                model.resize(selected, originalWidth, originalHeight);
-                model.move(selected, originalX + dx, originalY + dy);
+                model.movePaneWithCollision(selected, originalX + dx, originalY + dy, mask, dragOriginSnapshot);
             }
             if (effectiveLayout != null) {
-                PreviewLayoutModel.Pane src = model.pane(selected);
-                effectiveLayout.panes[selected].x = src.x;
-                effectiveLayout.panes[selected].y = src.y;
-                effectiveLayout.panes[selected].width = src.width;
-                effectiveLayout.panes[selected].height = src.height;
+                for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
+                    PreviewLayoutModel.Pane src = model.pane(i);
+                    effectiveLayout.panes[i].x = src.x;
+                    effectiveLayout.panes[i].y = src.y;
+                    effectiveLayout.panes[i].width = src.width;
+                    effectiveLayout.panes[i].height = src.height;
+                }
             }
             requestLayout();
             invalidate();
             return true;
         }
-        if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-            performClick();
+        if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
+            dragOriginSnapshot = null;
+            if (action == MotionEvent.ACTION_UP) {
+                performClick();
+            }
         }
         return true;
+    }
+
+    private int findHitPaneIndex(float x, float y) {
+        for (int i = getChildCount() - 1; i >= 0; i--) {
+            View child = getChildAt(i);
+            if (child.getVisibility() != View.VISIBLE) continue;
+            if (x >= child.getLeft() && x <= child.getRight()
+                    && y >= child.getTop() && y <= child.getBottom()) {
+                return paneIndex(child);
+            }
+        }
+        return -1;
     }
 
     @Override
@@ -538,12 +991,14 @@ public final class EditablePreviewLayout extends ViewGroup {
                     cornerRadiusPx,
                     cornerRadiusPx,
                     border);
-            float x = child.getRight() - size;
-            float y = child.getBottom() - size;
-            canvas.drawRoundRect(x, y, child.getRight(), child.getBottom(), 6 * density, 6 * density, handle);
-            canvas.drawLine(x + 10 * density, y + 10 * density, x + 23 * density, y + 23 * density, arrow);
-            canvas.drawLine(x + 15 * density, y + 23 * density, x + 23 * density, y + 23 * density, arrow);
-            canvas.drawLine(x + 23 * density, y + 15 * density, x + 23 * density, y + 23 * density, arrow);
+            if (!cropEditMode) {
+                float x = child.getRight() - size;
+                float y = child.getBottom() - size;
+                canvas.drawRoundRect(x, y, child.getRight(), child.getBottom(), 6 * density, 6 * density, handle);
+                canvas.drawLine(x + 10 * density, y + 10 * density, x + 23 * density, y + 23 * density, arrow);
+                canvas.drawLine(x + 15 * density, y + 23 * density, x + 23 * density, y + 23 * density, arrow);
+                canvas.drawLine(x + 23 * density, y + 15 * density, x + 23 * density, y + 23 * density, arrow);
+            }
         }
     }
 }

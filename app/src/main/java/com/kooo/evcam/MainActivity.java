@@ -49,15 +49,22 @@ import java.util.concurrent.TimeUnit;
 public class MainActivity extends AppCompatActivity implements
         com.kooo.evcam.ui.UiThemeController.Host,
         com.kooo.evcam.ui.UiThemeController.ThemeAware,
+        com.kooo.evcam.ui.UiScaleController.Host,
         com.kooo.evcam.ui.PreviewModeController.Host {
     private com.kooo.evcam.ui.AppShellController uiShell;
     private com.kooo.evcam.ui.UiThemeController uiTheme;
+    private com.kooo.evcam.ui.UiScaleController uiScale;
     private com.kooo.evcam.ui.PreviewEditorController previewEditor;
     private com.kooo.evcam.ui.PreviewModeController previewModeController;
 
     @Override
     public com.kooo.evcam.ui.UiThemeController getUiThemeController() {
         return uiTheme;
+    }
+
+    @Override
+    public com.kooo.evcam.ui.UiScaleController getUiScaleController() {
+        return uiScale;
     }
 
     @Override
@@ -272,6 +279,9 @@ public class MainActivity extends AppCompatActivity implements
                                 || cameraManager.isStoppingRecording())),
                 () -> previewEditor != null && previewEditor.isEditing());
         uiTheme.setShellController(uiShell);
+        uiScale = new com.kooo.evcam.ui.UiScaleController(this,
+                () -> previewEditor != null && previewEditor.isEditing());
+        uiScale.setShellController(uiShell);
         previewEditor = new com.kooo.evcam.ui.PreviewEditorController(this, editing -> {
             com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
             uiShell.setLayoutEditing(editing);
@@ -279,6 +289,7 @@ public class MainActivity extends AppCompatActivity implements
                 previewModeController.onEditingStateChanged(editing);
             }
             if (!editing && uiTheme != null) uiTheme.syncSystemBarsAndTree();
+            if (!editing && uiScale != null) uiScale.applySavedScaleInPlace();
         });
         uiShell.bind(
                 this::navigateToSection,
@@ -299,6 +310,7 @@ public class MainActivity extends AppCompatActivity implements
         initPreviewModeController();
         uiShell.setPreviewEnabled(appConfig.isMainPreviewEnabled());
         uiTheme.syncSystemBarsAndTree();
+        uiScale.applySavedScaleInPlace();
         if (savedInstanceState != null) {
             uiShell.restore(savedInstanceState.getInt("ui_destination", R.id.nav_recording));
         }
@@ -464,7 +476,7 @@ public class MainActivity extends AppCompatActivity implements
 
         // T06: 同步 E5 四类信号映射、绑定自动化总协调器并处理车辆动作 Intent
         appConfig.syncVehicleSignalCategoryFromConfig();
-        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().attachUiHost(vehicleAutomationUiHost);
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().attachUiHost(this, vehicleAutomationUiHost);
         if (com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this)
                 && com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(this)) {
             CameraForegroundService.start(this, "EVCam", "车辆信号与后台保活运行中");
@@ -945,7 +957,17 @@ public class MainActivity extends AppCompatActivity implements
                             cameraManager.updatePreviewTextureViews(textureFront, textureBack, textureLeft, textureRight);
                         }
                     }
+
+                    @Override
+                    public void onEnableMainPreviewClicked() {
+                        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
+                        setMainPreviewEnabled(true);
+                    }
                 });
+        com.kooo.evcam.ui.EditablePreviewLayout editable = previewModeController.getEditablePreviewLayout();
+        if (editable != null) {
+            editable.setOnTransformInvalidatedListener(this::refreshMainPreviewTransforms);
+        }
         uiShell.bindPreviewModeControls(
                 mode -> {
                     com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
@@ -953,6 +975,7 @@ public class MainActivity extends AppCompatActivity implements
                         previewEditor.finish(false);
                     }
                     previewModeController.setPreviewMode(mode);
+                    com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().startOrReload(this);
                 },
                 () -> {
                     if (previewEditor != null && previewEditor.isEditing()) {
@@ -1887,7 +1910,7 @@ public class MainActivity extends AppCompatActivity implements
                 @Override
                 public void moveRecordingToBackgroundForGearShift() {
                     if (isInterfaceInForeground()) {
-                        AppLog.i(TAG, "R/D 换挡弹出倒计时结束，自动退至后台（保持录制）");
+                        AppLog.i(TAG, "前进档（D 档）弹出倒计时结束，自动退至后台（保持录制）");
                         com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                     }
                 }
@@ -1900,7 +1923,7 @@ public class MainActivity extends AppCompatActivity implements
         intent.removeExtra(WakeUpHelper.EXTRA_VEHICLE_ACTION);
 
         if (WakeUpHelper.VEHICLE_ACTION_RD_POPUP.equals(action)) {
-            AppLog.i(TAG, "处理 R/D 换挡自动弹出 Intent -> 切换到记录仪页");
+            AppLog.i(TAG, "处理前进档（D 档）自动弹出 Intent -> 切换到记录仪页");
             if (uiShell != null) {
                 if (uiShell.isFullscreenPreview()) {
                     uiShell.setFullscreenPreview(false);
@@ -2900,30 +2923,18 @@ public class MainActivity extends AppCompatActivity implements
             applyPhoneScaleTransform(textureView, previewSize, cameraKey);
             AppLog.d(TAG, "设置 " + cameraKey + " 手机缩放变换, 预览尺寸: " + previewSize.getWidth() + "x" + previewSize.getHeight());
         } else {
-            // E5 等其他车型
-            boolean needRotation = "left".equals(cameraKey) || "right".equals(cameraKey);
-            if (needRotation) {
-                textureView.setAspectRatio(previewSize.getHeight(), previewSize.getWidth());
-                AppLog.d(TAG, "设置 " + cameraKey + " 宽高比(E5旋转后): " + previewSize.getHeight() + ":" + previewSize.getWidth());
-                int rotation = "left".equals(cameraKey) ? 270 : 90;
-                applyRotationTransform(textureView, previewSize, rotation, cameraKey);
-            } else {
-                textureView.setAspectRatio(previewSize.getWidth(), previewSize.getHeight());
-                boolean useFillMode = configuredCameraCount >= 4;
-                if (useFillMode) {
-                    textureView.setFillContainer(true);
-                    AppLog.d(TAG, "设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight() + ", 填满模式");
-                } else {
-                    textureView.setFillContainer(false);
-                    AppLog.d(TAG, "设置 " + cameraKey + " 宽高比: " + previewSize.getWidth() + ":" + previewSize.getHeight() + ", 适应模式");
-                }
-                com.kooo.evcam.ui.PreviewTransformHelper.applyMainPreviewTransform(textureView, this, cameraKey, 0);
-
+            // E5 等其他车型：统一使用 PreviewTransformHelper.buildSlotMatrix（支持各画面裁剪/填充与缩放平移）
+            int rotation = 0;
+            if ("left".equals(cameraKey)) {
+                rotation = 270;
+            } else if ("right".equals(cameraKey)) {
+                rotation = 90;
             }
+            applySlotMatrixTransform(textureView, previewSize, rotation, cameraKey);
         }
     }
 
-    /** 刷新主界面所有可见 TextureView 及独立悬浮窗的物理/输出双镜像变换。 */
+    /** 刷新主界面所有可见 TextureView 及独立悬浮窗的物理/输出双镜像与画框填充变换。 */
     public void refreshMainPreviewTransforms() {
         runOnUiThread(() -> {
             if (cameraManager != null) {
@@ -2944,75 +2955,48 @@ public class MainActivity extends AppCompatActivity implements
         });
     }
 
-    private void applyRotationTransform(AutoFitTextureView textureView, android.util.Size previewSize,
-                                        int rotation, String cameraKey) {
+    private void applySlotMatrixTransform(AutoFitTextureView textureView, android.util.Size previewSize,
+                                          int rotation, String cameraKey) {
         textureView.setTag(R.id.tag_main_preview_matrix_managed, Boolean.TRUE);
+        if (textureView.getRatioWidth() != 0 || textureView.getRatioHeight() != 0) {
+            textureView.setAspectRatio(0, 0);
+        }
+        final boolean isMainPane = (textureView == getTextureViewForKey(cameraKey));
+        final String modeKey = previewModeController != null
+                ? previewModeController.getCurrentPreviewMode().key
+                : appConfig.getPreviewMode();
+        final boolean fill = !isMainPane || appConfig.isPreviewSlotFillContainer(modeKey, cameraKey);
+        final float zoom = isMainPane ? appConfig.getPreviewSlotZoom(modeKey, cameraKey) : 1.0f;
+        final float panX = isMainPane ? appConfig.getPreviewSlotPanX(modeKey, cameraKey) : 0f;
+        final float panY = isMainPane ? appConfig.getPreviewSlotPanY(modeKey, cameraKey) : 0f;
         final com.kooo.evcam.blindspot.CameraMirrorPolicy.ResolvedMirror mirror =
                 com.kooo.evcam.blindspot.CameraMirrorPolicy.resolve(
                         appConfig, com.kooo.evcam.blindspot.MirrorTarget.MAIN_PREVIEW, cameraKey);
-        // 延迟执行，确保 TextureView 已经完成布局
-        textureView.post(() -> {
+
+        Runnable applyTask = () -> {
             int viewWidth = textureView.getWidth();
             int viewHeight = textureView.getHeight();
-
             if (viewWidth == 0 || viewHeight == 0) {
-                AppLog.d(TAG, cameraKey + " TextureView 尺寸为0，延迟应用旋转");
-                // 如果视图还没有尺寸，再次延迟
-                textureView.postDelayed(() -> applyRotationTransform(textureView, previewSize, rotation, cameraKey), 100);
+                textureView.postDelayed(() -> applySlotMatrixTransform(textureView, previewSize, rotation, cameraKey), 80);
                 return;
             }
-
-            android.graphics.Matrix matrix = new android.graphics.Matrix();
-            android.graphics.RectF viewRect = new android.graphics.RectF(0, 0, viewWidth, viewHeight);
-            
-            // 缓冲区矩形，使用 float 精度
-            android.graphics.RectF bufferRect = new android.graphics.RectF(0, 0, previewSize.getWidth(), previewSize.getHeight());
-
-            float centerX = viewRect.centerX();
-            float centerY = viewRect.centerY();
-
-            if (rotation == 90 || rotation == 270) {
-                // 1. 将 bufferRect 中心移动到 viewRect 中心
-                bufferRect.offset(centerX - bufferRect.centerX(), centerY - bufferRect.centerY());
-                
-                // 2. 将 buffer 映射到 view，这一步会处理拉伸校正
-                matrix.setRectToRect(viewRect, bufferRect, android.graphics.Matrix.ScaleToFit.FILL);
-                
-                // 3. 计算缩放比例以填满屏幕 (Center Crop)
-                // 因为旋转了 90 度，所以 viewHeight 对应 previewWidth，viewWidth 对应 previewHeight
-                float scale = Math.max(
-                        (float) viewHeight / previewSize.getWidth(),
-                        (float) viewWidth / previewSize.getHeight());
-                
-                // 4. 应用缩放与旋转前物理镜像（Sensor/Buffer 空间）
-                matrix.postScale(scale, scale, centerX, centerY);
-                if (mirror.physicalH || mirror.physicalV) {
-                    matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
-                }
-
-                // 5. 应用旋转
-                matrix.postRotate(rotation, centerX, centerY);
-            } else {
-                if (mirror.physicalH || mirror.physicalV) {
-                    matrix.postScale(mirror.physicalH ? -1f : 1f, mirror.physicalV ? -1f : 1f, centerX, centerY);
-                }
-                if (android.view.Surface.ROTATION_180 == rotation) {
-                    // 如果需要处理 180 度翻转
-                    matrix.postRotate(180, centerX, centerY);
-                }
-            }
-
-            // 6. 应用旋转后输出镜像（屏幕显示空间）
-            if (mirror.outputH || mirror.outputV) {
-                matrix.postScale(mirror.outputH ? -1f : 1f, mirror.outputV ? -1f : 1f, centerX, centerY);
-            }
-
-            // 保存基础变换，并叠加预览矫正
+            android.graphics.Matrix matrix = com.kooo.evcam.ui.PreviewTransformHelper.buildSlotMatrix(
+                    viewWidth, viewHeight,
+                    previewSize.getWidth(), previewSize.getHeight(),
+                    rotation, fill, zoom, panX, panY, mirror);
             previewBaseTransforms.put(cameraKey, new android.graphics.Matrix(matrix));
-
             textureView.setTransform(matrix);
-            AppLog.d(TAG, cameraKey + " 应用修正旋转: " + rotation + "度");
-        });
+        };
+        if (textureView.getWidth() > 0 && textureView.getHeight() > 0) {
+            applyTask.run();
+        } else {
+            textureView.post(applyTask);
+        }
+    }
+
+    private void applyRotationTransform(AutoFitTextureView textureView, android.util.Size previewSize,
+                                        int rotation, String cameraKey) {
+        applySlotMatrixTransform(textureView, previewSize, rotation, cameraKey);
     }
 
     // ==================== 调试信息覆盖层（连点5下显示） ====================
@@ -4254,6 +4238,9 @@ public class MainActivity extends AppCompatActivity implements
         super.onConfigurationChanged(newConfig);
         if (uiTheme != null) {
             uiTheme.onConfigurationChanged(newConfig);
+        }
+        if (uiScale != null) {
+            uiScale.applySavedScaleInPlace();
         }
     }
 

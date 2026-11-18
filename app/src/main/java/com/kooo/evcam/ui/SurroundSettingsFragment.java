@@ -49,6 +49,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private Button btnModeA;
     private Button btnModeB;
     private Button btnModeC;
+    private Button btnModeD;
 
     private Button btnTopDrive;
     private Button btnTopFront;
@@ -115,6 +116,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnModeA = view.findViewById(R.id.btn_surround_mode_a);
         btnModeB = view.findViewById(R.id.btn_surround_mode_b);
         btnModeC = view.findViewById(R.id.btn_surround_mode_c);
+        btnModeD = view.findViewById(R.id.btn_surround_mode_d);
 
         btnTopDrive = view.findViewById(R.id.btn_top_view_drive);
         btnTopFront = view.findViewById(R.id.btn_top_view_front);
@@ -158,6 +160,9 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnModeA.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_A));
         btnModeB.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_B));
         btnModeC.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_C));
+        if (btnModeD != null) {
+            btnModeD.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_D));
+        }
 
         btnTopDrive.setOnClickListener(v -> selectTopView(SurroundViewMode.DRIVE));
         btnTopFront.setOnClickListener(v -> selectTopView(SurroundViewMode.FRONT));
@@ -184,6 +189,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         switchOverlayButtons.setOnCheckedChangeListener((b, isChecked) -> {
             if (bindingUi) return;
             appConfig.setSurroundOverlayButtonsVisible(isChecked);
+            appConfig.setPreviewViewShortcutsEnabled(isChecked);
             notifyHostSurroundChanged();
         });
 
@@ -336,8 +342,14 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     }
 
     private void reloadAutomation() {
-        if (getContext() != null) {
-            VehicleAutomationCoordinator.getInstance().startOrReload(getContext());
+        Context ctx = getContext();
+        if (ctx != null) {
+            com.kooo.evcam.lifecycle.BackgroundCapabilityController.syncBackgroundKeepAlive(ctx);
+            VehicleAutomationCoordinator.getInstance().startOrReload(ctx);
+            if (com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(ctx)
+                    && com.kooo.evcam.lifecycle.AppLifecycleState.canRunBackgroundServices(ctx)) {
+                com.kooo.evcam.CameraForegroundService.start(ctx, "EVCam", "车辆信号与倒车触发运行中");
+            }
         }
     }
 
@@ -349,6 +361,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             applyOptionButtonState(btnModeA, ctx, AppConfig.PREVIEW_MODE_A.equals(mode));
             applyOptionButtonState(btnModeB, ctx, AppConfig.PREVIEW_MODE_B.equals(mode));
             applyOptionButtonState(btnModeC, ctx, AppConfig.PREVIEW_MODE_C.equals(mode));
+            applyOptionButtonState(btnModeD, ctx, AppConfig.PREVIEW_MODE_D.equals(mode));
 
             SurroundViewMode top = appConfig.getSurroundTopView();
             SurroundViewMode bottom = appConfig.getSurroundBottomView();
@@ -364,7 +377,8 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
 
             switchSuppressBlindSpot.setChecked(appConfig.isBlindSpotSuppressOn360());
             switchStretchRoad.setChecked(appConfig.isSurroundStretchRoadViews());
-            switchOverlayButtons.setChecked(appConfig.isSurroundOverlayButtonsVisible());
+            switchOverlayButtons.setChecked(
+                    appConfig.isSurroundOverlayButtonsVisible() && appConfig.isPreviewViewShortcutsEnabled());
 
             switchReversePreviewEnabled.setChecked(appConfig.isReversePreviewEnabled());
             switchSpeedCloseEnabled.setChecked(appConfig.isPreviewSpeedCloseEnabled());

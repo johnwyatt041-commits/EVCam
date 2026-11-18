@@ -1,26 +1,31 @@
-<?xml version='1.0' encoding='utf-8'?>
+<?xml version="1.0" encoding="utf-8"?>
 <LinearLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/page_background">
+
+    <!-- 顶部标题栏（嵌入双栏详情时自动适配为简洁 SC 大标题） -->
     <LinearLayout
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="horizontal"
-        android:paddingTop="15dp"
-        android:paddingBottom="8dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
+        android:paddingTop="18dp"
+        android:paddingBottom="10dp"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
         android:gravity="center_vertical"
-        android:background="@color/menu_background">
+        android:background="@color/page_background">
+
         <Button
-            android:id="@+id/btn_menu"
+            android:id="@+id/btn_back"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="☰"
+            android:layout_gravity="center_vertical"
+            android:text="←"
             android:textSize="16sp"
             android:minWidth="48dp"
             android:minHeight="48dp"
@@ -30,801 +35,1332 @@
             android:elevation="0dp"
             android:fontFamily="sans-serif-medium"
             android:textAllCaps="false" />
+
         <TextView
+            android:id="@+id/tv_toolbar_title"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
             android:layout_weight="1"
-            android:text="补盲选项"
-            android:textColor="@color/text_primary"
+            android:text="补盲"
             android:textSize="22sp"
-            android:fontFamily="sans-serif-medium" />
+            android:textStyle="bold"
+            android:textColor="@color/text_primary" />
+
         <Button
-            android:id="@+id/btn_home"
+            android:id="@+id/btn_menu"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="⌂"
-            android:textSize="16sp"
-            android:minWidth="48dp"
+            android:layout_marginEnd="6dp"
+            android:text="菜单"
+            android:textSize="14sp"
             android:minHeight="48dp"
             android:backgroundTint="@color/button_background"
             android:textColor="@color/button_text"
             android:elevation="0dp"
-            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false" />
+
+        <Button
+            android:id="@+id/btn_home"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="主页"
+            android:textSize="14sp"
+            android:minHeight="48dp"
+            android:backgroundTint="@color/button_background"
+            android:textColor="@color/button_text"
+            android:elevation="0dp"
             android:textAllCaps="false" />
     </LinearLayout>
+
     <ScrollView
+        android:id="@+id/scroll_blind_spot_settings"
         android:layout_width="match_parent"
-        android:layout_height="match_parent">
+        android:layout_height="match_parent"
+        android:fillViewport="true">
+
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="16dp">
+            android:paddingStart="20dp"
+            android:paddingEnd="20dp"
+            android:paddingTop="8dp"
+            android:paddingBottom="28dp">
+
+            <!-- 卡片 1（最顶部）：显示屏幕选择 + 补盲总开关 -->
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="16dp"
+                android:orientation="vertical"
                 android:background="@drawable/ui_card"
-                android:layout_marginBottom="16dp"
-                android:gravity="center_vertical">
+                android:padding="18dp"
+                android:layout_marginBottom="16dp">
+
+                <!-- 补盲总开关 -->
                 <LinearLayout
-                    android:layout_width="0dp"
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_weight="1"
-                    android:orientation="vertical">
-                    <TextView
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="14dp">
+
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical"
+                        android:layout_marginEnd="12dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="补盲功能总开关"
+                            android:textColor="@color/text_primary"
+                            android:textSize="17sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_blind_spot_global_hint"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="2dp"
+                            android:text="已启用主屏弹窗与副屏 / EVCC 仪表投屏联动"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_blind_spot_global"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="补盲功能总开关"
-                        android:textColor="@color/text_primary"
-                        android:textSize="18sp"
-                        android:fontFamily="sans-serif-medium" />
-                    <TextView
-                        android:id="@+id/tv_blind_spot_global_hint"
-                        android:layout_width="wrap_content"
-                        android:layout_height="wrap_content"
-                        android:text="关闭后所有补盲子功能将不生效"
-                        android:textColor="@color/text_secondary"
-                        android:textSize="13sp"
-                        android:layout_marginTop="4dp" />
+                        style="@style/Widget.EVCam.Switch" />
                 </LinearLayout>
-                <com.google.android.material.switchmaterial.SwitchMaterial
-                    android:id="@+id/switch_blind_spot_global"
-                    android:layout_width="wrap_content"
+
+                <View
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:background="@color/ui_border"
+                    android:layout_marginBottom="14dp" />
+
+                <!-- 显示屏幕选择 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginStart="16dp" />
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:layout_marginBottom="8dp">
+
+                    <TextView
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:text="显示屏幕选择（主屏 / 副屏 / EVCC 仪表）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:textStyle="bold" />
+
+                    <Button
+                        android:id="@+id/btn_refresh_displays"
+                        style="@style/Widget.EVCam.OptionPill.Compact"
+                        android:text="刷新屏幕" />
+                </LinearLayout>
+
+                <Spinner
+                    android:id="@+id/spinner_display_selection"
+                    android:layout_width="match_parent"
+                    android:layout_height="44dp"
+                    android:background="@color/input_background"
+                    android:paddingStart="10dp"
+                    android:paddingEnd="10dp"
+                    android:layout_marginBottom="6dp" />
+
+                <TextView
+                    android:id="@+id/tv_display_resolution_info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="主屏 · 2560×1600 等比可视化画布"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="12sp"
+                    android:layout_marginBottom="12dp" />
+
+                <!-- 选主屏时的快捷输出模式 -->
+                <LinearLayout
+                    android:id="@+id/layout_main_display_controls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@color/page_background"
+                    android:padding="12dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginEnd="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="转向时复用主屏常驻悬浮窗"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="开启后直接在常驻悬浮窗切换补盲画面，无额外窗口"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_turn_signal_reuse_main"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            style="@style/Widget.EVCam.Switch" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="主屏常驻悬浮窗"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:layout_marginEnd="10dp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_main_floating_enabled"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="16dp"
+                            style="@style/Widget.EVCam.Switch" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="默认镜头"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp"
+                            android:layout_marginEnd="8dp" />
+
+                        <Spinner
+                            android:id="@+id/spinner_main_floating_camera"
+                            android:layout_width="0dp"
+                            android:layout_height="36dp"
+                            android:layout_weight="1" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 选副屏 / EVCC 仪表时的快捷输出模式 -->
+                <LinearLayout
+                    android:id="@+id/layout_secondary_display_controls"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@color/page_background"
+                    android:padding="12dp"
+                    android:visibility="gone">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginEnd="10dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="启用副屏 / EVCC 补盲显示"
+                                android:textColor="@color/text_primary"
+                                android:textSize="14sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="将补盲画面直接投送至选定的副屏或 EVCC 仪表窗口"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="11sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_secondary_blind_spot_display"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            style="@style/Widget.EVCam.Switch" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="显示边框"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp"
+                            android:layout_marginEnd="8dp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_secondary_border"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="16dp"
+                            style="@style/Widget.EVCam.Switch" />
+
+                        <Button
+                            android:id="@+id/btn_toggle_secondary_adjust_mode"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="在副屏显示边界框以辅助调整" />
+                    </LinearLayout>
+                </LinearLayout>
             </LinearLayout>
+
+            <!-- 子功能区容器 -->
             <LinearLayout
                 android:id="@+id/blind_spot_sub_features_container"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical">
 
+                <!-- 卡片 2：触发方案与转向灯联动 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp"
                     android:background="@drawable/ui_card"
+                    android:padding="18dp"
                     android:layout_marginBottom="16dp">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="补盲画面矫正"
-                                android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="对补盲悬浮窗画面进行平移/缩放矫正 (Matrix)"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
-                        </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_blind_spot_correction"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
-                    <Button
-                        android:id="@+id/btn_adjust_blind_spot_correction"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="调整矫正参数 (四路独立)"
-                        android:layout_marginTop="12dp"
-                        android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/white"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
-                </LinearLayout>
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="@drawable/ui_card"
-                    android:layout_marginBottom="16dp">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="主屏悬浮窗比例锁定"
-                                android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="勾选后悬浮窗只能等比例缩放，不可自由调整长宽比"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
-                        </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_main_floating_aspect_ratio_lock"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginTop="12dp">
+                        android:layout_marginBottom="10dp">
+
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:layout_marginEnd="12dp">
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="长按拖动"
+                                android:text="触发方案与转向灯联动"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp"
-                                android:fontFamily="sans-serif-medium" />
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
                             <TextView
+                                android:id="@+id/tv_car_api_status"
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="开启后需长按1秒才能拖动/缩放悬浮窗，防止误触"
+                                android:layout_marginTop="2dp"
+                                android:text="触发状态: 就绪"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="2dp" />
+                                android:textSize="12sp" />
                         </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_main_floating_long_press_drag"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
-                    <Button
-                        android:id="@+id/btn_reset_main_floating"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="重置主屏悬浮窗 (恢复默认位置和大小)"
-                        android:layout_marginTop="12dp"
-                        android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/white"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
-                    <Button
-                        android:id="@+id/btn_reset_standalone_window"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="重置 4.2 独立预览小窗 (恢复默认位置和大小)"
-                        android:layout_marginTop="10dp"
-                        android:backgroundTint="@color/button_background"
-                        android:textColor="@color/button_text"
-                        android:textSize="15sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
-                </LinearLayout>
-                <LinearLayout
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:orientation="vertical"
-                    android:padding="16dp"
-                    android:background="@drawable/ui_card"
-                    android:layout_marginBottom="16dp">
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="转向灯联动 (左右补盲)"
-                                android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="开启转向灯时自动弹出对应侧摄像头画面"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
-                        </LinearLayout>
+
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/switch_turn_signal_linkage"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
+                            style="@style/Widget.EVCam.Switch" />
                     </LinearLayout>
 
-
+                    <!-- 触发模式胶囊按钮（两行分组，确保 1600×900 与 2560×1600 大号模式完整可见） -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:layout_marginTop="12dp"
-                        android:paddingStart="8dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="状态栏动效样式"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginBottom="4dp" />
-                        <RadioGroup
-                            android:id="@+id/rg_status_bar_style"
+                        android:layout_marginBottom="12dp">
+
+                        <HorizontalScrollView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:orientation="vertical">
-                            <RadioButton
-                                android:id="@+id/rb_style_off"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="关闭（无状态栏）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_style_sequential"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="A. 序贯灯段（类奥迪动态转向灯）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_style_comet"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="B. 流光彗尾（流星拖尾效果）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_style_ripple"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="C. 波纹扩散（水波纹横向传播）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_style_gradient_fill"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="D. 呼吸渐变填充（类充电动画）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_style_arrow_ripple"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="E. 箭头涟漪（箭头从中心飞出）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                        </RadioGroup>
-                        <LinearLayout
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical"
-                            android:layout_marginTop="8dp">
-                            <TextView
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:text="动效颜色"
-                                android:textColor="@color/text_primary"
-                                android:textSize="13sp" />
-                            <View
-                                android:id="@+id/view_status_bar_color_preview"
-                                android:layout_width="32dp"
-                                android:layout_height="32dp"
-                                android:layout_marginEnd="12dp" />
-                            <Button
-                                android:id="@+id/btn_pick_status_bar_color"
+                            android:scrollbars="none"
+                            android:layout_marginBottom="8dp">
+
+                            <LinearLayout
                                 android:layout_width="wrap_content"
-                                android:layout_height="36dp"
-                                android:text="选择颜色"
-                                android:textSize="16sp"
-                                android:backgroundTint="@color/button_accent"
-                                android:textColor="@color/white"
-                                android:minWidth="0dp"
-                                android:paddingStart="16dp"
-                                android:paddingEnd="16dp"
-                                android:minHeight="48dp"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+
+                                <Button
+                                    android:id="@+id/btn_trigger_vhal"
+                                    style="@style/Widget.EVCam.OptionPill"
+                                    android:layout_marginEnd="8dp"
+                                    android:text="VHAL 信号 (E5)" />
+
+                                <Button
+                                    android:id="@+id/btn_trigger_car_l6l7"
+                                    style="@style/Widget.EVCam.OptionPill"
+                                    android:layout_marginEnd="8dp"
+                                    android:text="CarSignal (L6/L7)" />
+
+                                <Button
+                                    android:id="@+id/btn_trigger_car_boyuel"
+                                    style="@style/Widget.EVCam.OptionPill"
+                                    android:text="CarSignal (博越L)" />
+                            </LinearLayout>
+                        </HorizontalScrollView>
+
+                        <HorizontalScrollView
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:scrollbars="none">
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+
+                                <Button
+                                    android:id="@+id/btn_trigger_logcat_xinghan7"
+                                    style="@style/Widget.EVCam.OptionPill"
+                                    android:layout_marginEnd="8dp"
+                                    android:text="日志监听 (星舰7)" />
+
+                                <Button
+                                    android:id="@+id/btn_trigger_logcat_custom"
+                                    style="@style/Widget.EVCam.OptionPill"
+                                    android:text="自定义日志关键字" />
+                            </LinearLayout>
+                        </HorizontalScrollView>
+                    </LinearLayout>
+
+                    <!-- 仅选 Logcat 模式时显示关键词输入框 -->
+                    <LinearLayout
+                        android:id="@+id/layout_logcat_keywords"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="12dp"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginEnd="8dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="左转日志关键字"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <EditText
+                                android:id="@+id/et_turn_signal_left_log"
+                                android:layout_width="match_parent"
+                                android:layout_height="38dp"
+                                android:background="@color/input_background"
+                                android:textColor="@color/text_primary"
+                                android:textColorHint="@color/text_secondary"
+                                android:hint="如: left front turn signal:1"
+                                android:textSize="13sp"
+                                android:paddingStart="10dp"
+                                android:paddingEnd="10dp"
+                                android:singleLine="true" />
                         </LinearLayout>
+
                         <LinearLayout
-                            android:layout_width="match_parent"
+                            android:layout_width="0dp"
                             android:layout_height="wrap_content"
-                            android:orientation="horizontal"
-                            android:gravity="center_vertical"
-                            android:layout_marginTop="8dp">
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="底色透明度"
+                                android:text="右转日志关键字"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+
+                            <EditText
+                                android:id="@+id/et_turn_signal_right_log"
+                                android:layout_width="match_parent"
+                                android:layout_height="38dp"
+                                android:background="@color/input_background"
                                 android:textColor="@color/text_primary"
-                                android:textSize="13sp" />
-                            <SeekBar
-                                android:id="@+id/seekbar_status_bar_opacity"
-                                android:layout_width="0dp"
-                                android:layout_height="wrap_content"
-                                android:layout_weight="1"
-                                android:layout_marginStart="12dp"
-                                android:max="100"
-                                android:progress="31" />
-                            <TextView
-                                android:id="@+id/tv_status_bar_opacity_value"
-                                android:layout_width="45dp"
-                                android:layout_height="wrap_content"
-                                android:text="31%"
-                                android:gravity="end"
-                                android:textColor="@color/text_primary"
-                                android:textSize="13sp" />
+                                android:textColorHint="@color/text_secondary"
+                                android:hint="如: right front turn signal:1"
+                                android:textSize="13sp"
+                                android:paddingStart="10dp"
+                                android:paddingEnd="10dp"
+                                android:singleLine="true" />
                         </LinearLayout>
                     </LinearLayout>
+
+                    <!-- 转向灯消失延迟 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginTop="16dp">
+                        android:layout_marginBottom="6dp">
+
                         <TextView
-                            android:layout_width="100dp"
-                            android:layout_height="wrap_content"
-                            android:text="消失延迟"
-                            android:textColor="@color/text_primary"
-                            android:textSize="15sp" />
-                        <SeekBar
-                            android:id="@+id/seekbar_turn_signal_timeout"
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:max="30" />
+                            android:text="熄灯后延迟消失时间"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
                         <TextView
                             android:id="@+id/tv_turn_signal_timeout_value"
-                            android:layout_width="50dp"
+                            android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="10s"
-                            android:gravity="end"
-                            android:textColor="@color/text_primary" />
+                            android:text="0 秒（松杆立即消失）"
+                            android:textColor="@color/button_accent"
+                            android:textSize="13sp" />
                     </LinearLayout>
-                    <LinearLayout
+
+                    <SeekBar
+                        android:id="@+id/seekbar_turn_signal_timeout"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:layout_marginTop="16dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="补盲触发方案"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginBottom="8dp" />
-                        <RadioGroup
-                            android:id="@+id/rg_turn_signal_preset"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:orientation="vertical">
-                            <RadioButton
-                                android:id="@+id/rb_preset_car_api"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="银河E5/26款星舰7-API触发"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_preset_xinghan7"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="26款星舰7-Logcat触发"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_preset_custom"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="自定义Logcat触发"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_preset_l6l7"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="银河L6/L7（由抖音@AbuCoder适配）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                            <RadioButton
-                                android:id="@+id/rb_preset_boyue_l"
-                                android:layout_width="match_parent"
-                                android:layout_height="wrap_content"
-                                android:minHeight="48dp"
-                                android:text="博越L（涛仔求来的）"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp"
-                                android:buttonTint="@color/colorPrimary"
-                                android:elevation="0dp"
-                                android:fontFamily="sans-serif-medium"
-                                android:textAllCaps="false" />
-                        </RadioGroup>
-                        <TextView
-                            android:id="@+id/tv_car_api_status"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:text="CarAPI 服务状态: 检测中..."
-                            android:textSize="13sp"
-                            android:paddingStart="32dp"
-                            android:paddingTop="4dp"
-                            android:paddingBottom="4dp"
-                            android:visibility="gone" />
-                    </LinearLayout>
-                    <LinearLayout
-                        android:id="@+id/layout_turn_signal_custom_keywords"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="vertical"
-                        android:layout_marginTop="8dp">
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="左转向灯触发log关键字"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="12dp"
-                            android:layout_marginBottom="6dp" />
-                        <EditText
-                            android:id="@+id/et_turn_signal_left_log"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:maxLines="3"
-                            android:gravity="center_vertical"
-                            android:background="@drawable/spinner_background"
-                            android:paddingStart="12dp"
-                            android:paddingEnd="12dp"
-                            android:inputType="text"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp" />
-                        <TextView
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="右转向灯触发log关键字"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginTop="12dp"
-                            android:layout_marginBottom="6dp" />
-                        <EditText
-                            android:id="@+id/et_turn_signal_right_log"
-                            android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:maxLines="3"
-                            android:gravity="center_vertical"
-                            android:background="@drawable/spinner_background"
-                            android:paddingStart="12dp"
-                            android:paddingEnd="12dp"
-                            android:inputType="text"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp" />
-                    </LinearLayout>
+                        android:max="10"
+                        android:layout_marginBottom="10dp" />
 
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginTop="16dp">
+                        android:gravity="center_vertical">
+
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:layout_marginEnd="10dp">
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="副屏补盲显示"
+                                android:text="雨夜模式独立补盲位置"
                                 android:textColor="@color/text_primary"
-                                android:textSize="15sp" />
+                                android:textSize="14sp" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="补盲激活时在副屏显示悬浮窗画面"
+                                android:text="启用后，左右转向自动切换到下方「雨夜左 / 雨夜右」位置与大小"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
+                                android:textSize="11sp" />
                         </LinearLayout>
+
                         <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_secondary_blind_spot_display"
+                            android:id="@+id/switch_rain_night_blind_spot"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
+                            style="@style/Widget.EVCam.Switch" />
                     </LinearLayout>
-                    <Button
-                        android:id="@+id/btn_adjust_secondary_blind_spot_window"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="调整副屏悬浮窗位置"
-                        android:layout_marginTop="12dp"
-                        android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/white"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
-                    <Button
-                        android:id="@+id/btn_adjust_mjpeg_stream"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:text="MJPEG 视频流（投到 ESP32/浏览器）"
-                        android:layout_marginTop="12dp"
-                        android:backgroundTint="@color/button_accent"
-                        android:textColor="@color/white"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
-                        android:elevation="0dp"
-                        android:fontFamily="sans-serif-medium"
-                        android:textAllCaps="false" />
                 </LinearLayout>
 
+                <!-- 卡片 3：画面位置与大小（2560×1600 图 4 可视化画布 + 数值微调双轨并存） -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
-                    android:padding="16dp"
                     android:background="@drawable/ui_card"
+                    android:padding="18dp"
                     android:layout_marginBottom="16dp">
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="14dp">
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="画面位置与大小"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:textStyle="bold" />
+
+                        <TextView
+                            android:id="@+id/tv_position_scope_badge"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="2560×1600 (16:10)"
+                            android:textColor="@color/button_accent"
+                            android:textSize="12sp"
+                            android:textStyle="bold" />
+                    </LinearLayout>
+
+                    <!-- 6 方向槽位 Pills（主屏模式下选择 前/后/左/右/雨夜左/雨夜右） -->
+                    <HorizontalScrollView
+                        android:id="@+id/layout_slot_tabs"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none"
+                        android:layout_marginBottom="10dp">
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <Button
+                                android:id="@+id/btn_slot_front"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="前" />
+
+                            <Button
+                                android:id="@+id/btn_slot_back"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="后" />
+
+                            <Button
+                                android:id="@+id/btn_slot_left"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="左" />
+
+                            <Button
+                                android:id="@+id/btn_slot_right"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="右" />
+
+                            <Button
+                                android:id="@+id/btn_slot_rain_left"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="雨夜左" />
+
+                            <Button
+                                android:id="@+id/btn_slot_rain_right"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:text="雨夜右" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+
+                    <!-- 提示文字 + 进入/完成编辑按钮 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:id="@+id/tv_visual_editor_hint"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="点击进入编辑后可直接调整画面"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <Button
+                            android:id="@+id/btn_toggle_visual_edit"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:text="进入编辑" />
+                    </LinearLayout>
+
+                    <!-- 图 4 可视化 2560×1600 (16:10) 拖拽画布 -->
+                    <com.kooo.evcam.blindspot.BlindSpotVisualEditorView
+                        android:id="@+id/blind_spot_visual_editor"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_gravity="center_horizontal"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- 左右使用同一位置（仅主屏普通左右补盲） -->
+                    <LinearLayout
+                        android:id="@+id/layout_same_side_row"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:layout_marginEnd="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="左右使用同一位置"
+                                android:textColor="@color/text_primary"
+                                android:textSize="15sp" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="仅同步普通左右补盲；雨夜位置单独调整"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_same_side_position"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            style="@style/Widget.EVCam.Switch" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/ui_border"
+                        android:layout_marginBottom="12dp" />
+
+                    <!-- 原有坐标数值与进度条精确微调（适配不同分辨率 HUD 副屏 / 主屏精确像素） -->
+                    <TextView
+                        android:id="@+id/tv_numeric_bounds_desc"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="数值与进度条微调（按当前屏幕实际分辨率换算，HUD 副屏可直接输入精确像素）"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp"
+                        android:layout_marginBottom="10dp" />
+
+                    <!-- X -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="6dp">
+
+                        <TextView
+                            android:layout_width="44dp"
+                            android:layout_height="wrap_content"
+                            android:text="X 坐标"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <SeekBar
+                            android:id="@+id/seekbar_pos_x"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="2560" />
+
+                        <EditText
+                            android:id="@+id/et_pos_x"
+                            android:layout_width="68dp"
+                            android:layout_height="34dp"
+                            android:background="@color/input_background"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:gravity="center"
+                            android:inputType="number"
+                            android:imeOptions="actionDone"
+                            android:layout_marginStart="6dp" />
+
+                        <TextView
+                            android:id="@+id/tv_pos_x_pct"
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:text="0%"
+                            android:gravity="end"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- Y -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="6dp">
+
+                        <TextView
+                            android:layout_width="44dp"
+                            android:layout_height="wrap_content"
+                            android:text="Y 坐标"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <SeekBar
+                            android:id="@+id/seekbar_pos_y"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="1600" />
+
+                        <EditText
+                            android:id="@+id/et_pos_y"
+                            android:layout_width="68dp"
+                            android:layout_height="34dp"
+                            android:background="@color/input_background"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:gravity="center"
+                            android:inputType="number"
+                            android:imeOptions="actionDone"
+                            android:layout_marginStart="6dp" />
+
+                        <TextView
+                            android:id="@+id/tv_pos_y_pct"
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:text="0%"
+                            android:gravity="end"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- 宽 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="6dp">
+
+                        <TextView
+                            android:layout_width="44dp"
+                            android:layout_height="wrap_content"
+                            android:text="宽度"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <SeekBar
+                            android:id="@+id/seekbar_pos_w"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="2560" />
+
+                        <EditText
+                            android:id="@+id/et_pos_w"
+                            android:layout_width="68dp"
+                            android:layout_height="34dp"
+                            android:background="@color/input_background"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:gravity="center"
+                            android:inputType="number"
+                            android:imeOptions="actionDone"
+                            android:layout_marginStart="6dp" />
+
+                        <TextView
+                            android:id="@+id/tv_pos_w_pct"
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:text="42%"
+                            android:gravity="end"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- 高 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="12dp">
+
+                        <TextView
+                            android:layout_width="44dp"
+                            android:layout_height="wrap_content"
+                            android:text="高度"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp" />
+
+                        <SeekBar
+                            android:id="@+id/seekbar_pos_h"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:max="1600" />
+
+                        <EditText
+                            android:id="@+id/et_pos_h"
+                            android:layout_width="68dp"
+                            android:layout_height="34dp"
+                            android:background="@color/input_background"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:gravity="center"
+                            android:inputType="number"
+                            android:imeOptions="actionDone"
+                            android:layout_marginStart="6dp" />
+
+                        <TextView
+                            android:id="@+id/tv_pos_h_pct"
+                            android:layout_width="42dp"
+                            android:layout_height="wrap_content"
+                            android:text="60%"
+                            android:gravity="end"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="12sp" />
+                    </LinearLayout>
+
+                    <!-- 窗口基础旋转（主屏 / 副屏） -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="窗口基础旋转"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:layout_marginEnd="10dp" />
+
+                        <HorizontalScrollView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:scrollbars="none">
+
+                            <LinearLayout
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:orientation="horizontal">
+
+                                <Button
+                                    android:id="@+id/btn_win_rot_0"
+                                    style="@style/Widget.EVCam.OptionPill.Compact"
+                                    android:layout_marginEnd="6dp"
+                                    android:text="0°" />
+
+                                <Button
+                                    android:id="@+id/btn_win_rot_90"
+                                    style="@style/Widget.EVCam.OptionPill.Compact"
+                                    android:layout_marginEnd="6dp"
+                                    android:text="90°" />
+
+                                <Button
+                                    android:id="@+id/btn_win_rot_180"
+                                    style="@style/Widget.EVCam.OptionPill.Compact"
+                                    android:layout_marginEnd="6dp"
+                                    android:text="180°" />
+
+                                <Button
+                                    android:id="@+id/btn_win_rot_270"
+                                    style="@style/Widget.EVCam.OptionPill.Compact"
+                                    android:text="270°" />
+                            </LinearLayout>
+                        </HorizontalScrollView>
+                    </LinearLayout>
+
+                    <!-- 主屏辅助调节开关（主屏模式显示） -->
+                    <LinearLayout
+                        android:id="@+id/layout_main_extra_options"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="锁定宽高比"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:layout_marginEnd="6dp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_main_floating_aspect_ratio_lock"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginEnd="16dp"
+                            style="@style/Widget.EVCam.Switch" />
+
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="悬浮窗长按拖动"
+                            android:textColor="@color/text_primary"
+                            android:textSize="13sp"
+                            android:layout_marginEnd="6dp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_main_floating_long_press_drag"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            style="@style/Widget.EVCam.Switch" />
+                    </LinearLayout>
+
+                    <!-- 副屏专属方向和透明度（副屏/EVCC模式显示） -->
+                    <LinearLayout
+                        android:id="@+id/layout_secondary_extra_options"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:layout_marginBottom="10dp"
+                        android:visibility="gone">
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="8dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="窗口方向"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:layout_marginEnd="10dp" />
+
+                            <Spinner
+                                android:id="@+id/spinner_secondary_orientation"
+                                android:layout_width="0dp"
+                                android:layout_height="36dp"
+                                android:layout_weight="1" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="透明度"
+                                android:textColor="@color/text_primary"
+                                android:textSize="13sp"
+                                android:layout_marginEnd="8dp" />
+
+                            <SeekBar
+                                android:id="@+id/seekbar_secondary_alpha"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:max="100" />
+
+                            <TextView
+                                android:id="@+id/tv_secondary_alpha_value"
+                                android:layout_width="46dp"
+                                android:layout_height="wrap_content"
+                                android:text="100%"
+                                android:gravity="end"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+                    </LinearLayout>
+
+                    <!-- 预览与重置 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <Button
+                            android:id="@+id/btn_preview_current_position"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="预览当前位置" />
+
+                        <Button
+                            android:id="@+id/btn_reset_current_position"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="恢复默认位置" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 卡片 4：分路画面矫正 + ESP32/浏览器 MJPEG 投屏 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/ui_card"
+                    android:padding="18dp"
+                    android:layout_marginBottom="16dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginEnd="12dp">
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="分方向画面矫正（独立作用于补盲）"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp"
+                                android:textStyle="bold" />
+
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:layout_marginTop="2dp"
+                                android:text="每路可单独设置旋转角度与四边裁切，不影响记录仪预览和录像"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="12sp" />
+                        </LinearLayout>
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_blind_spot_correction"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            style="@style/Widget.EVCam.Switch" />
+                    </LinearLayout>
+
+                    <Button
+                        android:id="@+id/btn_adjust_blind_spot_correction"
+                        style="@style/Widget.EVCam.OptionPill"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/ui_button_height"
+                        android:minHeight="@dimen/ui_button_height"
+                        android:gravity="start|center_vertical"
+                        android:text="分方向旋转与四边裁切设置（前 / 后 / 左 / 右）   ›"
+                        android:textSize="@dimen/ui_button_text_size" />
+
+                    <View
+                        android:id="@+id/divider_mjpeg_stream"
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/ui_border"
+                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="12dp" />
+
+                    <Button
+                        android:id="@+id/btn_adjust_mjpeg_stream"
+                        style="@style/Widget.EVCam.OptionPill"
+                        android:layout_width="match_parent"
+                        android:layout_height="@dimen/ui_button_height"
+                        android:minHeight="@dimen/ui_button_height"
+                        android:gravity="start|center_vertical"
+                        android:text="MJPEG 视频流（投到 ESP32 / 浏览器）   ›"
+                        android:textSize="@dimen/ui_button_text_size" />
+                </LinearLayout>
+
+                <!-- 卡片 5：规避联动与高级调试 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:background="@drawable/ui_card"
+                    android:padding="18dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical"
+                            android:layout_marginEnd="12dp">
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:text="显示 360 时暂停补盲"
                                 android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
+                                android:textSize="15sp" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="360 视图或全景避让期间仅暂停主屏补盲弹窗，EVCC 副屏与 ESP32 推流继续跟随转向联动"
+                                android:text="开启车机 360 环视或倒车画面时自动暂停补盲窗口"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
+                                android:textSize="12sp" />
                         </LinearLayout>
+
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/switch_blind_spot_suppress_on_360"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
+                            style="@style/Widget.EVCam.Switch" />
                     </LinearLayout>
+
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:gravity="center_vertical">
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="8dp">
+
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
                             android:layout_weight="1"
-                            android:orientation="vertical">
+                            android:orientation="vertical"
+                            android:layout_marginEnd="12dp">
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="全景影像避让"
+                                android:text="全景影像应用避让"
                                 android:textColor="@color/text_primary"
-                                android:textSize="18sp"
-                                android:fontFamily="sans-serif-medium" />
+                                android:textSize="15sp" />
+
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="EVCam本体和指定Activity在前台时自动隐藏主屏补盲窗口"
+                                android:text="检测到原厂 AVM Activity 在前台时隐藏补盲悬浮窗"
                                 android:textColor="@color/text_secondary"
-                                android:textSize="13sp"
-                                android:layout_marginTop="4dp" />
+                                android:textSize="12sp" />
                         </LinearLayout>
+
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/switch_avm_avoidance"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
+                            style="@style/Widget.EVCam.Switch" />
                     </LinearLayout>
+
                     <LinearLayout
                         android:id="@+id/layout_avm_avoidance_detail"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="vertical"
-                        android:layout_marginTop="12dp"
+                        android:layout_marginBottom="10dp"
                         android:visibility="gone">
+
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="避让Activity完整类名"
+                            android:text="原厂全景 Activity 类名"
                             android:textColor="@color/text_secondary"
-                            android:textSize="13sp"
-                            android:layout_marginBottom="6dp" />
+                            android:textSize="12sp"
+                            android:layout_marginBottom="4dp" />
+
                         <EditText
                             android:id="@+id/et_avm_avoidance_activity"
                             android:layout_width="match_parent"
-                            android:layout_height="wrap_content"
-                            android:minHeight="48dp"
-                            android:maxLines="2"
-                            android:gravity="center_vertical"
-                            android:background="@drawable/spinner_background"
-                            android:paddingStart="12dp"
-                            android:paddingEnd="12dp"
-                            android:inputType="text"
+                            android:layout_height="38dp"
+                            android:background="@color/input_background"
                             android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:hint="com.geely.avm_app.AvmRenderActivity" />
-                        <TextView
-                            android:layout_width="wrap_content"
+                            android:textSize="13sp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:singleLine="true" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/ui_border"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="8dp" />
+
+                    <Button
+                        android:id="@+id/ui_debug_toggle"
+                        style="@style/Widget.EVCam.OptionPill"
+                        android:layout_width="match_parent"
+                        android:gravity="start|center_vertical"
+                        android:text="高级调试  ›" />
+
+                    <LinearLayout
+                        android:id="@+id/ui_debug_section"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="vertical"
+                        android:paddingTop="10dp"
+                        android:visibility="gone">
+
+                        <EditText
+                            android:id="@+id/et_log_filter"
+                            android:layout_width="match_parent"
+                            android:layout_height="38dp"
+                            android:background="@color/input_background"
+                            android:textColor="@color/text_primary"
+                            android:textColorHint="@color/text_secondary"
+                            android:hint="过滤关键字（如 turn signal / VhalSignal）"
+                            android:textSize="13sp"
+                            android:paddingStart="10dp"
+                            android:paddingEnd="10dp"
+                            android:layout_marginBottom="8dp"
+                            android:singleLine="true" />
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:text="填写 all 则在所有界面上主屏补盲都不显示，仅副屏正常工作"
-                            android:textColor="@color/text_secondary"
-                            android:textSize="12sp"
-                            android:layout_marginTop="6dp" />
+                            android:orientation="horizontal">
+
+                            <Button
+                                android:id="@+id/btn_logcat_debug"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:layout_marginEnd="8dp"
+                                android:text="打开实时日志调试" />
+
+                            <Button
+                                android:id="@+id/btn_reset_standalone_window"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:text="重置独立小窗位置" />
+                        </LinearLayout>
                     </LinearLayout>
                 </LinearLayout>
+
             </LinearLayout>
-            <Button
-                android:id="@+id/ui_debug_toggle"
-                android:layout_width="match_parent"
-                android:layout_height="48dp"
-                android:layout_marginBottom="12dp"
-                android:text="高级调试 · 展开"
-                android:textSize="16sp" />
-            <LinearLayout
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:orientation="vertical"
-                android:padding="16dp"
-                android:background="@drawable/ui_card"
-                android:layout_marginBottom="32dp"
-                android:id="@+id/ui_debug_section"
-                android:visibility="gone">
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="调试工具"
-                    android:textColor="@color/text_primary"
-                    android:textSize="16sp"
-                    android:layout_marginBottom="16dp"
-                    android:fontFamily="sans-serif-medium" />
-                <EditText
-                    android:id="@+id/et_log_filter"
-                    android:layout_width="match_parent"
-                    android:layout_height="48dp"
-                    android:hint="输入日志过滤关键字"
-                    android:paddingStart="12dp"
-                    android:paddingEnd="12dp"
-                    android:background="@drawable/spinner_background"
-                    android:textColor="@color/text_primary"
-                    android:textColorHint="@color/text_secondary"
-                    android:layout_marginBottom="12dp" />
-                <Button
-                    android:id="@+id/btn_logcat_debug"
-                    android:layout_width="match_parent"
-                    android:layout_height="wrap_content"
-                    android:text="打开 Logcat 实时调试"
-                    android:backgroundTint="@color/button_background"
-                    android:textColor="@color/button_text"
-                    android:textSize="16sp"
-                    android:minHeight="48dp"
-                    android:elevation="0dp"
-                    android:fontFamily="sans-serif-medium"
-                    android:textAllCaps="false" />
-            </LinearLayout>
+
         </LinearLayout>
     </ScrollView>
+
 </LinearLayout>

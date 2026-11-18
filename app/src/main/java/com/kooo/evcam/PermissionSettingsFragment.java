@@ -28,6 +28,8 @@ import androidx.fragment.app.Fragment;
 
 import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.kooo.evcam.ui.UiScaleController;
+import com.kooo.evcam.ui.UiScaleHelper;
 import com.kooo.evcam.ui.UiThemeController;
 
 import java.util.List;
@@ -361,9 +363,14 @@ public class PermissionSettingsFragment extends Fragment implements UiThemeContr
         Button btnAction = new Button(ctx);
         btnAction.setText(item.actionLabel);
         btnAction.setAllCaps(false);
-        btnAction.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        btnAction.setMinWidth(dp(ctx, 78));
-        btnAction.setMinimumHeight(dp(ctx, 36));
+        btnAction.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                ctx.getResources().getDimension(R.dimen.ui_pill_text_size));
+        int minWidthPx = Math.max(dp(ctx, 78),
+                ctx.getResources().getDimensionPixelSize(R.dimen.ui_button_min_width));
+        int minHeightPx = ctx.getResources().getDimensionPixelSize(R.dimen.ui_pill_compact_height);
+        btnAction.setMinWidth(minWidthPx);
+        btnAction.setMinHeight(minHeightPx);
+        btnAction.setMinimumHeight(minHeightPx);
         boolean ready = item.isReady();
         btnAction.setEnabled(!ready);
         btnAction.setAlpha(ready ? 0.55f : 1.0f);
@@ -375,6 +382,7 @@ public class PermissionSettingsFragment extends Fragment implements UiThemeContr
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         btnLp.setMarginStart(dp(ctx, 10));
         btnAction.setLayoutParams(btnLp);
+        UiScaleHelper.applyScaleToButton(btnAction, UiScaleController.getSavedScaleFactor(ctx));
         if (!ready) {
             btnAction.setOnClickListener(v -> handleDiagnosticAction(item));
         }

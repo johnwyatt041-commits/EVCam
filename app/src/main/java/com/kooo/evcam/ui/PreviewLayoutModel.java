@@ -18,9 +18,12 @@ public final class PreviewLayoutModel {
     public static final int PRESET_MODE_B_THREE_COL = 3;
     public static final int PRESET_MODE_C_FRONT = 4;
     public static final int PRESET_MODE_C_BACK = 5;
+    public static final int PRESET_MODE_D_DUAL = 6;
 
     public static final float MODE_C_DEFAULT_MAIN_WIDTH = 0.64f;
     public static final float MODE_C_DEFAULT_SIDE_WIDTH = 0.18f;
+    private static final float OVERLAP_EPS = 0.002f;
+    private static final float SWAP_OVERLAP_THRESHOLD = 0.30f;
 
     public static final class Pane {
         public float x, y, width, height;
@@ -86,6 +89,11 @@ public final class PreviewLayoutModel {
             panes[BACK].set(0f, 0f, MODE_C_DEFAULT_MAIN_WIDTH, 1f);
             panes[LEFT].set(MODE_C_DEFAULT_MAIN_WIDTH, 0f, MODE_C_DEFAULT_SIDE_WIDTH, 1f);
             panes[RIGHT].set(MODE_C_DEFAULT_MAIN_WIDTH + MODE_C_DEFAULT_SIDE_WIDTH, 0f, MODE_C_DEFAULT_SIDE_WIDTH, 1f);
+        } else if (preset == PRESET_MODE_D_DUAL) {
+            panes[FRONT].set(0f, 0f, .50f, 1f);
+            panes[BACK].set(0f, 0f, .50f, 1f);
+            panes[LEFT].set(.50f, 0f, .50f, 1f);
+            panes[RIGHT].set(.50f, 0f, .50f, 1f);
         } else {
             panes[LEFT].set(0f, 0f, .3f, 1f);
             panes[RIGHT].set(.7f, 0f, .3f, 1f);
@@ -110,6 +118,375 @@ public final class PreviewLayoutModel {
         Pane pane = panes[index];
         pane.width = clamp(width, MIN_SIZE, 1f - pane.x);
         pane.height = clamp(height, MIN_SIZE, 1f - pane.y);
+    }
+
+    /**
+     * 拖动画框时执行碰撞检测与自动让位/互换，保证活跃画框间互不重叠。
+     * 若拖动块进入相邻块重心或显著重叠区，触发让位/互换（如把 A 拖到 B 右侧时，B 自动挤回 A 左侧）；
+     * 轻微触碰边界且未达换位阈值时先贴边阻挡，避免画面互相遮挡。
+     */
+    public void movePaneWithCollision(int movingIndex, float targetX, float targetY,
+                                      boolean[] activeMask, float[] dragOriginSnapshot) {
+        if (movingIndex < 0 || movingIndex >= PANE_COUNT || !Float.isFinite(targetX) || !Float.isFinite(targetY)) {
+            return;
+        }
+        boolean[] mask = normalizeMask(activeMask, movingIndex);
+        Pane moving = panes[movingIndex];
+        float w = clamp(moving.width, MIN_SIZE, 1f);
+        float h = clamp(moving.height, MIN_SIZE, 1f);
+        float prevX = moving.x;
+        float prevY = moving.y;
+        float origX = (dragOriginSnapshot != null && dragOriginSnapshot.length == 16)
+                ? dragOriginSnapshot[movingIndex * 4] : prevX;
+        float origY = (dragOriginSnapshot != null && dragOriginSnapshot.length == 16)
+                ? dragOriginSnapshot[movingIndex * 4 + 1] : prevY;
+
+        float nx = clamp(targetX, 0f, 1f - w);
+        float ny = clamp(targetY, 0f, 1f - h);
+        Pane candidate = new Pane(nx, ny, w, h);
+
+        List<Integer> colliding = new ArrayList<>();
+        for (int i = 0; i < PANE_COUNT; i++) {
+            if (i == movingIndex || !mask[i]) continue;
+            if (intersects(candidate, panes[i])) {
+                colliding.add(i);
+            }
+        }
+        if (colliding.isEmpty()) {
+            moving.set(nx, ny, w, h);
+            return;
+        }
+
+        boolean shouldSwapOrPush = false;
+        for (int otherIdx : colliding) {
+            Pane other = panes[otherIdx];
+            float interArea = intersectionArea(candidate, other);
+            float minArea = Math.min(candidate.width * candidate.height, other.width * other.height);
+            if (minArea > 0f && interArea / minArea >= SWAP_OVERLAP_THRESHOLD) {
+                shouldSwapOrPush = true;
+                break;
+            }
+            float candCx = candidate.x + candidate.width * 0.5f;
+            float candCy = candidate.y + candidate.height * 0.5f;
+            float otherCx = other.x + other.width * 0.5f;
+            float otherCy = other.y + other.height * 0.5f;
+            boolean crossedX = (origX < other.x && candCx >= otherCx - 0.08f)
+                    || (origX > other.x && candCx <= otherCx + 0.08f);
+            boolean crossedY = (origY < other.y && candCy >= otherCy - 0.08f)
+                    || (origY > other.y && candCy <= otherCy + 0.08f);
+            if (crossedX || crossedY) {
+                shouldSwapOrPush = true;
+                break;
+            }
+        }
+
+        if (!shouldSwapOrPush) {
+            // 未到换位阈值：尝试沿移动轴贴紧不重叠位置
+            Pane clamped = clampNonOverlapping(candidate, movingIndex, prevX, prevY, mask);
+            moving.set(clamped.x, clamped.y, clamped.width, clamped.height);
+            return;
+        }
+
+        moving.set(nx, ny, w, h);
+        for (int otherIdx : colliding) {
+            if (intersects(moving, panes[otherIdx])) {
+                yieldOtherPane(moving, otherIdx, origX, origY, mask);
+            }
+        }
+        resolveRemainingOverlaps(movingIndex, mask);
+    }
+
+    /**
+     * 调整画框大小时执行碰撞挤压与尺寸约束，保证活跃画框间互不重叠且不低于 MIN_SIZE。
+     */
+    public void resizePaneWithCollision(int resizingIndex, float targetW, float targetH, boolean[] activeMask) {
+        if (resizingIndex < 0 || resizingIndex >= PANE_COUNT || !Float.isFinite(targetW) || !Float.isFinite(targetH)) {
+            return;
+        }
+        boolean[] mask = normalizeMask(activeMask, resizingIndex);
+        Pane pane = panes[resizingIndex];
+        float oldW = pane.width;
+        float oldH = pane.height;
+        float newW = clamp(targetW, MIN_SIZE, 1f - pane.x);
+        float newH = clamp(targetH, MIN_SIZE, 1f - pane.y);
+        Pane candidate = new Pane(pane.x, pane.y, newW, newH);
+
+        for (int i = 0; i < PANE_COUNT; i++) {
+            if (i == resizingIndex || !mask[i]) continue;
+            Pane other = panes[i];
+            if (!intersects(candidate, other)) continue;
+
+            float otherCx = other.x + other.width * 0.5f;
+            float otherCy = other.y + other.height * 0.5f;
+            float oldRight = pane.x + oldW;
+            float oldBottom = pane.y + oldH;
+            boolean pushRight = other.x >= oldRight - 0.04f || otherCx >= oldRight;
+            boolean pushDown = other.y >= oldBottom - 0.04f || otherCy >= oldBottom;
+
+            if (pushRight && (!pushDown || (candidate.x + newW - other.x) <= (candidate.y + newH - other.y))) {
+                float maxAllowRight = Math.max(pane.x + MIN_SIZE, 1f - MIN_SIZE);
+                if (candidate.x + newW > maxAllowRight) {
+                    newW = Math.max(MIN_SIZE, maxAllowRight - pane.x);
+                    candidate.width = newW;
+                }
+                float nextX = candidate.x + newW;
+                float nextW = clamp(other.x + other.width - nextX, MIN_SIZE, 1f - nextX);
+                if (nextX + nextW > 1f) {
+                    nextW = Math.max(MIN_SIZE, 1f - nextX);
+                }
+                other.set(nextX, other.y, nextW, other.height);
+            } else if (pushDown) {
+                float maxAllowBottom = Math.max(pane.y + MIN_SIZE, 1f - MIN_SIZE);
+                if (candidate.y + newH > maxAllowBottom) {
+                    newH = Math.max(MIN_SIZE, maxAllowBottom - pane.y);
+                    candidate.height = newH;
+                }
+                float nextY = candidate.y + newH;
+                float nextH = clamp(other.y + other.height - nextY, MIN_SIZE, 1f - nextY);
+                if (nextY + nextH > 1f) {
+                    nextH = Math.max(MIN_SIZE, 1f - nextY);
+                }
+                other.set(other.x, nextY, other.width, nextH);
+            } else {
+                // 其他方位重合（例如对方在左上方）：截断到不碰触边界
+                if (other.x + other.width > candidate.x && other.x < candidate.x) {
+                    float avail = candidate.x - other.x;
+                    if (avail >= MIN_SIZE) {
+                        other.width = avail;
+                    } else {
+                        newW = oldW;
+                        candidate.width = newW;
+                    }
+                }
+                if (other.y + other.height > candidate.y && other.y < candidate.y) {
+                    float avail = candidate.y - other.y;
+                    if (avail >= MIN_SIZE) {
+                        other.height = avail;
+                    } else {
+                        newH = oldH;
+                        candidate.height = newH;
+                    }
+                }
+            }
+        }
+        pane.set(candidate.x, candidate.y, candidate.width, candidate.height);
+        resolveRemainingOverlaps(resizingIndex, mask);
+    }
+
+    public static boolean hasAnyOverlap(Pane[] targetPanes, boolean[] activeMask) {
+        if (targetPanes == null || targetPanes.length < PANE_COUNT) return false;
+        for (int i = 0; i < PANE_COUNT; i++) {
+            if (activeMask != null && i < activeMask.length && !activeMask[i]) continue;
+            for (int j = i + 1; j < PANE_COUNT; j++) {
+                if (activeMask != null && j < activeMask.length && !activeMask[j]) continue;
+                if (intersects(targetPanes[i], targetPanes[j])) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private static boolean[] normalizeMask(boolean[] activeMask, int fallbackIndex) {
+        if (activeMask == null || activeMask.length < PANE_COUNT) {
+            return new boolean[]{true, true, true, true};
+        }
+        boolean[] copy = new boolean[PANE_COUNT];
+        System.arraycopy(activeMask, 0, copy, 0, PANE_COUNT);
+        copy[clampIndex(fallbackIndex)] = true;
+        return copy;
+    }
+
+    private static boolean intersects(Pane a, Pane b) {
+        float ow = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        float oh = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        return ow > OVERLAP_EPS && oh > OVERLAP_EPS;
+    }
+
+    private static float intersectionArea(Pane a, Pane b) {
+        float ow = Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x);
+        float oh = Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y);
+        if (ow <= 0f || oh <= 0f) return 0f;
+        return ow * oh;
+    }
+
+    private Pane clampNonOverlapping(Pane desired, int movingIndex, float prevX, float prevY, boolean[] mask) {
+        Pane tryX = new Pane(desired.x, prevY, desired.width, desired.height);
+        boolean xBad = false;
+        for (int i = 0; i < PANE_COUNT; i++) {
+            if (i == movingIndex || !mask[i]) continue;
+            if (intersects(tryX, panes[i])) { xBad = true; break; }
+        }
+        Pane tryY = new Pane(prevX, desired.y, desired.width, desired.height);
+        boolean yBad = false;
+        for (int i = 0; i < PANE_COUNT; i++) {
+            if (i == movingIndex || !mask[i]) continue;
+            if (intersects(tryY, panes[i])) { yBad = true; break; }
+        }
+        if (!xBad) return tryX;
+        if (!yBad) return tryY;
+        return new Pane(prevX, prevY, desired.width, desired.height);
+    }
+
+    private void yieldOtherPane(Pane moving, int otherIdx, float origX, float origY, boolean[] mask) {
+        Pane other = panes[otherIdx];
+        float movingCx = moving.x + moving.width * 0.5f;
+        float otherCx = other.x + other.width * 0.5f;
+        float movingCy = moving.y + moving.height * 0.5f;
+        float otherCy = other.y + other.height * 0.5f;
+        float dx = moving.x - origX;
+        float dy = moving.y - origY;
+
+        List<Pane> candidates = new ArrayList<>(6);
+        boolean preferHorizontal = Math.abs(dx) >= Math.abs(dy) || Math.abs(movingCx - otherCx) >= Math.abs(movingCy - otherCy);
+        boolean pushLeftFirst = dx > 0.01f || (Math.abs(dx) <= 0.01f && movingCx >= otherCx);
+        boolean pushUpFirst = dy > 0.01f || (Math.abs(dy) <= 0.01f && movingCy >= otherCy);
+
+        Pane leftCand = new Pane(clamp(moving.x - other.width, 0f, Math.max(0f, moving.x - MIN_SIZE)), other.y,
+                Math.min(other.width, Math.max(MIN_SIZE, moving.x)), other.height);
+        Pane rightCand = new Pane(moving.x + moving.width, other.y,
+                Math.min(other.width, Math.max(MIN_SIZE, 1f - (moving.x + moving.width))), other.height);
+        Pane upCand = new Pane(other.x, clamp(moving.y - other.height, 0f, Math.max(0f, moving.y - MIN_SIZE)),
+                other.width, Math.min(other.height, Math.max(MIN_SIZE, moving.y)));
+        Pane downCand = new Pane(other.x, moving.y + moving.height,
+                other.width, Math.min(other.height, Math.max(MIN_SIZE, 1f - (moving.y + moving.height))));
+        Pane swapCand = new Pane(clamp(origX, 0f, 1f - Math.min(other.width, 1f)),
+                clamp(origY, 0f, 1f - Math.min(other.height, 1f)), other.width, other.height);
+
+        if (preferHorizontal) {
+            if (pushLeftFirst) {
+                candidates.add(leftCand);
+                candidates.add(swapCand);
+                candidates.add(rightCand);
+            } else {
+                candidates.add(rightCand);
+                candidates.add(swapCand);
+                candidates.add(leftCand);
+            }
+            candidates.add(pushUpFirst ? upCand : downCand);
+            candidates.add(pushUpFirst ? downCand : upCand);
+        } else {
+            if (pushUpFirst) {
+                candidates.add(upCand);
+                candidates.add(swapCand);
+                candidates.add(downCand);
+            } else {
+                candidates.add(downCand);
+                candidates.add(swapCand);
+                candidates.add(upCand);
+            }
+            candidates.add(pushLeftFirst ? leftCand : rightCand);
+            candidates.add(pushLeftFirst ? rightCand : leftCand);
+        }
+
+        for (Pane c : candidates) {
+            if (c.x < -OVERLAP_EPS || c.y < -OVERLAP_EPS
+                    || c.x + c.width > 1f + OVERLAP_EPS || c.y + c.height > 1f + OVERLAP_EPS
+                    || c.width < MIN_SIZE - OVERLAP_EPS || c.height < MIN_SIZE - OVERLAP_EPS) {
+                continue;
+            }
+            c.x = clamp(c.x, 0f, 1f - MIN_SIZE);
+            c.y = clamp(c.y, 0f, 1f - MIN_SIZE);
+            c.width = clamp(c.width, MIN_SIZE, 1f - c.x);
+            c.height = clamp(c.height, MIN_SIZE, 1f - c.y);
+            if (intersects(c, moving)) continue;
+            boolean hitsOther = false;
+            for (int j = 0; j < PANE_COUNT; j++) {
+                if (j == otherIdx || j == -1 || !mask[j] || panes[j] == moving) continue;
+                if (intersects(c, panes[j])) { hitsOther = true; break; }
+            }
+            if (!hitsOther) {
+                other.set(c.x, c.y, c.width, c.height);
+                return;
+            }
+        }
+        // 次优：先找不撞 moving 的位置，再交给 resolveRemainingOverlaps 统一消解
+        for (Pane c : candidates) {
+            if (c.width < MIN_SIZE - OVERLAP_EPS || c.height < MIN_SIZE - OVERLAP_EPS) continue;
+            float cx = clamp(c.x, 0f, 1f - MIN_SIZE);
+            float cy = clamp(c.y, 0f, 1f - MIN_SIZE);
+            float cw = clamp(c.width, MIN_SIZE, 1f - cx);
+            float ch = clamp(c.height, MIN_SIZE, 1f - cy);
+            Pane norm = new Pane(cx, cy, cw, ch);
+            if (!intersects(norm, moving)) {
+                other.set(norm.x, norm.y, norm.width, norm.height);
+                return;
+            }
+        }
+    }
+
+    private void resolveRemainingOverlaps(int anchorIndex, boolean[] mask) {
+        Pane anchor = panes[anchorIndex];
+        for (int pass = 0; pass < 6 && hasAnyOverlap(panes, mask); pass++) {
+            for (int i = 0; i < PANE_COUNT; i++) {
+                if (!mask[i]) continue;
+                for (int j = i + 1; j < PANE_COUNT; j++) {
+                    if (!mask[j]) continue;
+                    if (!intersects(panes[i], panes[j])) continue;
+                    int victimIdx = (j == anchorIndex) ? i : (i == anchorIndex ? j : j);
+                    Pane fixed = (victimIdx == i) ? panes[j] : panes[i];
+                    Pane victim = panes[victimIdx];
+                    relocateOrShrinkFrom(victim, fixed, anchor, victimIdx, mask);
+                }
+            }
+        }
+        if (hasAnyOverlap(panes, mask)) {
+            // 极端大尺寸锚点导致剩余空间不足时的兜底：安全收缩锚点留出最小可容纳条带后按列铺排
+            List<Integer> active = new ArrayList<>();
+            for (int i = 0; i < PANE_COUNT; i++) {
+                if (mask[i]) active.add(i);
+            }
+            active.sort(Comparator.comparingDouble(i -> panes[i].x));
+            float w = 1f / active.size();
+            float cursor = 0f;
+            for (int k = 0; k < active.size(); k++) {
+                int idx = active.get(k);
+                float pw = (k == active.size() - 1) ? (1f - cursor) : w;
+                panes[idx].set(cursor, 0f, pw, 1f);
+                cursor += pw;
+            }
+        }
+    }
+
+    private void relocateOrShrinkFrom(Pane victim, Pane fixed, Pane anchor, int victimIdx, boolean[] mask) {
+        float rightSpace = 1f - (fixed.x + fixed.width);
+        float leftSpace = fixed.x;
+        float bottomSpace = 1f - (fixed.y + fixed.height);
+        float topSpace = fixed.y;
+        List<Pane> opts = new ArrayList<>(4);
+        if (leftSpace >= MIN_SIZE) {
+            float nw = Math.min(victim.width, leftSpace);
+            opts.add(new Pane(fixed.x - nw, victim.y, nw, victim.height));
+        }
+        if (rightSpace >= MIN_SIZE) {
+            float nw = Math.min(victim.width, rightSpace);
+            opts.add(new Pane(fixed.x + fixed.width, victim.y, nw, victim.height));
+        }
+        if (topSpace >= MIN_SIZE) {
+            float nh = Math.min(victim.height, topSpace);
+            opts.add(new Pane(victim.x, fixed.y - nh, victim.width, nh));
+        }
+        if (bottomSpace >= MIN_SIZE) {
+            float nh = Math.min(victim.height, bottomSpace);
+            opts.add(new Pane(victim.x, fixed.y + fixed.height, victim.width, nh));
+        }
+        for (Pane o : opts) {
+            boolean bad = false;
+            for (int k = 0; k < PANE_COUNT; k++) {
+                if (k == victimIdx || !mask[k]) continue;
+                if (intersects(o, panes[k])) { bad = true; break; }
+            }
+            if (!bad) {
+                victim.set(o.x, o.y, o.width, o.height);
+                return;
+            }
+        }
+        for (Pane o : opts) {
+            if (!intersects(o, fixed) && (fixed == anchor || !intersects(o, anchor))) {
+                victim.set(o.x, o.y, o.width, o.height);
+                return;
+            }
+        }
     }
 
     public float[] snapshot() {
@@ -242,6 +619,55 @@ public final class PreviewLayoutModel {
             }
         }
         return out;
+    }
+
+    /**
+     * 计算模式 D（左侧前/后主框 + 右侧方向盘联动左/右框）的有效排版。
+     * 未选中的另一对摄像头（如后摄与右摄）强制设为不可见以便释放预览流，并与已选槽位共享坐标矩形。
+     */
+    public EffectiveLayout computeEffectiveModeD(int leftSlotCamIndex, int rightSlotCamIndex) {
+        EffectiveLayout out = new EffectiveLayout();
+        int activeMain = (leftSlotCamIndex == BACK) ? BACK : FRONT;
+        int inactiveMain = (activeMain == BACK) ? FRONT : BACK;
+        int activeSide = (rightSlotCamIndex == RIGHT) ? RIGHT : LEFT;
+        int inactiveSide = (activeSide == RIGHT) ? LEFT : RIGHT;
+
+        out.visible[activeMain] = true;
+        out.visible[inactiveMain] = false;
+        out.visible[activeSide] = true;
+        out.visible[inactiveSide] = false;
+
+        Pane mainRect = panes[activeMain];
+        Pane sideRect = panes[activeSide];
+        out.panes[activeMain].set(mainRect.x, mainRect.y, mainRect.width, mainRect.height);
+        out.panes[activeSide].set(sideRect.x, sideRect.y, sideRect.width, sideRect.height);
+
+        boolean[] mask = new boolean[PANE_COUNT];
+        mask[activeMain] = true;
+        mask[activeSide] = true;
+        if (hasAnyOverlap(out.panes, mask)) {
+            float mw = clamp(mainRect.width, MIN_SIZE, 1f - MIN_SIZE);
+            boolean mainOnRight = mainRect.x > sideRect.x;
+            if (mainOnRight) {
+                out.panes[activeSide].set(0f, 0f, 1f - mw, 1f);
+                out.panes[activeMain].set(1f - mw, 0f, mw, 1f);
+            } else {
+                out.panes[activeMain].set(0f, 0f, mw, 1f);
+                out.panes[activeSide].set(mw, 0f, 1f - mw, 1f);
+            }
+        }
+        out.panes[inactiveMain].set(out.panes[activeMain].x, out.panes[activeMain].y,
+                out.panes[activeMain].width, out.panes[activeMain].height);
+        out.panes[inactiveSide].set(out.panes[activeSide].x, out.panes[activeSide].y,
+                out.panes[activeSide].width, out.panes[activeSide].height);
+        return out;
+    }
+
+    /** 在双切换槽位模型（C 的主框、D 的主/侧框）中同步配对镜像坐标。 */
+    public void syncPairedSlot(int activeIndex, int pairedIndex) {
+        if (activeIndex < 0 || activeIndex >= PANE_COUNT || pairedIndex < 0 || pairedIndex >= PANE_COUNT) return;
+        Pane src = panes[activeIndex];
+        panes[pairedIndex].set(src.x, src.y, src.width, src.height);
     }
 
     private void copyAllPanes(EffectiveLayout out) {

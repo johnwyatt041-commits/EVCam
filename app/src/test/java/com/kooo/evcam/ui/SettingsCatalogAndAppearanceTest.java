@@ -64,6 +64,10 @@ public class SettingsCatalogAndAppearanceTest {
             backingStore.put(inv.getArgument(0), inv.getArgument(1));
             return editor;
         });
+        when(editor.remove(anyString())).thenAnswer(inv -> {
+            backingStore.remove(inv.getArgument(0));
+            return editor;
+        });
         return new AppConfig(context);
     }
 
@@ -199,7 +203,10 @@ public class SettingsCatalogAndAppearanceTest {
         assertFalse(config.isPreviewViewShortcutsEnabled());
 
         assertEquals("分栏 B（三列分屏）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_B));
-        assertEquals("三路 C（档位联动大屏）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_C));
+        assertEquals("三路 C（双侧 + 手动前/后大屏）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_C));
+        assertEquals("模式 D（双视转向联动）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_D));
+        assertEquals(AppConfig.PREVIEW_MODE_D, AppConfig.normalizePreviewMode(AppConfig.PREVIEW_MODE_D));
+        assertEquals(AppConfig.PREVIEW_MODE_D, PreviewMode.fromKey(AppConfig.PREVIEW_MODE_D).key);
         assertEquals("仅沉浸全屏显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_AUTO));
         assertEquals("始终显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_ALWAYS));
         assertEquals("隐藏", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_HIDDEN));
@@ -286,5 +293,60 @@ public class SettingsCatalogAndAppearanceTest {
         assertTrue(config.isPreviewGuidanceEnabled());
         assertEquals("全景 A（360 + 分视角）",
                 AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_A));
+    }
+
+    @Test
+    public void t08PerSlotFillZoomPanClampsPersistsAndResetsCleanly() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertTrue(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_C, "left"));
+        assertEquals(1.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(0.0f, config.getPreviewSlotPanX(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(0.0f, config.getPreviewSlotPanY(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+
+        config.setPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_C, "left", false);
+        config.setPreviewSlotZoom(AppConfig.PREVIEW_MODE_C, "left", 99.0f);
+        config.setPreviewSlotPan(AppConfig.PREVIEW_MODE_C, "left", -2.0f, 3.0f);
+
+        assertFalse(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_C, "left"));
+        assertEquals(3.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(-0.5f, config.getPreviewSlotPanX(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(0.5f, config.getPreviewSlotPanY(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        // Independent from other slots / modes
+        assertTrue(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_D, "left"));
+        assertEquals(1.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_D, "left"), 0.0001f);
+
+        config.resetPreviewSlotTransform(AppConfig.PREVIEW_MODE_C, "left");
+        assertTrue(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_C, "left"));
+        assertEquals(1.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(0.0f, config.getPreviewSlotPanX(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+        assertEquals(0.0f, config.getPreviewSlotPanY(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
+    }
+
+    @Test
+    public void packEUiScaleModeNormalizesPersistsAndComputesMultiplier() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertEquals(AppConfig.UI_SCALE_STANDARD, config.getUiScaleMode());
+        assertEquals(1.0f, config.getUiScaleMultiplier(), 0.0001f);
+        assertEquals(AppConfig.UI_SCALE_STANDARD, AppConfig.normalizeUiScaleMode(null));
+        assertEquals(AppConfig.UI_SCALE_STANDARD, AppConfig.normalizeUiScaleMode("unexpected"));
+        assertEquals("标准（自适应）", AppearanceSettingsFragment.formatUiScaleLabel("unexpected"));
+
+        config.setUiScaleMode(AppConfig.UI_SCALE_LARGE);
+        assertEquals(AppConfig.UI_SCALE_LARGE, config.getUiScaleMode());
+        assertEquals(AppConfig.UI_SCALE_LARGE_MULTIPLIER, config.getUiScaleMultiplier(), 0.0001f);
+        assertEquals("车机大号", AppearanceSettingsFragment.formatUiScaleLabel(AppConfig.UI_SCALE_LARGE));
+
+        assertEquals(1.0f, UiScaleHelper.normalizeScale(Float.NaN), 0.0001f);
+        assertEquals(1.0f, UiScaleHelper.normalizeScale(-1.0f), 0.0001f);
+        assertEquals(1.0f, UiScaleHelper.normalizeScale(1.004f), 0.0001f);
+        assertEquals(1.16f, UiScaleHelper.normalizeScale(1.16f), 0.0001f);
+
+        config.setUiScaleMode("invalid_back_to_standard");
+        assertEquals(AppConfig.UI_SCALE_STANDARD, config.getUiScaleMode());
+        assertEquals(1.0f, config.getUiScaleMultiplier(), 0.0001f);
     }
 }

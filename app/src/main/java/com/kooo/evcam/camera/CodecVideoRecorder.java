@@ -219,6 +219,7 @@ public class CodecVideoRecorder {
                     current.customText,
                     enabled,
                     enabled,
+                    enabled,
                     current.position,
                     current.style);
         }

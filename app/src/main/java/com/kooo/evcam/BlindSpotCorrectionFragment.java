@@ -1,7 +1,7 @@
 package com.kooo.evcam;
 
+import android.content.Context;
 import android.content.Intent;
-import android.content.res.ColorStateList;
 import android.os.Bundle;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -11,400 +11,497 @@ import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
-import java.util.Locale;
-
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
+import com.kooo.evcam.blindspot.BlindSpotCorrectionMath;
+import com.kooo.evcam.blindspot.BlindSpotCropPreviewView;
+import com.kooo.evcam.blindspot.CameraMirrorPolicy;
 import com.kooo.evcam.blindspot.MirrorTarget;
-import com.kooo.evcam.stream.MjpegStreamManager;
+import com.kooo.evcam.ui.UiOptionPillHelper;
+import com.kooo.evcam.ui.UiThemeController;
 
-public class BlindSpotCorrectionFragment extends Fragment {
-    private static final float SCALE_MIN = 0.10f;
-    private static final float SCALE_MAX = 3.00f;
-    private static final float SCALE_STEP = 0.01f;
+import java.util.Locale;
 
-    private static final float TRANSLATE_MIN = -1.00f;
-    private static final float TRANSLATE_MAX = 1.00f;
-    private static final float TRANSLATE_STEP = 0.01f;
+/**
+ * 补盲分方向旋转角度与四边裁切调整界面（独立作用于补盲画面）。
+ *
+ * <p>每一路（前/后/左/右）独立配置旋转角度 (0°–359°) 与上/下/左/右四边裁切比例，
+ * 仅作用于补盲显示（主屏补盲弹窗与副屏 HUD），不影响记录仪主预览和录像，也不引入鱼眼畸变。</p>
+ */
+public class BlindSpotCorrectionFragment extends Fragment implements UiThemeController.ThemeAware {
 
-    private Button backButton;
-    private Button homeButton;
-    private Button btnCameraFront, btnCameraBack, btnCameraLeft, btnCameraRight;
+    private AppConfig appConfig;
+    private String currentCameraPos = "right";
+    private MirrorTarget currentMirrorTarget = MirrorTarget.BLIND_SPOT;
+    private boolean isFloatingPreviewActive = false;
+    private boolean isUpdatingUi = false;
 
-    private SeekBar seekScaleX;
-    private SeekBar seekScaleY;
-    private SeekBar seekTranslateX;
-    private SeekBar seekTranslateY;
-    private SeekBar seekRotation;
+    private Button btnToggleFloatingPreview;
+    private Button btnCamFront;
+    private Button btnCamBack;
+    private Button btnCamLeft;
+    private Button btnCamRight;
 
-    private TextView tvScaleX;
-    private TextView tvScaleY;
-    private TextView tvTranslateX;
-    private TextView tvTranslateY;
-    private TextView tvRotation;
+    private BlindSpotCropPreviewView cropPreviewView;
+    private TextView tvRotationValue;
+    private Button btnRot0;
+    private Button btnRot90;
+    private Button btnRot180;
+    private Button btnRot270;
+    private SeekBar seekbarRotation;
+
+    private TextView tvCropSummary;
+    private SeekBar seekbarCropTop;
+    private SeekBar seekbarCropBottom;
+    private SeekBar seekbarCropLeft;
+    private SeekBar seekbarCropRight;
+    private TextView tvCropTopValue;
+    private TextView tvCropBottomValue;
+    private TextView tvCropLeftValue;
+    private TextView tvCropRightValue;
 
     private Button btnPhysicalMirrorH;
     private Button btnPhysicalMirrorV;
     private Button btnTargetBlindSpot;
-    private Button btnTargetMain;
-    private Button btnTargetSecondary;
-    private Button btnTargetStream;
-    private Button btnMirrorH;
-    private Button btnMirrorV;
+    private Button btnTargetSecondaryHud;
+    private Button btnTargetNetworkStream;
+    private Button btnOutputMirrorH;
+    private Button btnOutputMirrorV;
+    private TextView tvMirrorEffectiveState;
 
-    private Button resetButton;
-    private Button saveButton;
-
-    private AppConfig appConfig;
-    private String currentCameraPos = "front";
-    private MirrorTarget currentMirrorTarget = MirrorTarget.BLIND_SPOT;
+    private Button btnResetCurrent;
+    private Button btnSaveCorrection;
 
     @Nullable
     @Override
-    public View onCreateView(@NonNull LayoutInflater inflater, @Nullable ViewGroup container, @Nullable Bundle savedInstanceState) {
+    public View onCreateView(
+            @NonNull LayoutInflater inflater,
+            @Nullable ViewGroup container,
+            @Nullable Bundle savedInstanceState) {
         View view = inflater.inflate(R.layout.fragment_blind_spot_correction, container, false);
         appConfig = new AppConfig(requireContext());
-        initViews(view);
-        initSeekBars();
-        loadFromConfig(currentCameraPos);
-        setupListeners();
-        updateCameraButtonStyles();
-        startPreview(currentCameraPos);
+        bindViews(view);
+        initListeners(view);
+        loadCameraValues(currentCameraPos);
         SettingsFragment.configureSubPageToolbar(this, view);
         return view;
     }
 
-    @Override
-    public void onDestroyView() {
-        stopPreview();
-        super.onDestroyView();
-    }
+    private void bindViews(View view) {
+        btnToggleFloatingPreview = view.findViewById(R.id.btn_toggle_floating_preview);
+        btnCamFront = view.findViewById(R.id.btn_cam_front);
+        btnCamBack = view.findViewById(R.id.btn_cam_back);
+        btnCamLeft = view.findViewById(R.id.btn_cam_left);
+        btnCamRight = view.findViewById(R.id.btn_cam_right);
 
-    private void initViews(View view) {
-        backButton = view.findViewById(R.id.btn_back);
-        homeButton = view.findViewById(R.id.btn_home);
-        btnCameraFront = view.findViewById(R.id.btn_camera_front);
-        btnCameraBack = view.findViewById(R.id.btn_camera_back);
-        btnCameraLeft = view.findViewById(R.id.btn_camera_left);
-        btnCameraRight = view.findViewById(R.id.btn_camera_right);
+        cropPreviewView = view.findViewById(R.id.blind_spot_crop_preview);
+        tvRotationValue = view.findViewById(R.id.tv_rotation_value);
+        btnRot0 = view.findViewById(R.id.btn_rot_0);
+        btnRot90 = view.findViewById(R.id.btn_rot_90);
+        btnRot180 = view.findViewById(R.id.btn_rot_180);
+        btnRot270 = view.findViewById(R.id.btn_rot_270);
+        seekbarRotation = view.findViewById(R.id.seekbar_rotation);
 
-        seekScaleX = view.findViewById(R.id.seek_scale_x);
-        seekScaleY = view.findViewById(R.id.seek_scale_y);
-        seekTranslateX = view.findViewById(R.id.seek_translate_x);
-        seekTranslateY = view.findViewById(R.id.seek_translate_y);
-        seekRotation = view.findViewById(R.id.seek_rotation);
-
-        tvScaleX = view.findViewById(R.id.tv_scale_x);
-        tvScaleY = view.findViewById(R.id.tv_scale_y);
-        tvTranslateX = view.findViewById(R.id.tv_translate_x);
-        tvTranslateY = view.findViewById(R.id.tv_translate_y);
-        tvRotation = view.findViewById(R.id.tv_rotation);
+        tvCropSummary = view.findViewById(R.id.tv_crop_summary);
+        seekbarCropTop = view.findViewById(R.id.seekbar_crop_top);
+        seekbarCropBottom = view.findViewById(R.id.seekbar_crop_bottom);
+        seekbarCropLeft = view.findViewById(R.id.seekbar_crop_left);
+        seekbarCropRight = view.findViewById(R.id.seekbar_crop_right);
+        tvCropTopValue = view.findViewById(R.id.tv_crop_top_value);
+        tvCropBottomValue = view.findViewById(R.id.tv_crop_bottom_value);
+        tvCropLeftValue = view.findViewById(R.id.tv_crop_left_value);
+        tvCropRightValue = view.findViewById(R.id.tv_crop_right_value);
 
         btnPhysicalMirrorH = view.findViewById(R.id.btn_physical_mirror_h);
         btnPhysicalMirrorV = view.findViewById(R.id.btn_physical_mirror_v);
-        btnTargetBlindSpot = view.findViewById(R.id.btn_mirror_target_blind_spot);
-        btnTargetMain = view.findViewById(R.id.btn_mirror_target_main);
-        btnTargetSecondary = view.findViewById(R.id.btn_mirror_target_secondary);
-        btnTargetStream = view.findViewById(R.id.btn_mirror_target_stream);
-        btnMirrorH = view.findViewById(R.id.btn_mirror_h);
-        btnMirrorV = view.findViewById(R.id.btn_mirror_v);
+        btnTargetBlindSpot = view.findViewById(R.id.btn_target_blind_spot);
+        btnTargetSecondaryHud = view.findViewById(R.id.btn_target_secondary_hud);
+        btnTargetNetworkStream = view.findViewById(R.id.btn_target_network_stream);
+        btnTargetNetworkStream.setVisibility(AppFeatures.NETWORK_STREAMING ? View.VISIBLE : View.GONE);
+        btnOutputMirrorH = view.findViewById(R.id.btn_output_mirror_h);
+        btnOutputMirrorV = view.findViewById(R.id.btn_output_mirror_v);
+        tvMirrorEffectiveState = view.findViewById(R.id.tv_mirror_effective_state);
 
-        resetButton = view.findViewById(R.id.btn_reset);
-        saveButton = view.findViewById(R.id.btn_save_apply);
+        btnResetCurrent = view.findViewById(R.id.btn_reset_current);
+        btnSaveCorrection = view.findViewById(R.id.btn_save_correction);
     }
 
-    private void initSeekBars() {
-        seekScaleX.setMax((int) Math.round((SCALE_MAX - SCALE_MIN) / SCALE_STEP));
-        seekScaleY.setMax((int) Math.round((SCALE_MAX - SCALE_MIN) / SCALE_STEP));
-        seekTranslateX.setMax((int) Math.round((TRANSLATE_MAX - TRANSLATE_MIN) / TRANSLATE_STEP));
-        seekTranslateY.setMax((int) Math.round((TRANSLATE_MAX - TRANSLATE_MIN) / TRANSLATE_STEP));
-
-        seekRotation.setMax(360);
-    }
-
-    private void setupListeners() {
-        backButton.setOnClickListener(v -> SettingsFragment.popSubPage(this));
-
-        homeButton.setOnClickListener(v -> {
-            if (getActivity() instanceof MainActivity) {
-                ((MainActivity) getActivity()).goToRecordingInterface();
-            }
-        });
-
-        View.OnClickListener cameraClickListener = v -> {
-            String newCameraPos;
-            if (v == btnCameraFront) newCameraPos = "front";
-            else if (v == btnCameraBack) newCameraPos = "back";
-            else if (v == btnCameraLeft) newCameraPos = "left";
-            else if (v == btnCameraRight) newCameraPos = "right";
-            else return;
-            currentCameraPos = newCameraPos;
-            updateCameraButtonStyles();
-            loadFromConfig(currentCameraPos);
-            startPreview(currentCameraPos);
-        };
-        btnCameraFront.setOnClickListener(cameraClickListener);
-        btnCameraBack.setOnClickListener(cameraClickListener);
-        btnCameraLeft.setOnClickListener(cameraClickListener);
-        btnCameraRight.setOnClickListener(cameraClickListener);
-
-        SeekBar.OnSeekBarChangeListener seekListener = new SeekBar.OnSeekBarChangeListener() {
-            @Override
-            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (!fromUser) return;
-                if (seekBar == seekScaleX) {
-                    float v = progressToScale(progress);
-                    tvScaleX.setText(format2(v));
-                    appConfig.setBlindSpotCorrectionScaleX(currentCameraPos, v);
-                } else if (seekBar == seekScaleY) {
-                    float v = progressToScale(progress);
-                    tvScaleY.setText(format2(v));
-                    appConfig.setBlindSpotCorrectionScaleY(currentCameraPos, v);
-                } else if (seekBar == seekTranslateX) {
-                    float v = progressToTranslate(progress);
-                    tvTranslateX.setText(format2(v));
-                    appConfig.setBlindSpotCorrectionTranslateX(currentCameraPos, v);
-                } else if (seekBar == seekTranslateY) {
-                    float v = progressToTranslate(progress);
-                    tvTranslateY.setText(format2(v));
-                    appConfig.setBlindSpotCorrectionTranslateY(currentCameraPos, v);
-                } else {
-                    return;
+    private void initListeners(View view) {
+        view.findViewById(R.id.btn_back).setOnClickListener(v -> SettingsFragment.popSubPage(this));
+        View btnMenu = view.findViewById(R.id.btn_menu);
+        if (btnMenu != null) {
+            btnMenu.setVisibility(View.GONE);
+        }
+        View btnHome = view.findViewById(R.id.btn_home);
+        if (btnHome != null) {
+            btnHome.setOnClickListener(v -> {
+                if (getActivity() instanceof MainActivity) {
+                    ((MainActivity) getActivity()).goToRecordingInterface();
                 }
+            });
+        }
 
-                BlindSpotService.update(requireContext());
-            }
+        btnToggleFloatingPreview.setOnClickListener(v -> toggleFloatingPreview());
 
-            @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
+        btnCamFront.setOnClickListener(v -> switchCamera("front"));
+        btnCamBack.setOnClickListener(v -> switchCamera("back"));
+        btnCamLeft.setOnClickListener(v -> switchCamera("left"));
+        btnCamRight.setOnClickListener(v -> switchCamera("right"));
 
-            @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
-        };
+        btnRot0.setOnClickListener(v -> setChannelRotation(0));
+        btnRot90.setOnClickListener(v -> setChannelRotation(90));
+        btnRot180.setOnClickListener(v -> setChannelRotation(180));
+        btnRot270.setOnClickListener(v -> setChannelRotation(270));
 
-        seekScaleX.setOnSeekBarChangeListener(seekListener);
-        seekScaleY.setOnSeekBarChangeListener(seekListener);
-        seekTranslateX.setOnSeekBarChangeListener(seekListener);
-        seekTranslateY.setOnSeekBarChangeListener(seekListener);
-
-        seekRotation.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+        seekbarRotation.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                if (!fromUser) return;
-                tvRotation.setText(progress + "°");
-                appConfig.setBlindSpotCorrectionRotation(currentCameraPos, progress);
-                BlindSpotService.update(requireContext());
+                if (isUpdatingUi || !fromUser) return;
+                setChannelRotation(progress);
             }
 
             @Override
-            public void onStartTrackingTouch(SeekBar seekBar) {}
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
 
             @Override
-            public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-
-        if (btnPhysicalMirrorH != null) {
-            btnPhysicalMirrorH.setOnClickListener(v -> {
-                boolean current = appConfig.isPhysicalMirrorH(currentCameraPos);
-                appConfig.setPhysicalMirrorH(currentCameraPos, !current);
-                updateMirrorButtonStyles();
-                notifyAllMirrorConsumers();
-            });
-        }
-
-        if (btnPhysicalMirrorV != null) {
-            btnPhysicalMirrorV.setOnClickListener(v -> {
-                boolean current = appConfig.isPhysicalMirrorV(currentCameraPos);
-                appConfig.setPhysicalMirrorV(currentCameraPos, !current);
-                updateMirrorButtonStyles();
-                notifyAllMirrorConsumers();
-            });
-        }
-
-        View.OnClickListener targetClickListener = v -> {
-            if (v == btnTargetMain) {
-                currentMirrorTarget = MirrorTarget.MAIN_PREVIEW;
-            } else if (v == btnTargetSecondary) {
-                currentMirrorTarget = MirrorTarget.SECONDARY_HUD;
-            } else if (v == btnTargetStream) {
-                currentMirrorTarget = MirrorTarget.NETWORK_STREAM;
-            } else {
-                currentMirrorTarget = MirrorTarget.BLIND_SPOT;
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                notifyServiceUpdate();
             }
-            updateMirrorButtonStyles();
-        };
-        if (btnTargetBlindSpot != null) btnTargetBlindSpot.setOnClickListener(targetClickListener);
-        if (btnTargetMain != null) btnTargetMain.setOnClickListener(targetClickListener);
-        if (btnTargetSecondary != null) btnTargetSecondary.setOnClickListener(targetClickListener);
-        if (btnTargetStream != null) btnTargetStream.setOnClickListener(targetClickListener);
-
-        btnMirrorH.setOnClickListener(v -> {
-            boolean current = appConfig.isOutputMirrorH(currentMirrorTarget, currentCameraPos);
-            appConfig.setOutputMirrorH(currentMirrorTarget, currentCameraPos, !current);
-            updateMirrorButtonStyles();
-            notifyAllMirrorConsumers();
         });
 
-        btnMirrorV.setOnClickListener(v -> {
-            boolean current = appConfig.isOutputMirrorV(currentMirrorTarget, currentCameraPos);
-            appConfig.setOutputMirrorV(currentMirrorTarget, currentCameraPos, !current);
-            updateMirrorButtonStyles();
-            notifyAllMirrorConsumers();
+        bindEdgeCropSeekBar(seekbarCropTop, tvCropTopValue, Edge.TOP);
+        bindEdgeCropSeekBar(seekbarCropBottom, tvCropBottomValue, Edge.BOTTOM);
+        bindEdgeCropSeekBar(seekbarCropLeft, tvCropLeftValue, Edge.LEFT);
+        bindEdgeCropSeekBar(seekbarCropRight, tvCropRightValue, Edge.RIGHT);
+
+        btnPhysicalMirrorH.setOnClickListener(v -> {
+            appConfig.setPhysicalMirrorH(currentCameraPos, !appConfig.isPhysicalMirrorH(currentCameraPos));
+            updateMirrorUi();
+            notifyServiceUpdate();
+        });
+        btnPhysicalMirrorV.setOnClickListener(v -> {
+            appConfig.setPhysicalMirrorV(currentCameraPos, !appConfig.isPhysicalMirrorV(currentCameraPos));
+            updateMirrorUi();
+            notifyServiceUpdate();
         });
 
-        resetButton.setOnClickListener(v -> {
+        btnTargetBlindSpot.setOnClickListener(v -> {
+            currentMirrorTarget = MirrorTarget.BLIND_SPOT;
+            updateMirrorUi();
+        });
+        btnTargetSecondaryHud.setOnClickListener(v -> {
+            currentMirrorTarget = MirrorTarget.SECONDARY_HUD;
+            updateMirrorUi();
+        });
+        btnTargetNetworkStream.setOnClickListener(v -> {
+            currentMirrorTarget = MirrorTarget.NETWORK_STREAM;
+            updateMirrorUi();
+        });
+
+        btnOutputMirrorH.setOnClickListener(v -> {
+            appConfig.setOutputMirrorH(
+                    currentMirrorTarget,
+                    currentCameraPos,
+                    !appConfig.isOutputMirrorH(currentMirrorTarget, currentCameraPos));
+            updateMirrorUi();
+            notifyServiceUpdate();
+        });
+        btnOutputMirrorV.setOnClickListener(v -> {
+            appConfig.setOutputMirrorV(
+                    currentMirrorTarget,
+                    currentCameraPos,
+                    !appConfig.isOutputMirrorV(currentMirrorTarget, currentCameraPos));
+            updateMirrorUi();
+            notifyServiceUpdate();
+        });
+
+        btnResetCurrent.setOnClickListener(v -> {
             appConfig.resetBlindSpotCorrection(currentCameraPos);
             appConfig.setPhysicalMirrorH(currentCameraPos, false);
             appConfig.setPhysicalMirrorV(currentCameraPos, false);
             appConfig.resetMirrorForTarget(currentMirrorTarget, currentCameraPos);
-            loadFromConfig(currentCameraPos);
-            notifyAllMirrorConsumers();
+            loadCameraValues(currentCameraPos);
+            notifyServiceUpdate();
+            Toast.makeText(requireContext(),
+                    "已恢复「" + getCameraLabel(currentCameraPos) + "」默认角度、裁切与镜像",
+                    Toast.LENGTH_SHORT).show();
         });
 
-        saveButton.setOnClickListener(v -> {
-            notifyAllMirrorConsumers();
-            Toast.makeText(requireContext(), "矫正及双镜像参数已保存并应用", Toast.LENGTH_SHORT).show();
-        });
-    }
-
-    private void loadFromConfig(String cameraPos) {
-        float scaleX = appConfig.getBlindSpotCorrectionScaleX(cameraPos);
-        float scaleY = appConfig.getBlindSpotCorrectionScaleY(cameraPos);
-        float translateX = appConfig.getBlindSpotCorrectionTranslateX(cameraPos);
-        float translateY = appConfig.getBlindSpotCorrectionTranslateY(cameraPos);
-        int rotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
-
-        int px = scaleToProgress(scaleX);
-        int py = scaleToProgress(scaleY);
-        int tx = translateToProgress(translateX);
-        int ty = translateToProgress(translateY);
-
-        seekScaleX.setProgress(px);
-        seekScaleY.setProgress(py);
-        seekTranslateX.setProgress(tx);
-        seekTranslateY.setProgress(ty);
-        seekRotation.setProgress(rotation);
-
-        tvScaleX.setText(format2(progressToScale(px)));
-        tvScaleY.setText(format2(progressToScale(py)));
-        tvTranslateX.setText(format2(progressToTranslate(tx)));
-        tvTranslateY.setText(format2(progressToTranslate(ty)));
-        tvRotation.setText(rotation + "°");
-
-        updateMirrorButtonStyles();
-    }
-
-    private void startPreview(String cameraPos) {
-        if (!WakeUpHelper.hasOverlayPermission(requireContext())) {
-            Toast.makeText(requireContext(), "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
-            WakeUpHelper.requestOverlayPermission(requireContext());
-            return;
-        }
-        Intent intent = new Intent(requireContext(), BlindSpotService.class);
-        intent.putExtra("action", "preview_blind_spot");
-        intent.putExtra("camera_pos", cameraPos);
-        requireContext().startService(intent);
-    }
-
-    private void stopPreview() {
-        Intent intent = new Intent(requireContext(), BlindSpotService.class);
-        intent.putExtra("action", "stop_preview_blind_spot");
-        requireContext().startService(intent);
-    }
-
-    private void updateCameraButtonStyles() {
-        Button[] buttons = {btnCameraFront, btnCameraBack, btnCameraLeft, btnCameraRight};
-        String[] positions = {"front", "back", "left", "right"};
-        for (int i = 0; i < buttons.length; i++) {
-            if (positions[i].equals(currentCameraPos)) {
-                buttons[i].setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                        getResources().getColor(R.color.button_accent, null)));
-                buttons[i].setTextColor(getResources().getColor(R.color.white, null));
-            } else {
-                buttons[i].setBackgroundTintList(android.content.res.ColorStateList.valueOf(
-                        getResources().getColor(R.color.button_background, null)));
-                buttons[i].setTextColor(getResources().getColor(R.color.button_text, null));
+        btnSaveCorrection.setOnClickListener(v -> {
+            if (!appConfig.isBlindSpotCorrectionEnabled() && hasActiveCorrectionForCurrentCamera()) {
+                appConfig.setBlindSpotCorrectionEnabled(true);
             }
+            notifyServiceUpdate();
+            Toast.makeText(requireContext(), "分方向补盲矫正已保存并应用", Toast.LENGTH_SHORT).show();
+            SettingsFragment.popSubPage(this);
+        });
+    }
+
+    private enum Edge {
+        TOP, BOTTOM, LEFT, RIGHT
+    }
+
+    private void bindEdgeCropSeekBar(SeekBar seekBar, TextView valueView, Edge edge) {
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (isUpdatingUi || !fromUser) return;
+                BlindSpotCorrectionMath.EdgeCrop cur = appConfig.getBlindSpotCorrectionEdgeCrop(currentCameraPos);
+                int topPct = Math.round(cur.top * 100f);
+                int bottomPct = Math.round(cur.bottom * 100f);
+                int leftPct = Math.round(cur.left * 100f);
+                int rightPct = Math.round(cur.right * 100f);
+
+                int clamped = progress;
+                switch (edge) {
+                    case TOP:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, bottomPct);
+                        topPct = clamped;
+                        break;
+                    case BOTTOM:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, topPct);
+                        bottomPct = clamped;
+                        break;
+                    case LEFT:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, rightPct);
+                        leftPct = clamped;
+                        break;
+                    case RIGHT:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, leftPct);
+                        rightPct = clamped;
+                        break;
+                }
+                if (clamped != progress) {
+                    isUpdatingUi = true;
+                    sb.setProgress(clamped);
+                    isUpdatingUi = false;
+                }
+                valueView.setText(clamped + "%");
+
+                BlindSpotCorrectionMath.EdgeCrop next =
+                        BlindSpotCorrectionMath.EdgeCrop.fromPercents(leftPct, topPct, rightPct, bottomPct);
+                appConfig.setBlindSpotCorrectionEdgeCrop(currentCameraPos, next);
+                ensureCorrectionEnabledWhenModified();
+                updateCropAndRotationVisuals();
+                notifyServiceUpdate();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar sb) {
+                notifyServiceUpdate();
+            }
+        });
+    }
+
+    private void switchCamera(String cameraPos) {
+        currentCameraPos = cameraPos;
+        loadCameraValues(cameraPos);
+        if (isFloatingPreviewActive) {
+            sendPreviewAction(cameraPos);
         }
     }
 
-    private void updateMirrorButtonStyles() {
+    private void setChannelRotation(int degrees) {
+        int safeDeg = BlindSpotCorrectionMath.normalizeAngle(degrees);
+        appConfig.setBlindSpotCorrectionRotation(currentCameraPos, safeDeg);
+        ensureCorrectionEnabledWhenModified();
+        isUpdatingUi = true;
+        seekbarRotation.setProgress(safeDeg);
+        isUpdatingUi = false;
+        updateCropAndRotationVisuals();
+        notifyServiceUpdate();
+    }
+
+    private void ensureCorrectionEnabledWhenModified() {
+        if (!appConfig.isBlindSpotCorrectionEnabled() && hasActiveCorrectionForCurrentCamera()) {
+            appConfig.setBlindSpotCorrectionEnabled(true);
+        }
+    }
+
+    private boolean hasActiveCorrectionForCurrentCamera() {
+        return appConfig.getBlindSpotCorrectionRotation(currentCameraPos) != 0
+                || !appConfig.getBlindSpotCorrectionEdgeCrop(currentCameraPos).isZero();
+    }
+
+    private void loadCameraValues(String cameraPos) {
+        isUpdatingUi = true;
+        try {
+            int rotation = BlindSpotCorrectionMath.normalizeAngle(
+                    appConfig.getBlindSpotCorrectionRotation(cameraPos));
+            seekbarRotation.setProgress(rotation);
+
+            BlindSpotCorrectionMath.EdgeCrop crop = appConfig.getBlindSpotCorrectionEdgeCrop(cameraPos);
+            int topPct = Math.round(crop.top * 100f);
+            int bottomPct = Math.round(crop.bottom * 100f);
+            int leftPct = Math.round(crop.left * 100f);
+            int rightPct = Math.round(crop.right * 100f);
+
+            seekbarCropTop.setProgress(topPct);
+            seekbarCropBottom.setProgress(bottomPct);
+            seekbarCropLeft.setProgress(leftPct);
+            seekbarCropRight.setProgress(rightPct);
+            tvCropTopValue.setText(topPct + "%");
+            tvCropBottomValue.setText(bottomPct + "%");
+            tvCropLeftValue.setText(leftPct + "%");
+            tvCropRightValue.setText(rightPct + "%");
+        } finally {
+            isUpdatingUi = false;
+        }
+        updateCameraButtonsUi();
+        updateCropAndRotationVisuals();
+        updateMirrorUi();
+        updatePreviewButtonUi();
+    }
+
+    private void updateCameraButtonsUi() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        UiOptionPillHelper.apply(btnCamFront, ctx, "front".equals(currentCameraPos));
+        UiOptionPillHelper.apply(btnCamBack, ctx, "back".equals(currentCameraPos));
+        UiOptionPillHelper.apply(btnCamLeft, ctx, "left".equals(currentCameraPos));
+        UiOptionPillHelper.apply(btnCamRight, ctx, "right".equals(currentCameraPos));
+    }
+
+    private void updateCropAndRotationVisuals() {
+        Context ctx = getContext();
+        int rotation = BlindSpotCorrectionMath.normalizeAngle(
+                appConfig.getBlindSpotCorrectionRotation(currentCameraPos));
+        BlindSpotCorrectionMath.EdgeCrop crop =
+                appConfig.getBlindSpotCorrectionEdgeCrop(currentCameraPos);
+
+        tvRotationValue.setText(rotation + "°");
+        tvCropSummary.setText(String.format(
+                Locale.US,
+                "保留 %d%% × %d%%",
+                Math.round(crop.visibleWidth() * 100f),
+                Math.round(crop.visibleHeight() * 100f)));
+        cropPreviewView.setPreviewState(getCameraLabel(currentCameraPos), rotation, crop);
+
+        if (ctx != null) {
+            UiOptionPillHelper.apply(btnRot0, ctx, rotation == 0);
+            UiOptionPillHelper.apply(btnRot90, ctx, rotation == 90);
+            UiOptionPillHelper.apply(btnRot180, ctx, rotation == 180);
+            UiOptionPillHelper.apply(btnRot270, ctx, rotation == 270);
+        }
+    }
+
+    private void updateMirrorUi() {
+        Context ctx = getContext();
         boolean physH = appConfig.isPhysicalMirrorH(currentCameraPos);
         boolean physV = appConfig.isPhysicalMirrorV(currentCameraPos);
         boolean outH = appConfig.isOutputMirrorH(currentMirrorTarget, currentCameraPos);
         boolean outV = appConfig.isOutputMirrorV(currentMirrorTarget, currentCameraPos);
 
-        int accentColor = getResources().getColor(R.color.button_accent, null);
-        int normalColor = getResources().getColor(R.color.button_background, null);
-        int whiteText = getResources().getColor(R.color.white, null);
-        int normalText = getResources().getColor(R.color.button_text, null);
+        if (ctx != null) {
+            UiOptionPillHelper.apply(btnPhysicalMirrorH, ctx, physH);
+            UiOptionPillHelper.apply(btnPhysicalMirrorV, ctx, physV);
+            UiOptionPillHelper.apply(btnTargetBlindSpot, ctx, currentMirrorTarget == MirrorTarget.BLIND_SPOT);
+            UiOptionPillHelper.apply(btnTargetSecondaryHud, ctx, currentMirrorTarget == MirrorTarget.SECONDARY_HUD);
+            UiOptionPillHelper.apply(btnTargetNetworkStream, ctx, currentMirrorTarget == MirrorTarget.NETWORK_STREAM);
+            UiOptionPillHelper.apply(btnOutputMirrorH, ctx, outH);
+            UiOptionPillHelper.apply(btnOutputMirrorV, ctx, outV);
+            UiOptionPillHelper.apply(btnResetCurrent, ctx, false);
+            UiOptionPillHelper.apply(btnSaveCorrection, ctx, true, true);
+        }
 
-        styleToggleButton(btnPhysicalMirrorH, physH, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnPhysicalMirrorV, physV, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnTargetBlindSpot, currentMirrorTarget == MirrorTarget.BLIND_SPOT, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnTargetMain, currentMirrorTarget == MirrorTarget.MAIN_PREVIEW, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnTargetSecondary, currentMirrorTarget == MirrorTarget.SECONDARY_HUD, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnTargetStream, currentMirrorTarget == MirrorTarget.NETWORK_STREAM, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnMirrorH, outH, accentColor, normalColor, whiteText, normalText);
-        styleToggleButton(btnMirrorV, outV, accentColor, normalColor, whiteText, normalText);
+        CameraMirrorPolicy.ResolvedMirror resolved =
+                CameraMirrorPolicy.resolve(appConfig, currentMirrorTarget, currentCameraPos);
+        tvMirrorEffectiveState.setText(String.format(
+                Locale.US,
+                "物理(%s/%s) + %s输出(%s/%s) → 实际生效(水平:%s, 垂直:%s)",
+                physH ? "反" : "正",
+                physV ? "倒" : "正",
+                getTargetLabel(currentMirrorTarget),
+                outH ? "反" : "正",
+                outV ? "倒" : "正",
+                resolved.effectiveH ? "镜像" : "正常",
+                resolved.effectiveV ? "翻转" : "正常"));
     }
 
-    private static void styleToggleButton(
-            @Nullable Button button,
-            boolean active,
-            int accentColor,
-            int normalColor,
-            int whiteText,
-            int normalText) {
-        if (button == null) {
+    private void updatePreviewButtonUi() {
+        Context ctx = getContext();
+        if (ctx == null || btnToggleFloatingPreview == null) return;
+        btnToggleFloatingPreview.setText(isFloatingPreviewActive ? "关闭浮窗预览" : "开启浮窗实景预览");
+        UiOptionPillHelper.apply(btnToggleFloatingPreview, ctx, isFloatingPreviewActive, true);
+    }
+
+    private void toggleFloatingPreview() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        if (isFloatingPreviewActive) {
+            isFloatingPreviewActive = false;
+            stopPreview();
+            updatePreviewButtonUi();
             return;
         }
-        button.setBackgroundTintList(ColorStateList.valueOf(active ? accentColor : normalColor));
-        button.setTextColor(active ? whiteText : normalText);
-    }
-
-    private void notifyAllMirrorConsumers() {
-        if (getContext() != null) {
-            BlindSpotService.update(requireContext());
+        if (!WakeUpHelper.hasOverlayPermission(ctx)) {
+            Toast.makeText(ctx, "请先授予悬浮窗权限，当前可通过预览图确认四边裁切范围", Toast.LENGTH_SHORT).show();
+            return;
         }
-        MainActivity main = MainActivity.getInstance();
-        if (main != null) {
-            main.refreshMainPreviewTransforms();
+        isFloatingPreviewActive = true;
+        sendPreviewAction(currentCameraPos);
+        updatePreviewButtonUi();
+    }
+
+    private void sendPreviewAction(String cameraPos) {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        Intent intent = new Intent(ctx, BlindSpotService.class);
+        intent.putExtra("action", "preview_blind_spot");
+        intent.putExtra("camera_pos", cameraPos);
+        ctx.startService(intent);
+    }
+
+    private void stopPreview() {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        Intent intent = new Intent(ctx, BlindSpotService.class);
+        intent.putExtra("action", "stop_preview_blind_spot");
+        ctx.startService(intent);
+    }
+
+    private void notifyServiceUpdate() {
+        Context ctx = getContext();
+        if (ctx != null) {
+            BlindSpotService.update(ctx);
         }
-        MjpegStreamManager streamManager = MjpegStreamManager.getInstance();
-        if (streamManager != null) {
-            streamManager.applyParams();
+    }
+
+    private String getCameraLabel(String pos) {
+        if ("front".equals(pos)) return "前";
+        if ("back".equals(pos)) return "后";
+        if ("left".equals(pos)) return "左";
+        if ("right".equals(pos)) return "右";
+        return pos;
+    }
+
+    private String getTargetLabel(MirrorTarget target) {
+        if (target == MirrorTarget.SECONDARY_HUD) return "副屏";
+        if (target == MirrorTarget.NETWORK_STREAM) return "投屏";
+        return "补盲窗";
+    }
+
+    @Override
+    public void onThemeApplied(Context themedContext, boolean isNight) {
+        updateCameraButtonsUi();
+        updateCropAndRotationVisuals();
+        updateMirrorUi();
+        updatePreviewButtonUi();
+    }
+
+    @Override
+    public void onDestroyView() {
+        if (isFloatingPreviewActive) {
+            isFloatingPreviewActive = false;
+            stopPreview();
         }
-    }
-
-    private int scaleToProgress(float scale) {
-        float clamped = clamp(scale, SCALE_MIN, SCALE_MAX);
-        return (int) Math.round((clamped - SCALE_MIN) / SCALE_STEP);
-    }
-
-    private float progressToScale(int progress) {
-        return SCALE_MIN + progress * SCALE_STEP;
-    }
-
-    private int translateToProgress(float translate) {
-        float clamped = clamp(translate, TRANSLATE_MIN, TRANSLATE_MAX);
-        return (int) Math.round((clamped - TRANSLATE_MIN) / TRANSLATE_STEP);
-    }
-
-    private float progressToTranslate(int progress) {
-        return TRANSLATE_MIN + progress * TRANSLATE_STEP;
-    }
-
-    private float clamp(float v, float min, float max) {
-        if (v < min) return min;
-        if (v > max) return max;
-        return v;
-    }
-
-    private String format2(float v) {
-        return String.format(java.util.Locale.US, "%.2f", v);
+        super.onDestroyView();
     }
 }
-

@@ -34,6 +34,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 
 import com.kooo.evcam.blindspot.BlindSpotCoordinator;
+import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
@@ -454,14 +455,16 @@ public class BlindSpotService extends Service {
             }
             mainFloatingWindowView = new MainFloatingWindowView(this, appConfig);
             mainFloatingWindowView.setDesiredCamera(cameraPos, true);
+            mainFloatingWindowView.setBlindSpotActiveSlot(BlindSpotPlacement.resolveSlotForCamera(
+                    cameraPos, appConfig.isRainNightBlindSpotEnabled()));
             mainFloatingWindowView.show();
-            mainFloatingWindowView.updateStatusLabel(cameraPos);
             isMainTempShown = true;
             AppLog.d(TAG, "主屏开启临时补盲悬浮窗: " + cameraPos);
             return;
         }
 
         if (mainFloatingWindowView != null) {
+            mainFloatingWindowView.setBlindSpotActiveSlot(null);
             mainFloatingWindowView.dismiss();
             mainFloatingWindowView = null;
             isMainTempShown = false;
@@ -474,10 +477,12 @@ public class BlindSpotService extends Service {
         if (slot == BlindSpotCoordinator.WindowSlot.PRE_CREATED_LEFT && preCreatedLeftWindow != null) {
             dedicatedBlindSpotWindow = preCreatedLeftWindow;
             preCreatedLeftWindow = null;
+            dedicatedBlindSpotWindow.setCameraPos(cameraPos);
             AppLog.d(TAG, "✅ 使用预创建的左补盲窗口");
         } else if (slot == BlindSpotCoordinator.WindowSlot.PRE_CREATED_RIGHT && preCreatedRightWindow != null) {
             dedicatedBlindSpotWindow = preCreatedRightWindow;
             preCreatedRightWindow = null;
+            dedicatedBlindSpotWindow.setCameraPos(cameraPos);
             AppLog.d(TAG, "✅ 使用预创建的右补盲窗口");
         } else {
             dedicatedBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
@@ -486,7 +491,6 @@ public class BlindSpotService extends Service {
         }
 
         dedicatedBlindSpotWindow.show();
-        dedicatedBlindSpotWindow.updateStatusLabel(cameraPos);
 
         if (!isPreCreatedWindowsReady || preCreatedLeftWindow == null || preCreatedRightWindow == null) {
             preCreateBlindSpotWindows();
@@ -837,6 +841,7 @@ public class BlindSpotService extends Service {
                 mainFloatingWindowView = null;
                 isMainTempShown = false;
             } else if (mainFloatingWindowView != null) {
+                mainFloatingWindowView.setBlindSpotActiveSlot(null);
                 mainFloatingWindowView.updateCamera(appConfig.getMainFloatingCamera());
             }
 
@@ -908,8 +913,9 @@ public class BlindSpotService extends Service {
             if ("preview_blind_spot".equals(action)) {
                 String cameraPos = intent.getStringExtra("camera_pos");
                 if (cameraPos == null) cameraPos = "right";
+                String placementSlot = intent.getStringExtra("placement_slot");
                 previewCameraPos = cameraPos;
-                showPreviewWindow(cameraPos);
+                showPreviewWindow(cameraPos, placementSlot);
                 updateWindows();
                 return START_STICKY;
             }
@@ -952,14 +958,25 @@ public class BlindSpotService extends Service {
         return START_STICKY;
     }
 
-    private void showPreviewWindow(String cameraPos) {
+    private void showPreviewWindow(String cameraPos, String placementSlot) {
         if (!canShowMainOverlay()) return;
 
         if (previewBlindSpotWindow == null) {
             previewBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
-            previewBlindSpotWindow.enableAdjustPreviewMode();
-            previewBlindSpotWindow.setCameraPos(cameraPos); // 先设置摄像头位置，再 show
+            previewBlindSpotWindow.setCameraPos(cameraPos);
+            if (placementSlot != null) {
+                previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
+            } else {
+                previewBlindSpotWindow.enableAdjustPreviewMode();
+            }
             previewBlindSpotWindow.show();
+        } else {
+            previewBlindSpotWindow.setCameraPos(cameraPos);
+            if (placementSlot != null) {
+                previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
+            } else {
+                previewBlindSpotWindow.enableAdjustPreviewMode();
+            }
         }
         previewBlindSpotWindow.setCamera(cameraPos);
 
@@ -1039,10 +1056,10 @@ public class BlindSpotService extends Service {
             mainFloatingWindowView.applyTransformNow();
         }
         if (dedicatedBlindSpotWindow != null) {
-            dedicatedBlindSpotWindow.applyTransformNow();
+            dedicatedBlindSpotWindow.updateBoundsFromPlacement();
         }
         if (previewBlindSpotWindow != null) {
-            previewBlindSpotWindow.applyTransformNow();
+            previewBlindSpotWindow.updateBoundsFromPlacement();
         }
         String secondaryCameraPos = currentSignalCamera != null ? currentSignalCamera : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
         if (secondaryCameraPos != null) {

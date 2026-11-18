@@ -206,34 +206,66 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
 
-                    <HorizontalScrollView
+                    <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:scrollbars="none">
+                        android:orientation="vertical">
 
                         <LinearLayout
-                            android:layout_width="wrap_content"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
+                            android:layout_marginBottom="8dp"
                             android:orientation="horizontal">
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_default_mode_a"
                                 style="@style/Widget.EVCam.OptionPill"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
                                 android:layout_marginEnd="8dp"
-                                android:text="全景 A · 360 分屏" />
+                                android:ellipsize="end"
+                                android:text="全景 A · 360" />
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_default_mode_b"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:layout_marginEnd="8dp"
-                                android:text="分栏 B · 三列分屏" />
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:ellipsize="end"
+                                android:text="分栏 B · 三列" />
+                        </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_default_mode_c"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:text="三路 C · 档位大屏" />
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:layout_marginEnd="8dp"
+                                android:ellipsize="end"
+                                android:text="三路 C · 双侧" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_default_mode_d"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:ellipsize="end"
+                                android:text="模式 D · 转向" />
                         </LinearLayout>
-                    </HorizontalScrollView>
+                    </LinearLayout>
 
                     <View
                         android:layout_width="match_parent"
@@ -297,6 +329,57 @@
                 android:layout_weight="1"
                 android:orientation="vertical">
 
+                <!-- 菜单与按钮尺寸（标准自适应 / 车机大号） -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="14dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="菜单与按钮缩放"
+                        android:textColor="@color/text_primary"
+                        android:textSize="16sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <TextView
+                        android:id="@+id/tv_ui_scale_status"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:layout_marginBottom="12dp"
+                        android:text="当前：标准（已按大屏自动适配）"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none">
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_ui_scale_standard"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="标准（自适应）" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_ui_scale_large"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:text="车机大号" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+                </LinearLayout>
+
                 <!-- 4. 开门退出（退出前确认 + 秒数胶囊） -->
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -339,50 +422,61 @@
                     <HorizontalScrollView
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
+                        android:fillViewport="true"
                         android:scrollbars="none">
 
                         <LinearLayout
-                            android:layout_width="wrap_content"
+                            android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:orientation="horizontal">
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_door_exit_3s"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:paddingStart="11dp"
-                                android:paddingEnd="11dp"
-                                android:layout_marginEnd="6dp"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:layout_marginEnd="4dp"
                                 android:text="3秒" />
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_door_exit_5s"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:paddingStart="11dp"
-                                android:paddingEnd="11dp"
-                                android:layout_marginEnd="6dp"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:layout_marginEnd="4dp"
                                 android:text="5秒" />
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_door_exit_10s"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:paddingStart="11dp"
-                                android:paddingEnd="11dp"
-                                android:layout_marginEnd="6dp"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:layout_marginEnd="4dp"
                                 android:text="10秒" />
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_door_exit_15s"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:paddingStart="11dp"
-                                android:paddingEnd="11dp"
-                                android:layout_marginEnd="6dp"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
+                                android:layout_marginEnd="4dp"
                                 android:text="15秒" />
 
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_door_exit_30s"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:paddingStart="11dp"
-                                android:paddingEnd="11dp"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="4dp"
+                                android:paddingEnd="4dp"
                                 android:text="30秒" />
                         </LinearLayout>
                     </HorizontalScrollView>
@@ -429,7 +523,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="视图切换快捷键 (A/B/C)"
+                                android:text="画内视角切换按钮"
                                 android:textColor="@color/text_primary"
                                 android:textSize="14sp"
                                 android:fontFamily="sans-serif-medium" />
@@ -438,7 +532,7 @@
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
                                 android:layout_marginTop="2dp"
-                                android:text="主预览左上角显示模式 A / B / C、主副屏与全屏按钮"
+                                android:text="统一控制 360 模式 A 视角/轮位按钮及模式 C/D 画内手动「前/后」按钮"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                         </LinearLayout>

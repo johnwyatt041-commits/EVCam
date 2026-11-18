@@ -22,6 +22,7 @@ import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.SettingsFragment;
+import com.kooo.evcam.ui.UiScaleController;
 import com.kooo.evcam.ui.UiThemeController.ThemeMode;
 
 /**
@@ -30,14 +31,18 @@ import com.kooo.evcam.ui.UiThemeController.ThemeMode;
  * - 默认启动页选择（记录仪 / 回看 / 设置）
  * - confirm_door_exit 开关持久化（车门信号自动触发留待 T06 接入 VehicleSignalHub）
  */
-public class AppearanceSettingsFragment extends Fragment implements UiThemeController.ThemeAware {
+public class AppearanceSettingsFragment extends Fragment
+        implements UiThemeController.ThemeAware, UiScaleController.ScaleAware {
 
     private AppConfig appConfig;
     private TextView themeStatusText;
+    private TextView uiScaleStatusText;
     private TextView startPageStatusText;
     private TextView previewModeStatusText;
     private TextView previewPresentationStatusText;
     private TextView cornerNavStatusText;
+    private Button btnUiScaleStandard;
+    private Button btnUiScaleLarge;
     private Button btnFollowSystem;
     private Button btnDark;
     private Button btnLight;
@@ -47,6 +52,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private Button btnDefaultModeA;
     private Button btnDefaultModeB;
     private Button btnDefaultModeC;
+    private Button btnDefaultModeD;
     private Button btnPresentationSidebar;
     private Button btnPresentationFullscreen;
     private Button btnPresentationWindow;
@@ -54,6 +60,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     private Button btnCornerNavAlways;
     private Button btnCornerNavHidden;
     private SwitchMaterial viewShortcutsSwitch;
+    private boolean suppressShortcutListener = false;
     private SwitchMaterial accessibilityOverlaySwitch;
     private SwitchMaterial confirmDoorExitSwitch;
     private Button btnDoorExit3s;
@@ -74,10 +81,13 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         }
 
         themeStatusText = view.findViewById(R.id.tv_theme_status);
+        uiScaleStatusText = view.findViewById(R.id.tv_ui_scale_status);
         startPageStatusText = view.findViewById(R.id.tv_start_page_status);
         previewModeStatusText = view.findViewById(R.id.tv_preview_mode_status);
         previewPresentationStatusText = view.findViewById(R.id.tv_preview_presentation_status);
         cornerNavStatusText = view.findViewById(R.id.tv_corner_nav_status);
+        btnUiScaleStandard = view.findViewById(R.id.btn_ui_scale_standard);
+        btnUiScaleLarge = view.findViewById(R.id.btn_ui_scale_large);
         btnFollowSystem = view.findViewById(R.id.btn_theme_follow_system);
         btnDark = view.findViewById(R.id.btn_theme_dark);
         btnLight = view.findViewById(R.id.btn_theme_light);
@@ -87,6 +97,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         btnDefaultModeA = view.findViewById(R.id.btn_default_mode_a);
         btnDefaultModeB = view.findViewById(R.id.btn_default_mode_b);
         btnDefaultModeC = view.findViewById(R.id.btn_default_mode_c);
+        btnDefaultModeD = view.findViewById(R.id.btn_default_mode_d);
         btnPresentationSidebar = view.findViewById(R.id.btn_presentation_sidebar);
         btnPresentationFullscreen = view.findViewById(R.id.btn_presentation_fullscreen);
         btnPresentationWindow = view.findViewById(R.id.btn_presentation_window);
@@ -106,6 +117,13 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
             appConfig = new AppConfig(getContext());
         }
 
+        if (btnUiScaleStandard != null) {
+            btnUiScaleStandard.setOnClickListener(v -> selectUiScaleMode(AppConfig.UI_SCALE_STANDARD));
+        }
+        if (btnUiScaleLarge != null) {
+            btnUiScaleLarge.setOnClickListener(v -> selectUiScaleMode(AppConfig.UI_SCALE_LARGE));
+        }
+
         btnFollowSystem.setOnClickListener(v -> selectTheme(ThemeMode.FOLLOW_SYSTEM));
         btnDark.setOnClickListener(v -> selectTheme(ThemeMode.DARK));
         btnLight.setOnClickListener(v -> selectTheme(ThemeMode.LIGHT));
@@ -122,6 +140,9 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         }
         if (btnDefaultModeC != null) {
             btnDefaultModeC.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_C));
+        }
+        if (btnDefaultModeD != null) {
+            btnDefaultModeD.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_D));
         }
         if (btnPresentationSidebar != null) {
             btnPresentationSidebar.setOnClickListener(v -> selectPreviewPresentation(PreviewPresentation.SIDEBAR));
@@ -143,10 +164,15 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         }
 
         if (appConfig != null && viewShortcutsSwitch != null) {
-            viewShortcutsSwitch.setChecked(appConfig.isPreviewViewShortcutsEnabled());
+            suppressShortcutListener = true;
+            viewShortcutsSwitch.setChecked(
+                    appConfig.isPreviewViewShortcutsEnabled() && appConfig.isSurroundOverlayButtonsVisible());
+            suppressShortcutListener = false;
             viewShortcutsSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (suppressShortcutListener) return;
                 if (appConfig != null) {
                     appConfig.setPreviewViewShortcutsEnabled(isChecked);
+                    appConfig.setSurroundOverlayButtonsVisible(isChecked);
                     notifyHostPreviewSettingsChanged();
                 }
             });
@@ -191,6 +217,7 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
             boolean isNight = controller != null ? controller.isCurrentThemeNight()
                     : UiThemeController.isTargetNight(getContext(), null);
             refreshThemeUi(getContext(), isNight);
+            refreshUiScaleUi(getContext());
             refreshStartPageUi(getContext());
             refreshPreviewOptionsUi(getContext());
             refreshDoorExitUi(getContext());
@@ -207,6 +234,14 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         return null;
     }
 
+    @Nullable
+    private UiScaleController resolveScaleController() {
+        if (getActivity() instanceof UiScaleController.Host) {
+            return ((UiScaleController.Host) getActivity()).getUiScaleController();
+        }
+        return null;
+    }
+
     private void selectTheme(@NonNull ThemeMode mode) {
         UiThemeController controller = resolveThemeController();
         if (controller != null) {
@@ -214,6 +249,23 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         } else if (getContext() != null) {
             UiThemeController.saveThemeMode(getContext(), mode);
             refreshThemeUi(getContext(), UiThemeController.isTargetNight(getContext(), null));
+        }
+    }
+
+    private void selectUiScaleMode(@NonNull String mode) {
+        UiScaleController controller = resolveScaleController();
+        if (controller != null) {
+            if (!controller.selectUiScaleMode(mode)) {
+                return;
+            }
+        } else if (appConfig != null && getContext() != null) {
+            appConfig.setUiScaleMode(mode);
+            refreshUiScaleUi(getContext());
+        }
+        if (getContext() != null) {
+            Toast.makeText(getContext(),
+                    "菜单与按钮缩放已设为「" + formatUiScaleLabel(mode) + "」",
+                    Toast.LENGTH_SHORT).show();
         }
     }
 
@@ -269,9 +321,35 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
         refreshThemeUi(themedContext, isNight);
+        refreshUiScaleUi(themedContext);
         refreshStartPageUi(themedContext);
         refreshPreviewOptionsUi(themedContext);
         refreshDoorExitUi(themedContext);
+    }
+
+    @Override
+    public void onUiScaleApplied(float scaleFactor) {
+        if (getContext() == null || getView() == null) return;
+        refreshUiScaleUi(getContext());
+    }
+
+    private void refreshUiScaleUi(@NonNull Context context) {
+        String mode = AppConfig.normalizeUiScaleMode(
+                appConfig != null ? appConfig.getUiScaleMode() : AppConfig.UI_SCALE_STANDARD);
+        if (uiScaleStatusText != null) {
+            uiScaleStatusText.setText(AppConfig.UI_SCALE_LARGE.equals(mode)
+                    ? "当前：车机大号（菜单与按钮放大约 16%，2560×1600 车机端推荐，切换不断录）"
+                    : "当前：标准（自适应，按屏幕分辨率与 DPI 自动适配）");
+        }
+        applyOptionButtonState(btnUiScaleStandard, context, AppConfig.UI_SCALE_STANDARD.equals(mode));
+        applyOptionButtonState(btnUiScaleLarge, context, AppConfig.UI_SCALE_LARGE.equals(mode));
+    }
+
+    @NonNull
+    public static String formatUiScaleLabel(@Nullable String mode) {
+        return AppConfig.UI_SCALE_LARGE.equals(AppConfig.normalizeUiScaleMode(mode))
+                ? "车机大号"
+                : "标准（自适应）";
     }
 
     private void refreshThemeUi(@NonNull Context context, boolean isNight) {
@@ -312,6 +390,14 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         applyOptionButtonState(btnDefaultModeA, context, AppConfig.PREVIEW_MODE_A.equals(previewMode));
         applyOptionButtonState(btnDefaultModeB, context, AppConfig.PREVIEW_MODE_B.equals(previewMode));
         applyOptionButtonState(btnDefaultModeC, context, AppConfig.PREVIEW_MODE_C.equals(previewMode));
+        applyOptionButtonState(btnDefaultModeD, context, AppConfig.PREVIEW_MODE_D.equals(previewMode));
+
+        if (viewShortcutsSwitch != null && appConfig != null) {
+            suppressShortcutListener = true;
+            viewShortcutsSwitch.setChecked(
+                    appConfig.isPreviewViewShortcutsEnabled() && appConfig.isSurroundOverlayButtonsVisible());
+            suppressShortcutListener = false;
+        }
 
         String cornerMode = appConfig != null
                 ? appConfig.getPreviewCornerNavMode()
@@ -346,8 +432,13 @@ public class AppearanceSettingsFragment extends Fragment implements UiThemeContr
         if (AppConfig.PREVIEW_MODE_A.equals(previewMode)) {
             return "全景 A（360 + 分视角）";
         }
-        return AppConfig.PREVIEW_MODE_C.equals(previewMode)
-                ? "三路 C（档位联动大屏）" : "分栏 B（三列分屏）";
+        if (AppConfig.PREVIEW_MODE_C.equals(previewMode)) {
+            return "三路 C（双侧 + 手动前/后大屏）";
+        }
+        if (AppConfig.PREVIEW_MODE_D.equals(previewMode)) {
+            return "模式 D（双视转向联动）";
+        }
+        return "分栏 B（三列分屏）";
     }
 
     @NonNull

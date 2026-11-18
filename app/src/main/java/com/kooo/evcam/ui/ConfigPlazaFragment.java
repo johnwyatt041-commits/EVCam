@@ -16,6 +16,7 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.EditText;
+import android.widget.HorizontalScrollView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -347,13 +348,19 @@ public class ConfigPlazaFragment extends Fragment implements UiThemeController.T
         tvMeta.setLayoutParams(metaParams);
         card.addView(tvMeta);
 
-        // 操作按钮行
+        // 操作按钮行（包入 HorizontalScrollView，避免大号缩放或长按钮截断）
+        HorizontalScrollView actionsScroll = new HorizontalScrollView(ctx);
+        actionsScroll.setHorizontalScrollBarEnabled(false);
+        actionsScroll.setFillViewport(false);
+        LinearLayout.LayoutParams scrollParams = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        scrollParams.topMargin = dp(ctx, 10);
+        actionsScroll.setLayoutParams(scrollParams);
+
         LinearLayout actionsRow = new LinearLayout(ctx);
         actionsRow.setOrientation(LinearLayout.HORIZONTAL);
-        LinearLayout.LayoutParams actionsParams = new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
-        actionsParams.topMargin = dp(ctx, 10);
-        actionsRow.setLayoutParams(actionsParams);
+        actionsRow.setLayoutParams(new ViewGroup.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT));
 
         Button btnApply = new Button(ctx);
         btnApply.setText("查看与分区应用");
@@ -402,7 +409,9 @@ public class ConfigPlazaFragment extends Fragment implements UiThemeController.T
             actionsRow.addView(btnDelete);
         }
 
-        card.addView(actionsRow);
+        UiScaleHelper.applyScaleToViewTree(actionsRow, UiScaleController.getSavedScaleFactor(ctx));
+        actionsScroll.addView(actionsRow);
+        card.addView(actionsScroll);
         return card;
     }
 
@@ -721,6 +730,13 @@ public class ConfigPlazaFragment extends Fragment implements UiThemeController.T
             UiThemeController tc = ((UiThemeController.Host) getActivity()).getUiThemeController();
             if (tc != null) {
                 tc.syncSystemBarsAndTree();
+            }
+        }
+        if (result.appliedSections.contains(E5ConfigSection.APPEARANCE)
+                && getActivity() instanceof UiScaleController.Host) {
+            UiScaleController sc = ((UiScaleController.Host) getActivity()).getUiScaleController();
+            if (sc != null) {
+                sc.applySavedScaleInPlace();
             }
         }
         if (getActivity() instanceof PreviewModeController.Host) {

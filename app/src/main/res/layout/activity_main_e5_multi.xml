@@ -53,28 +53,26 @@
                 <Button
                     android:id="@+id/btn_take_photo"
                     android:layout_width="wrap_content"
-                    android:layout_height="52dp"
+                    android:layout_height="@dimen/ui_main_action_button_height"
                     android:text="拍照"
                     android:layout_marginEnd="10dp" />
                 <Button
                     android:id="@+id/btn_start_record"
                     android:layout_width="wrap_content"
-                    android:layout_height="52dp"
-                    android:minWidth="128dp"
+                    android:layout_height="@dimen/ui_main_action_button_height"
+                    android:minWidth="@dimen/ui_main_action_button_min_width"
                     android:text="开始录制"
                     android:backgroundTint="@color/ui_danger"
                     android:textColor="#FFFFFF" />
             </LinearLayout>
             <FrameLayout
-                android:id="@+id/ui_preview_editor_host"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:visibility="gone" />
-            <FrameLayout
-                android:id="@+id/ui_preview_mode_host"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1">
+            <FrameLayout
+                android:id="@+id/ui_preview_mode_host"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent">
                 <FrameLayout
                     android:id="@+id/ui_photo_staging_container"
                     android:layout_width="match_parent"
@@ -201,8 +199,7 @@
                     <LinearLayout
                         android:id="@+id/ui_shortcut_corner_nav_group"
                         android:layout_width="wrap_content"
-                        android:layout_height="38dp"
-                        android:layout_marginEnd="8dp"
+                        android:layout_height="@dimen/ui_corner_shortcut_height"
                         android:paddingHorizontal="6dp"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
@@ -211,87 +208,38 @@
                         <TextView
                             android:id="@+id/btn_shortcut_back"
                             android:layout_width="wrap_content"
-                            android:layout_height="30dp"
+                            android:layout_height="@dimen/ui_corner_shortcut_item_height"
                             android:gravity="center"
                             android:paddingHorizontal="10dp"
                             android:text="← 返回"
                             android:textColor="#FFFFFF"
-                            android:textSize="13sp"
+                            android:textSize="@dimen/ui_pill_text_size"
                             android:fontFamily="sans-serif-medium"
                             android:clickable="true"
                             android:focusable="true" />
                         <TextView
                             android:id="@+id/btn_shortcut_settings"
                             android:layout_width="wrap_content"
-                            android:layout_height="30dp"
+                            android:layout_height="@dimen/ui_corner_shortcut_item_height"
                             android:gravity="center"
                             android:paddingHorizontal="10dp"
                             android:text="设置"
                             android:textColor="#FFFFFF"
-                            android:textSize="13sp"
-                            android:fontFamily="sans-serif-medium"
-                            android:clickable="true"
-                            android:focusable="true" />
-                    </LinearLayout>
-                    <LinearLayout
-                        android:id="@+id/ui_shortcut_view_switch_group"
-                        android:layout_width="wrap_content"
-                        android:layout_height="38dp"
-                        android:paddingHorizontal="6dp"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:background="@drawable/preview_shortcut_pill">
-                        <TextView
-                            android:id="@+id/btn_shortcut_mode_b"
-                            android:layout_width="wrap_content"
-                            android:layout_height="30dp"
-                            android:gravity="center"
-                            android:paddingHorizontal="10dp"
-                            android:text="B"
-                            android:textColor="#FFFFFF"
-                            android:textSize="13sp"
-                            android:fontFamily="sans-serif-medium"
-                            android:clickable="true"
-                            android:focusable="true" />
-                        <TextView
-                            android:id="@+id/btn_shortcut_mode_c"
-                            android:layout_width="wrap_content"
-                            android:layout_height="30dp"
-                            android:gravity="center"
-                            android:paddingHorizontal="10dp"
-                            android:text="C"
-                            android:textColor="#FFFFFF"
-                            android:textSize="13sp"
-                            android:fontFamily="sans-serif-medium"
-                            android:clickable="true"
-                            android:focusable="true" />
-                        <TextView
-                            android:id="@+id/btn_shortcut_mode_c_swap"
-                            android:layout_width="wrap_content"
-                            android:layout_height="30dp"
-                            android:gravity="center"
-                            android:paddingHorizontal="10dp"
-                            android:text="前/后"
-                            android:textColor="#FFFFFF"
-                            android:textSize="13sp"
-                            android:fontFamily="sans-serif-medium"
-                            android:clickable="true"
-                            android:focusable="true"
-                            android:visibility="gone" />
-                        <TextView
-                            android:id="@+id/btn_shortcut_fullscreen"
-                            android:layout_width="wrap_content"
-                            android:layout_height="30dp"
-                            android:gravity="center"
-                            android:paddingHorizontal="10dp"
-                            android:text="全屏"
-                            android:textColor="#FFFFFF"
-                            android:textSize="13sp"
+                            android:textSize="@dimen/ui_pill_text_size"
                             android:fontFamily="sans-serif-medium"
                             android:clickable="true"
                             android:focusable="true" />
                     </LinearLayout>
                 </LinearLayout>
+            </FrameLayout>
+            <FrameLayout
+                android:id="@+id/ui_preview_editor_host"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_gravity="top|center_horizontal"
+                android:layout_margin="10dp"
+                android:elevation="10dp"
+                android:visibility="gone" />
             </FrameLayout>
         </LinearLayout>
         <TextView

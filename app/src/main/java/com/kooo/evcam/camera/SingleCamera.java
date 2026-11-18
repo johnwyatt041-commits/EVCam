@@ -527,10 +527,17 @@ public class SingleCamera {
                 } catch (Exception ignored) {
                 }
             }
-            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface);
             if (!isConnected()) {
                 openCamera();
             }
+            if (!changed && isConnected() && captureSession != null && activePreviewConfig != null) {
+                java.util.List<Surface> currentSurfaces = activePreviewConfig.getSurfaces();
+                if (currentSurfaces != null && currentSurfaces.contains(surface)) {
+                    AppLog.d(TAG, "Camera " + cameraId + " surround preview surface unchanged and active, skip re-add");
+                    return;
+                }
+            }
+            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface);
             if (backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
                 backgroundHandler.removeCallbacks(recreateSessionRunnable);
                 backgroundHandler.post(() -> {
@@ -788,7 +795,10 @@ public class SingleCamera {
     /**
      * 启动后台线程
      */
-    private void startBackgroundThread() {
+    private synchronized void startBackgroundThread() {
+        if (backgroundThread != null && backgroundThread.isAlive()) {
+            return;
+        }
         backgroundThread = new HandlerThread("Camera-" + cameraId);
         backgroundThread.start();
         backgroundHandler = new Handler(backgroundThread.getLooper());
@@ -801,24 +811,36 @@ public class SingleCamera {
     private static final long THREAD_JOIN_TIMEOUT_MS = 2000;  // 2秒超时
     
     private void stopBackgroundThread() {
-        if (backgroundThread == null) {
+        final HandlerThread threadToStop;
+        synchronized (this) {
+            threadToStop = backgroundThread;
+            if (threadToStop == null) {
+                return;
+            }
+            // Clear references before quitting/joining so a concurrent startBackgroundThread()
+            // never gets clobbered by this cleanup or reuses a quitting looper.
+            backgroundThread = null;
+            backgroundHandler = null;
+        }
+
+        threadToStop.quitSafely();
+        if (Thread.currentThread() == threadToStop) {
+            AppLog.d(TAG, "Camera " + cameraId + " stopBackgroundThread called on itself; skipping join");
             return;
         }
-        
-        backgroundThread.quitSafely();
-        
+
         try {
             // 使用超时的 join，避免无限阻塞
-            backgroundThread.join(THREAD_JOIN_TIMEOUT_MS);
-            
+            threadToStop.join(THREAD_JOIN_TIMEOUT_MS);
+
             // 检查线程是否仍在运行
-            if (backgroundThread.isAlive()) {
+            if (threadToStop.isAlive()) {
                 AppLog.w(TAG, "Camera " + cameraId + " background thread did not terminate in time, interrupting");
-                backgroundThread.interrupt();
+                threadToStop.interrupt();
                 // 再给一次机会（短超时）
-                backgroundThread.join(500);
-                
-                if (backgroundThread.isAlive()) {
+                threadToStop.join(500);
+
+                if (threadToStop.isAlive()) {
                     AppLog.e(TAG, "Camera " + cameraId + " background thread still alive after interrupt");
                 }
             }
@@ -826,10 +848,6 @@ public class SingleCamera {
             AppLog.e(TAG, "Camera " + cameraId + " interrupted while stopping background thread", e);
             // 恢复中断标志，让上层知道发生了中断
             Thread.currentThread().interrupt();
-        } finally {
-            // 无论成功与否都清理引用，避免内存泄漏
-            backgroundThread = null;
-            backgroundHandler = null;
         }
     }
 
@@ -2077,6 +2095,11 @@ public class SingleCamera {
             return false;
         }
         if (surface == null || !surface.isValid()) return false;
+        java.util.List<Surface> configuredSurfaces = activePreviewConfig.getSurfaces();
+        if (configuredSurfaces != null && configuredSurfaces.contains(surface)) {
+            AppLog.d(TAG, "Camera " + cameraId + " surface already in OutputConfiguration, skip dynamic add");
+            return true;
+        }
 
         try {
             // 1. 添加到共享 OutputConfiguration
@@ -2623,6 +2646,11 @@ public class SingleCamera {
             return false;
         }
         if (surface == null || !surface.isValid()) return false;
+        java.util.List<Surface> configuredSurfaces = activePreviewConfig.getSurfaces();
+        if (configuredSurfaces != null && configuredSurfaces.contains(surface)) {
+            AppLog.d(TAG, "Camera " + cameraId + " surface already in OutputConfiguration, skip dynamic add");
+            return true;
+        }
 
         try {
             activePreviewConfig.addSurface(surface);

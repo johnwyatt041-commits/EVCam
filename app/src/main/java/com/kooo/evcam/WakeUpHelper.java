@@ -281,7 +281,7 @@ public class WakeUpHelper {
     public static final String VEHICLE_ACTION_REVERSE_PREVIEW = "reverse_preview";
 
     /**
-     * 因 R/D 换挡自动弹出、R 档倒车自动预览或摄像头掉线有门槛恢复拉起 MainActivity 到前台。
+     * 因前进档（D 档）自动弹出、R 档倒车自动预览或摄像头掉线有门槛恢复拉起 MainActivity 到前台。
      */
     public static void launchForVehicleAction(Context context, String vehicleAction) {
         if (context == null || vehicleAction == null) return;

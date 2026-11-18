@@ -24,6 +24,8 @@ import android.widget.Toast;
 import android.content.Intent;
 import android.graphics.Color;
 
+import com.kooo.evcam.blindspot.BlindSpotDisplayUtils;
+import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
@@ -72,7 +74,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
     private boolean isCurrentlySwapped = false;
     private boolean hasUnsavedResize = false;
 
-    private BlindSpotStatusBarView statusBar;
+    private String placementSlotOverride = null;
     private TurnSignalArrowView turnSignalArrowView;
 
     public BlindSpotFloatingWindowView(Context context, boolean isSetupMode) {
@@ -93,10 +95,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         View saveButton = findViewById(R.id.btn_save_blind_spot_config);
         View rotateButton = findViewById(R.id.btn_rotate_blind_spot);
 
-        statusBar = findViewById(R.id.blind_spot_status_bar);
         turnSignalArrowView = findViewById(R.id.turn_signal_arrow_view);
-        
-        applyStatusBarStyle();
 
         // 统一使用转向灯补盲的旋转设置，与转向灯触发时保持一致
         currentRotation = appConfig.getTurnSignalFloatingRotation();
@@ -106,13 +105,18 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             saveLayout.setVisibility(View.VISIBLE);
             saveButton.setOnClickListener(v -> {
                 hasUnsavedResize = false;
-                // 若宽高因矫正旋转而交换过，保存前还原为基础值
                 int saveW = params.width;
                 int saveH = params.height;
                 if (isCurrentlySwapped) {
                     saveW = params.height;
                     saveH = params.width;
                 }
+                int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
+                String slot = resolveActivePlacementSlot();
+                appConfig.setBlindSpotPlacement(
+                        slot,
+                        BlindSpotPlacement.fromPixels(params.x, params.y, saveW, saveH, screenSize[0], screenSize[1])
+                );
                 appConfig.setTurnSignalFloatingBounds(params.x, params.y, saveW, saveH);
                 appConfig.setTurnSignalFloatingRotation(currentRotation);
                 dismiss();
@@ -123,12 +127,12 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             });
         }
 
-        // 根据摄像头位置选择配置
-        int initialWidth, initialHeight, initialX, initialY;
-        initialWidth = appConfig.getTurnSignalFloatingWidth();
-        initialHeight = appConfig.getTurnSignalFloatingHeight();
-        initialX = appConfig.getTurnSignalFloatingX();
-        initialY = appConfig.getTurnSignalFloatingY();
+        // 根据可视化位置方案计算初始像素位置与尺寸
+        int[] initialBounds = resolvePlacementBoundsPx();
+        int initialX = initialBounds[0];
+        int initialY = initialBounds[1];
+        int initialWidth = initialBounds[2];
+        int initialHeight = initialBounds[3];
 
         params = com.kooo.evcam.ui.OverlayWindowParamsFactory.createMainParams(
                 getContext(),
@@ -286,19 +290,60 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         return super.onTouchEvent(event);
     }
     
+    public void setPlacementSlot(String slot) {
+        this.placementSlotOverride = slot != null ? BlindSpotPlacement.normalizeSlot(slot) : null;
+        updateBoundsFromPlacement();
+    }
+
+    private String resolveActivePlacementSlot() {
+        if (placementSlotOverride != null) {
+            return placementSlotOverride;
+        }
+        return BlindSpotPlacement.resolveSlotForCamera(
+                cameraPos,
+                appConfig.isRainNightBlindSpotEnabled()
+        );
+    }
+
+    private int[] resolvePlacementBoundsPx() {
+        int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
+        return appConfig.getBlindSpotPlacementPixels(resolveActivePlacementSlot(), screenSize[0], screenSize[1]);
+    }
+
+    public void updateBoundsFromPlacement() {
+        if (params == null) return;
+        if (isAdjustPreviewMode && placementSlotOverride == null) {
+            applyTransformNow();
+            return;
+        }
+        int[] bounds = resolvePlacementBoundsPx();
+        if (params.x != bounds[0] || params.y != bounds[1]
+                || params.width != bounds[2] || params.height != bounds[3]) {
+            params.x = bounds[0];
+            params.y = bounds[1];
+            params.width = bounds[2];
+            params.height = bounds[3];
+            isCurrentlySwapped = false;
+            try {
+                if (getParent() != null) {
+                    updateWindowLayoutSafely();
+                }
+            } catch (Exception e) {
+                AppLog.e(TAG, "Error updating placement bounds: " + e.getMessage());
+            }
+        }
+        applyTransformNow();
+    }
+
     /**
      * 仅设置摄像头位置（不触发预览切换）。
      * 用于 show() 前设定初始摄像头，避免 onSurfaceTextureAvailable 使用默认值。
      */
     public void setCameraPos(String cameraPos) {
         this.cameraPos = cameraPos;
-        // 重新加载对应摄像头的配置（因为init()时cameraPos可能还是默认值）
-
-        // 统一使用转向灯补盲的旋转设置，与转向灯触发时保持一致
         currentRotation = appConfig.getTurnSignalFloatingRotation();
-        AppLog.d(TAG, "🎯 setCameraPos更新旋转角度: camera=" + cameraPos + ", rotation=" + currentRotation);
-        // 重新应用画面变换，确保使用正确的摄像头配置
-        applyTransformNow();
+        AppLog.d(TAG, "setCameraPos: camera=" + cameraPos + ", rotation=" + currentRotation);
+        updateBoundsFromPlacement();
     }
 
     /**
@@ -396,7 +441,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
 
                 attachedOverlay = com.kooo.evcam.ui.OverlayWindowParamsFactory.attachMainOverlay(
                         getContext(), windowManager, this, params, null);
-                if (isAdjustPreviewMode) {
+                if (isAdjustPreviewMode && placementSlotOverride == null) {
                     moveToAdjustPreviewDefaultPosition();
                 }
                 applyTransformNow();
@@ -423,7 +468,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
         if (attachedOverlay != null) {
             attachedOverlay.updateLayout();
         } else if (windowManager != null) {
-            updateWindowLayoutSafely();
+            windowManager.updateViewLayout(this, params);
         }
     }
 
@@ -432,27 +477,14 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
     }
 
     public void applyTransformNow() {
-        // 矫正旋转更接近竖屏时，悬浮窗宽高互换，让画面自然填满不裁切
-        int correctionRotation = 0;
-        if (appConfig.isBlindSpotCorrectionEnabled() && cameraPos != null) {
-            correctionRotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
-        }
+        int[] targetBounds = resolvePlacementBoundsPx();
+        int targetW = targetBounds[2];
+        int targetH = targetBounds[3];
+        isCurrentlySwapped = false;
 
-        // 根据模式选择尺寸配置
-        int baseW, baseH;
-        {
-            // 转向灯模式使用补盲画面尺寸
-            baseW = appConfig.getTurnSignalFloatingWidth();
-            baseH = appConfig.getTurnSignalFloatingHeight();
-        }
-
-        boolean shouldSwap = BlindSpotCorrection.isCloserToPortrait(correctionRotation);
-        isCurrentlySwapped = shouldSwap;
-        int targetW = shouldSwap ? baseH : baseW;
-        int targetH = shouldSwap ? baseW : baseH;
-
-        // 用户正在拖动缩放或有未保存的缩放时，不覆盖 params，以免打断手势或丢失调整
-        if (!isResizing && !hasUnsavedResize
+        boolean keepCompactAdjustSize = isAdjustPreviewMode && placementSlotOverride == null;
+        // 用户正在拖动缩放、有未保存的缩放、或矫正页紧凑预览模式下，不覆盖 params
+        if (!keepCompactAdjustSize && !isResizing && !hasUnsavedResize
                 && params != null && (params.width != targetW || params.height != targetH)) {
             params.width = targetW;
             params.height = targetH;
@@ -469,9 +501,33 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                 com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT, cameraPos, currentRotation, isCurrentlySwapped);
     }
 
+    /**
+     * 位置预览模式：按可视化编辑器设定的精确坐标与尺寸展示半透框，且不拦截底层设置按钮点击。
+     */
+    public void enablePositionPreviewMode(String slot) {
+        isAdjustPreviewMode = false;
+        this.placementSlotOverride = slot != null ? BlindSpotPlacement.normalizeSlot(slot) : null;
+        if (params != null) {
+            params.flags |= WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
+        }
+        setForeground(createPositionPreviewBorderDrawable());
+        updateBoundsFromPlacement();
+    }
+
+    private android.graphics.drawable.Drawable createPositionPreviewBorderDrawable() {
+        float d = getResources().getDisplayMetrics().density;
+        android.graphics.drawable.GradientDrawable gd = new android.graphics.drawable.GradientDrawable();
+        gd.setColor(0x00000000);
+        gd.setStroke(Math.max(2, Math.round(3f * d)), 0xFF38BDF8);
+        gd.setCornerRadius(14f * d);
+        return gd;
+    }
+
     public void enableAdjustPreviewMode() {
         isAdjustPreviewMode = true;
+        this.placementSlotOverride = null;
         if (params != null) {
+            params.flags &= ~WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE;
             int targetW = dpToPx(320);
             int targetH = dpToPx(180);
             if (targetW > 0 && targetH > 0) {
@@ -479,6 +535,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                 params.height = targetH;
             }
         }
+        setForeground(null);
         moveToAdjustPreviewDefaultPosition();
     }
 
@@ -573,27 +630,6 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             retryBindRunnable = null;
         }
         retryBindCount = 0;
-    }
-
-    private void applyStatusBarStyle() {
-        if (statusBar == null) return;
-        int style = appConfig.getBlindSpotStatusBarStyle();
-        if (style == BlindSpotStatusBarView.STYLE_OFF) {
-            statusBar.setVisibility(View.GONE);
-        } else {
-            statusBar.setVisibility(View.VISIBLE);
-            statusBar.setAnimationStyle(style);
-            statusBar.setEffectColor(appConfig.getBlindSpotStatusBarColor());
-            int alpha = (int) (appConfig.getBlindSpotStatusBarBgOpacity() / 100f * 255);
-            statusBar.setBackgroundColor(android.graphics.Color.argb(alpha, 0x1A, 0x1A, 0x1A));
-        }
-    }
-
-    public void updateStatusLabel(String cameraPos) {
-        if (statusBar != null) {
-            applyStatusBarStyle();
-            statusBar.setDirection(cameraPos);
-        }
     }
 
     /**

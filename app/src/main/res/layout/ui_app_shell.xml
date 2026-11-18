@@ -31,7 +31,7 @@
         <TextView
             android:id="@+id/ui_nav_record_toggle"
             style="@style/Widget.EVCam.Navigation"
-            android:layout_marginBottom="4dp"
+            android:layout_marginBottom="@dimen/ui_nav_gap"
             android:text="开始录制"
             android:drawableTop="@drawable/ic_nav_record_circle"
             android:contentDescription="开始或停止录制" />
@@ -124,7 +124,7 @@
             android:paddingBottom="2dp"
             android:text="V1.6.6"
             android:textColor="@color/text_secondary"
-            android:textSize="11sp"
+            android:textSize="@dimen/ui_rail_version_text_size"
             android:maxLines="1" />
     </LinearLayout>
 
@@ -144,7 +144,7 @@
         <LinearLayout
             android:id="@+id/ui_top_bar"
             android:layout_width="match_parent"
-            android:layout_height="56dp"
+            android:layout_height="@dimen/ui_top_bar_height"
             android:gravity="center_vertical"
             android:paddingStart="@dimen/ui_page_padding"
             android:paddingEnd="@dimen/ui_page_padding"
@@ -152,11 +152,8 @@
 
             <Button
                 android:id="@+id/ui_back"
-                android:layout_width="wrap_content"
-                android:layout_height="44dp"
-                android:layout_marginEnd="12dp"
-                android:paddingStart="16dp"
-                android:paddingEnd="16dp"
+                style="@style/Widget.EVCam.TopBarButton"
+                android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
                 android:text="← 返回"
                 android:visibility="gone" />
 
@@ -165,20 +162,30 @@
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
                 android:layout_weight="1"
+                android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
                 android:text="记录仪"
                 android:textColor="@color/text_primary"
-                android:textSize="20sp"
+                android:textSize="@dimen/ui_top_bar_title_text_size"
+                android:maxLines="1"
+                android:ellipsize="end"
                 android:fontFamily="sans-serif-medium" />
 
             <TextView
                 android:id="@+id/ui_recording_status"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:layout_marginEnd="12dp"
+                android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
                 android:text="待机"
                 android:textColor="@color/text_primary"
-                android:textSize="15sp"
+                android:textSize="@dimen/ui_top_bar_status_text_size"
+                android:maxLines="1"
                 android:fontFamily="sans-serif-medium" />
+
+            <Button
+                android:id="@+id/ui_edit_layout"
+                style="@style/Widget.EVCam.TopBarButton"
+                android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
+                android:text="编辑布局" />
 
             <LinearLayout
                 android:id="@+id/ui_preview_mode_controls"
@@ -190,74 +197,45 @@
 
                 <Button
                     android:id="@+id/ui_mode_a"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="360 A"
-                    android:textSize="13sp"
-                    android:textAllCaps="false" />
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="360 A" />
 
                 <Button
                     android:id="@+id/ui_mode_b"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="分栏 B"
-                    android:textSize="13sp"
-                    android:textAllCaps="false" />
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="分栏 B" />
 
                 <Button
                     android:id="@+id/ui_mode_c"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="三路 C"
-                    android:textSize="13sp"
-                    android:textAllCaps="false" />
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="三路 C" />
+
+                <Button
+                    android:id="@+id/ui_mode_d"
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="模式 D" />
 
                 <Button
                     android:id="@+id/ui_fullscreen_toggle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="8dp"
-                    android:text="全屏"
-                    android:textSize="13sp"
-                    android:textAllCaps="false" />
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="全屏" />
 
                 <Button
                     android:id="@+id/ui_floating_window_toggle"
-                    android:layout_width="wrap_content"
-                    android:layout_height="40dp"
-                    android:minWidth="0dp"
-                    android:paddingHorizontal="12dp"
-                    android:layout_marginEnd="10dp"
-                    android:text="小窗"
-                    android:textSize="13sp"
-                    android:textAllCaps="false" />
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
+                    android:text="小窗" />
             </LinearLayout>
 
             <Button
-                android:id="@+id/ui_edit_layout"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:layout_marginEnd="10dp"
-                android:text="编辑布局"
-                android:textSize="13sp" />
-
-            <Button
                 android:id="@+id/ui_preview_toggle"
-                android:layout_width="wrap_content"
-                android:layout_height="40dp"
-                android:text="开启预览"
-                android:textSize="13sp" />
+                style="@style/Widget.EVCam.TopBarButton"
+                android:text="开启预览" />
         </LinearLayout>
 
         <View

@@ -22,6 +22,11 @@ public final class SurroundCalibrationProfile {
     public static final float E5_CAR_MIN_Y_CM = -259.5f;
     public static final float E5_CAR_MAX_Y_CM = 274.5f;
 
+    // 360 鸟瞰车周 stitched 地面可视边距（cm）：让车模周围留出充足路面与转向轨线空间（对标 SC 俯视视场）
+    public static final double BIRD_SIDE_MARGIN_CM = 125.0;
+    public static final double BIRD_REAR_MARGIN_CM = 170.0;
+    public static final double BIRD_FRONT_MARGIN_CM = 185.0;
+
     /** 单路相机标定参数：支持统一球面（xi + focal）及 OpenCV Kannala-Brandt 鱼眼畸变（fx/fy + k1..k4）。 */
     public static final class CameraCalibration {
         @NonNull
@@ -150,15 +155,15 @@ public final class SurroundCalibrationProfile {
     }
 
     public double getHalfWorldWidthCm() {
-        return groundWidthCm * 0.5;
+        return (groundWidthCm * 0.5) + BIRD_SIDE_MARGIN_CM;
     }
 
     public double getWorldMinYCm() {
-        return -(groundLengthCm * 0.5);
+        return -(groundLengthCm * 0.5) - BIRD_REAR_MARGIN_CM;
     }
 
     public double getWorldMaxYCm() {
-        return (groundLengthCm * 0.5) + groundFrontExtensionCm;
+        return (groundLengthCm * 0.5) + BIRD_FRONT_MARGIN_CM + groundFrontExtensionCm;
     }
 
     private static double clamp(double v, double min, double max) {

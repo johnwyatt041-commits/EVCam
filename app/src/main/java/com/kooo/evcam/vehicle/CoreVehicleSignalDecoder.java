@@ -9,6 +9,8 @@ public final class CoreVehicleSignalDecoder {
     private static final long CONTINUOUS_EXPIRE_MS = 3000L;
 
     private VehicleSignalSnapshot.Gear gear = VehicleSignalSnapshot.Gear.UNKNOWN;
+    private VehicleSignalSnapshot.Gear gearSelection = VehicleSignalSnapshot.Gear.UNKNOWN;
+    private VehicleSignalSnapshot.Gear currentGear = VehicleSignalSnapshot.Gear.UNKNOWN;
     private int speedKmh = -1;
     private int doorFl = -1;
     private int doorFr = -1;
@@ -20,7 +22,11 @@ public final class CoreVehicleSignalDecoder {
     private long speedUpdatedMs;
     private long lastUpdatedMs;
 
-    private long gearTimestamp;
+    private long gearSelectionTimestamp;
+    private long currentGearTimestamp;
+    private long gearUpdateSeq;
+    private long gearSelectionSeq;
+    private long currentGearSeq;
     private long speedTimestamp;
     private long turnTimestamp;
     private long doorFlTimestamp;
@@ -33,6 +39,8 @@ public final class CoreVehicleSignalDecoder {
     /** 重置全部 4 类信号为未知（断连或应用彻底退出时调用）。 */
     public synchronized void reset() {
         gear = VehicleSignalSnapshot.Gear.UNKNOWN;
+        gearSelection = VehicleSignalSnapshot.Gear.UNKNOWN;
+        currentGear = VehicleSignalSnapshot.Gear.UNKNOWN;
         speedKmh = -1;
         doorFl = -1;
         doorFr = -1;
@@ -42,7 +50,8 @@ public final class CoreVehicleSignalDecoder {
         rightTurn = -1;
         speedUpdatedMs = 0L;
         lastUpdatedMs = 0L;
-        gearTimestamp = speedTimestamp = turnTimestamp = 0L;
+        gearSelectionTimestamp = currentGearTimestamp = speedTimestamp = turnTimestamp = 0L;
+        gearUpdateSeq = gearSelectionSeq = currentGearSeq = 0L;
         doorFlTimestamp = doorFrTimestamp = doorRlTimestamp = doorRrTimestamp = 0L;
         cachedSnapshot = VehicleSignalSnapshot.UNKNOWN;
     }
@@ -66,7 +75,8 @@ public final class CoreVehicleSignalDecoder {
             }
             switch (category) {
                 case GEAR:
-                    if (area == 0 && applyGear(timestamp, availability, intVal)) {
+                    // Accept all area IDs for gear (zoned VHAL properties may use non-zero areaId).
+                    if (applyGear(prop, timestamp, availability, intVal)) {
                         changed[0] = true;
                     }
                     break;
@@ -144,19 +154,70 @@ public final class CoreVehicleSignalDecoder {
         return true;
     }
 
-    private boolean applyGear(long timestamp, int availability, Integer intVal) {
-        if (timestamp > 0 && timestamp < gearTimestamp) {
-            return false;
-        }
-        gearTimestamp = timestamp;
-        VehicleSignalSnapshot.Gear next = (availability == 0 && intVal != null)
+    private boolean applyGear(int propertyId, long timestamp, int availability, Integer intVal) {
+        VehicleSignalSnapshot.Gear parsed = (availability == 0 && intVal != null)
                 ? VehicleSignalSnapshot.Gear.fromVhalValue(intVal)
                 : VehicleSignalSnapshot.Gear.UNKNOWN;
+
+        // Track GEAR_SELECTION (0x11400400) and CURRENT_GEAR (0x11400401) separately so an
+        // unimplemented/UNKNOWN sibling property cannot clobber a valid gear reading.
+        boolean isCurrentGearProp = propertyId == VehicleSignalCategory.getEffectiveCurrentGearPropId()
+                && propertyId != VehicleSignalCategory.getEffectiveGearSelectionPropId();
+        long seq = ++gearUpdateSeq;
+        if (isCurrentGearProp) {
+            if (timestamp > 0 && timestamp < currentGearTimestamp) {
+                return false;
+            }
+            currentGearTimestamp = timestamp;
+            currentGearSeq = seq;
+            currentGear = parsed;
+        } else {
+            if (timestamp > 0 && timestamp < gearSelectionTimestamp) {
+                return false;
+            }
+            gearSelectionTimestamp = timestamp;
+            gearSelectionSeq = seq;
+            gearSelection = parsed;
+        }
+
+        VehicleSignalSnapshot.Gear next = resolveEffectiveGear(
+                gearSelection, gearSelectionTimestamp, gearSelectionSeq,
+                currentGear, currentGearTimestamp, currentGearSeq
+        );
         if (next == gear) {
             return false;
         }
         gear = next;
         return true;
+    }
+
+    private static VehicleSignalSnapshot.Gear resolveEffectiveGear(
+            VehicleSignalSnapshot.Gear selection,
+            long selectionTs,
+            long selectionSeq,
+            VehicleSignalSnapshot.Gear current,
+            long currentTs,
+            long currentSeq) {
+        boolean selectionKnown = isKnownGear(selection);
+        boolean currentKnown = isKnownGear(current);
+        if (currentKnown && selectionKnown) {
+            if (currentTs != selectionTs && (currentTs > 0 || selectionTs > 0)) {
+                return currentTs > selectionTs ? current : selection;
+            }
+            return currentSeq >= selectionSeq ? current : selection;
+        }
+        if (currentKnown) {
+            return current;
+        }
+        if (selectionKnown) {
+            return selection;
+        }
+        return current != VehicleSignalSnapshot.Gear.UNKNOWN ? current : selection;
+    }
+
+    private static boolean isKnownGear(VehicleSignalSnapshot.Gear value) {
+        return value != VehicleSignalSnapshot.Gear.UNKNOWN
+                && value != VehicleSignalSnapshot.Gear.OTHER;
     }
 
     private boolean applySpeed(long timestamp, int availability, Float floatVal, long nowMs) {

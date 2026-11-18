@@ -20,7 +20,7 @@ import java.nio.FloatBuffer;
 import java.util.function.Supplier;
 
 /**
- * 3.3 合并单纹理视频水印渲染层（日期时间 / 自定义文字 / 车速 / 档位与车况，四角落 + 卡片/阴影双样式）。
+ * 3.3 合并单纹理视频水印渲染层（日期时间 / 自定义文字 / 车速 / 档位 / 转向灯，四角落 + 卡片/阴影双样式）。
  * 在编码器现有 EGL 上下文中按秒或车辆状态变化懒更新 texSubImage2D，零中间 FBO、关闭即释放零残留。
  */
 public final class VehicleStatusWatermark implements AutoCloseable {
@@ -69,7 +69,8 @@ public final class VehicleStatusWatermark implements AutoCloseable {
         public final boolean showCustomText;
         public final String customText;
         public final boolean showSpeed;
-        public final boolean showGearAndTurn;
+        public final boolean showGear;
+        public final boolean showTurnSignal;
         public final Position position;
         public final Style style;
 
@@ -78,35 +79,38 @@ public final class VehicleStatusWatermark implements AutoCloseable {
                 boolean showCustomText,
                 String customText,
                 boolean showSpeed,
-                boolean showGearAndTurn,
+                boolean showGear,
+                boolean showTurnSignal,
                 Position position,
                 Style style) {
             this.showDateTime = showDateTime;
             this.showCustomText = showCustomText;
             this.customText = normalizeCustomText(customText);
             this.showSpeed = showSpeed;
-            this.showGearAndTurn = showGearAndTurn;
+            this.showGear = showGear;
+            this.showTurnSignal = showTurnSignal;
             this.position = position != null ? position : Position.BOTTOM_RIGHT;
             this.style = style != null ? style : Style.CARD;
         }
 
         public static WatermarkOptions disabled() {
-            return new WatermarkOptions(false, false, "", false, false, Position.BOTTOM_RIGHT, Style.CARD);
+            return new WatermarkOptions(false, false, "", false, false, false, Position.BOTTOM_RIGHT, Style.CARD);
         }
 
         public static WatermarkOptions legacyVehicleStatusOnly() {
-            return new WatermarkOptions(false, false, "", true, true, Position.BOTTOM_LEFT, Style.CARD);
+            return new WatermarkOptions(false, false, "", true, true, true, Position.BOTTOM_LEFT, Style.CARD);
         }
 
         public boolean hasAnyEnabled() {
             return showDateTime
                     || (showCustomText && !customText.isEmpty())
                     || showSpeed
-                    || showGearAndTurn;
+                    || showGear
+                    || showTurnSignal;
         }
 
         public boolean needsVehicleSource() {
-            return showSpeed || showGearAndTurn;
+            return showSpeed || showGear || showTurnSignal;
         }
 
         @Override
@@ -117,10 +121,24 @@ public final class VehicleStatusWatermark implements AutoCloseable {
             return showDateTime == that.showDateTime
                     && showCustomText == that.showCustomText
                     && showSpeed == that.showSpeed
-                    && showGearAndTurn == that.showGearAndTurn
+                    && showGear == that.showGear
+                    && showTurnSignal == that.showTurnSignal
                     && customText.equals(that.customText)
                     && position == that.position
                     && style == that.style;
+        }
+
+        @Override
+        public int hashCode() {
+            return java.util.Objects.hash(
+                    showDateTime,
+                    showCustomText,
+                    customText,
+                    showSpeed,
+                    showGear,
+                    showTurnSignal,
+                    position,
+                    style);
         }
     }
 
@@ -254,11 +272,13 @@ public final class VehicleStatusWatermark implements AutoCloseable {
         }
         long nowMs = System.currentTimeMillis();
         long epochSecond = nowMs / 1000L;
-        VehicleStatus status = statusSupplier != null ? statusSupplier.get() : VehicleStatus.UNKNOWN;
+        VehicleStatus status = (statusSupplier != null && (options.showSpeed || options.showTurnSignal))
+                ? statusSupplier.get()
+                : VehicleStatus.UNKNOWN;
         if (status == null) {
             status = VehicleStatus.UNKNOWN;
         }
-        VehicleSignalSnapshot.Gear gear = (options.showGearAndTurn && gearSupplier != null)
+        VehicleSignalSnapshot.Gear gear = (options.showGear && gearSupplier != null)
                 ? gearSupplier.get()
                 : VehicleSignalSnapshot.Gear.UNKNOWN;
         if (gear == null) {
@@ -393,14 +413,20 @@ public final class VehicleStatusWatermark implements AutoCloseable {
             WatermarkOptions options,
             VehicleStatus status,
             VehicleSignalSnapshot.Gear gear) {
-        if (options == null || !options.showGearAndTurn) {
+        if (options == null || (!options.showGear && !options.showTurnSignal)) {
             return "";
         }
         VehicleStatus safeStatus = status != null ? status : VehicleStatus.UNKNOWN;
-        return "档位 " + formatGear(gear)
-                + "   刹车 " + signalLabel(safeStatus.brake)
-                + "   左 " + signalLabel(safeStatus.left)
-                + "   右 " + signalLabel(safeStatus.right);
+        StringBuilder sb = new StringBuilder();
+        if (options.showGear) {
+            sb.append("档位 ").append(formatGear(gear));
+        }
+        if (options.showTurnSignal) {
+            if (sb.length() > 0) sb.append("   ");
+            sb.append("左 ").append(signalLabel(safeStatus.left))
+                    .append("   右 ").append(signalLabel(safeStatus.right));
+        }
+        return sb.toString();
     }
 
     private static String formatGear(VehicleSignalSnapshot.Gear gear) {
@@ -438,11 +464,10 @@ public final class VehicleStatusWatermark implements AutoCloseable {
         VehicleSignalSnapshot.Gear g = gear != null ? gear : VehicleSignalSnapshot.Gear.UNKNOWN;
         long timePart = options.showDateTime ? epochSecond : 0L;
         String speedPart = options.showSpeed ? String.valueOf(s.speedKmh) : "-";
-        String statusPart = options.showGearAndTurn
-                ? (g.ordinal() + ":" + s.brake + ":" + s.left + ":" + s.right)
-                : "-";
+        String gearPart = options.showGear ? String.valueOf(g.ordinal()) : "-";
+        String turnPart = options.showTurnSignal ? (s.left + ":" + s.right) : "-";
         return timePart + "|" + (options.showCustomText ? options.customText : "")
-                + "|" + speedPart + "|" + statusPart
+                + "|" + speedPart + "|" + gearPart + "|" + turnPart
                 + "|" + options.position.name() + "|" + options.style.name();
     }
 

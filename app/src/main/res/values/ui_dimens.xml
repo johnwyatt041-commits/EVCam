@@ -1,5 +1,5 @@
 <resources>
-    <dimen name="ui_rail_width">80dp</dimen>
+    <dimen name="ui_rail_width">84dp</dimen>
     <dimen name="ui_page_padding">16dp</dimen>
     <dimen name="ui_rail_padding">6dp</dimen>
     <dimen name="ui_rail_brand_height">36dp</dimen>
@@ -11,5 +11,52 @@
     <dimen name="ui_nav_text_size">12sp</dimen>
     <dimen name="ui_nav_icon_size">22dp</dimen>
     <dimen name="ui_nav_icon_gap">4dp</dimen>
+    <dimen name="ui_rail_version_text_size">11sp</dimen>
+
+    <dimen name="ui_top_bar_height">56dp</dimen>
+    <dimen name="ui_top_bar_button_height">40dp</dimen>
+    <dimen name="ui_top_bar_button_padding_h">10dp</dimen>
+    <dimen name="ui_top_bar_button_gap">6dp</dimen>
+    <dimen name="ui_top_bar_group_gap">8dp</dimen>
+    <dimen name="ui_top_bar_button_text_size">13sp</dimen>
+    <dimen name="ui_top_bar_title_text_size">20sp</dimen>
+    <dimen name="ui_top_bar_status_text_size">15sp</dimen>
+
     <dimen name="ui_settings_sidebar_width">196dp</dimen>
+    <dimen name="ui_settings_sidebar_title_size">20sp</dimen>
+    <dimen name="ui_settings_row_height">46dp</dimen>
+    <dimen name="ui_settings_row_gap">6dp</dimen>
+    <dimen name="ui_settings_row_padding_h">12dp</dimen>
+    <dimen name="ui_settings_row_icon_size">18dp</dimen>
+    <dimen name="ui_settings_row_icon_gap">10dp</dimen>
+    <dimen name="ui_settings_row_text_size">15sp</dimen>
+    <dimen name="ui_settings_row_chevron_size">18sp</dimen>
+
+    <dimen name="ui_page_title_text_size">20sp</dimen>
+    <dimen name="ui_toolbar_padding_top">16dp</dimen>
+    <dimen name="ui_toolbar_padding_bottom">10dp</dimen>
+
+    <dimen name="ui_button_height">46dp</dimen>
+    <dimen name="ui_button_min_width">64dp</dimen>
+    <dimen name="ui_button_padding_h">14dp</dimen>
+    <dimen name="ui_button_text_size">15sp</dimen>
+
+    <dimen name="ui_pill_height">38dp</dimen>
+    <dimen name="ui_pill_compact_height">34dp</dimen>
+    <dimen name="ui_pill_padding_h">14dp</dimen>
+    <dimen name="ui_pill_text_size">13sp</dimen>
+
+    <dimen name="ui_tab_button_height">44dp</dimen>
+    <dimen name="ui_tab_button_text_size">14sp</dimen>
+    <dimen name="ui_playback_tab_height">48dp</dimen>
+    <dimen name="ui_playback_tab_text_size">16sp</dimen>
+
+    <dimen name="ui_main_action_button_height">50dp</dimen>
+    <dimen name="ui_main_action_button_min_width">124dp</dimen>
+    <dimen name="ui_editor_button_height">38dp</dimen>
+    <dimen name="ui_editor_button_text_size">13sp</dimen>
+    <dimen name="ui_corner_shortcut_height">38dp</dimen>
+    <dimen name="ui_corner_shortcut_item_height">32dp</dimen>
+    <dimen name="ui_surround_pill_height">38dp</dimen>
+    <dimen name="ui_surround_pill_text_size">13sp</dimen>
 </resources>

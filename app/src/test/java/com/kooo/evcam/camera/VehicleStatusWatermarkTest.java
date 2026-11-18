@@ -18,6 +18,7 @@ public class VehicleStatusWatermarkTest {
                 longText,
                 true,
                 true,
+                true,
                 VehicleStatusWatermark.Position.TOP_LEFT,
                 VehicleStatusWatermark.Style.CARD
         );
@@ -35,7 +36,7 @@ public class VehicleStatusWatermarkTest {
         String line2Unknown = VehicleStatusWatermark.formatSecondLine(
                 opts, VehicleStatus.UNKNOWN, VehicleSignalSnapshot.Gear.UNKNOWN);
         assertTrue(line2Unknown.contains("档位 未知"));
-        assertTrue(line2Unknown.contains("刹车 未知"));
+        assertFalse(line2Unknown.contains("刹车"));
         assertTrue(line2Unknown.contains("左 未知"));
         assertTrue(line2Unknown.contains("右 未知"));
 
@@ -44,15 +45,52 @@ public class VehicleStatusWatermarkTest {
         String line2Active = VehicleStatusWatermark.formatSecondLine(opts, active, VehicleSignalSnapshot.Gear.DRIVE);
         assertTrue(line1Active.contains("车速 68 km/h"));
         assertTrue(line2Active.contains("档位 D"));
-        assertTrue(line2Active.contains("刹车 开"));
+        assertFalse(line2Active.contains("刹车"));
         assertTrue(line2Active.contains("左 开"));
         assertTrue(line2Active.contains("右 关"));
     }
 
     @Test
+    public void gearAndTurnSignalSwitchesWorkIndependentlyWithoutBrake() {
+        VehicleStatus active = new VehicleStatus(52, 1, 1, 0);
+
+        VehicleStatusWatermark.WatermarkOptions gearOnly = new VehicleStatusWatermark.WatermarkOptions(
+                false, false, "", false, true, false,
+                VehicleStatusWatermark.Position.BOTTOM_RIGHT,
+                VehicleStatusWatermark.Style.CARD);
+        assertTrue(gearOnly.hasAnyEnabled());
+        assertTrue(gearOnly.needsVehicleSource());
+        assertEquals("", VehicleStatusWatermark.formatFirstLine(gearOnly, "2026-11-18 19:00:00", active));
+        assertEquals("档位 D", VehicleStatusWatermark.formatSecondLine(gearOnly, active, VehicleSignalSnapshot.Gear.DRIVE));
+
+        VehicleStatusWatermark.WatermarkOptions turnOnly = new VehicleStatusWatermark.WatermarkOptions(
+                false, false, "", false, false, true,
+                VehicleStatusWatermark.Position.BOTTOM_RIGHT,
+                VehicleStatusWatermark.Style.CARD);
+        assertTrue(turnOnly.hasAnyEnabled());
+        assertTrue(turnOnly.needsVehicleSource());
+        assertEquals("", VehicleStatusWatermark.formatFirstLine(turnOnly, "2026-11-18 19:00:00", active));
+        assertEquals("左 开   右 关", VehicleStatusWatermark.formatSecondLine(turnOnly, active, VehicleSignalSnapshot.Gear.DRIVE));
+
+        // Brake transitions must not invalidate cacheKey since brake is excluded from watermark.
+        String kBrakeOff = VehicleStatusWatermark.buildCacheKey(
+                turnOnly, 1000L, new VehicleStatus(52, 0, 1, 0), VehicleSignalSnapshot.Gear.DRIVE);
+        String kBrakeOn = VehicleStatusWatermark.buildCacheKey(
+                turnOnly, 1000L, new VehicleStatus(52, 1, 1, 0), VehicleSignalSnapshot.Gear.DRIVE);
+        assertEquals(kBrakeOff, kBrakeOn);
+
+        String kGearChanged = VehicleStatusWatermark.buildCacheKey(
+                turnOnly, 1000L, active, VehicleSignalSnapshot.Gear.REVERSE);
+        assertEquals(kBrakeOff, kGearChanged);
+        String kTurnChanged = VehicleStatusWatermark.buildCacheKey(
+                turnOnly, 1000L, new VehicleStatus(52, 0, 0, 1), VehicleSignalSnapshot.Gear.DRIVE);
+        assertNotEquals(kBrakeOff, kTurnChanged);
+    }
+
+    @Test
     public void disabledModulesReportNoActiveWatermarkAndNoVehicleLeaseNeed() {
         VehicleStatusWatermark.WatermarkOptions dateOnly = new VehicleStatusWatermark.WatermarkOptions(
-                true, false, "", false, false,
+                true, false, "", false, false, false,
                 VehicleStatusWatermark.Position.BOTTOM_RIGHT,
                 VehicleStatusWatermark.Style.TEXT);
         assertTrue(dateOnly.hasAnyEnabled());
@@ -89,7 +127,7 @@ public class VehicleStatusWatermarkTest {
     @Test
     public void cacheKeyOnlyChangesWhenSecondOrStateOrOptionsChange() {
         VehicleStatusWatermark.WatermarkOptions opts = new VehicleStatusWatermark.WatermarkOptions(
-                true, false, "", true, true,
+                true, false, "", true, true, true,
                 VehicleStatusWatermark.Position.BOTTOM_RIGHT,
                 VehicleStatusWatermark.Style.CARD);
 

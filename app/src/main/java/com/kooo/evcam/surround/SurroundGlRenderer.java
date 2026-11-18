@@ -229,6 +229,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private final AtomicBoolean roadMeshDirty = new AtomicBoolean(true);
     private final AtomicBoolean carBitmapDirty = new AtomicBoolean(true);
     private final AtomicBoolean guidanceDirty = new AtomicBoolean(true);
+    private final Object surfaceReleaseLock = new Object();
+    private volatile boolean rendererAttached = false;
     private volatile boolean released = false;
 
     @Nullable
@@ -266,10 +268,19 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         for (int i = 0; i < 4; i++) {
             Matrix.setIdentityM(texMatrices[i], 0);
         }
-        reloadConfigurationFromPrefs();
+        // Defer requestRender until GLSurfaceView.setRenderer(...) initializes GLThread.
+        reloadConfigurationInternal(false);
+    }
+
+    public void markRendererAttached() {
+        this.rendererAttached = true;
     }
 
     public void reloadConfigurationFromPrefs() {
+        reloadConfigurationInternal(true);
+    }
+
+    private void reloadConfigurationInternal(boolean triggerRender) {
         synchronized (stateLock) {
             this.activeProfile = SurroundCalibrationManager.resolveActiveProfile(appConfig);
             this.wheelsCollapsed = appConfig.isSurroundWheelsCollapsed();
@@ -281,7 +292,9 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             this.carBitmapDirty.set(true);
             this.guidanceDirty.set(true);
         }
-        requestRenderSafe();
+        if (triggerRender) {
+            requestRenderSafe();
+        }
     }
 
     public void updateRenderState(@NonNull SurroundViewMode topMode,
@@ -329,14 +342,19 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     }
 
     public void requestRenderSafe() {
-        if (!released && hostGlView != null) {
-            hostGlView.requestRender();
+        if (!released && rendererAttached && hostGlView != null) {
+            try {
+                hostGlView.requestRender();
+            } catch (NullPointerException | IllegalStateException ignored) {
+                // GLSurfaceView may already be detached or torn down.
+            }
         }
     }
 
     @Override
     public void onSurfaceCreated(GL10 gl, EGLConfig config) {
         released = false;
+        rendererAttached = true;
         GLES20.glClearColor(0.05f, 0.06f, 0.09f, 1.0f);
         GLES20.glDisable(GLES20.GL_DEPTH_TEST);
 
@@ -435,10 +453,11 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                   boolean showGuidance,
                                   float angleDeg,
                                   boolean isReverse) {
-        if (box.isEmpty()) return;
+        if (box.isEmpty() || birdProgram == 0) return;
         ensureBirdMesh(profile);
         uploadCarTextureIfNeeded();
         updateCarQuad(profile);
+        if (birdVertexBuffer == null || birdIndexBuffer == null || birdIndexCount <= 0) return;
 
         GLES20.glViewport(box.left, box.glY(viewportHeight), box.width, box.height);
         GLES20.glUseProgram(birdProgram);
@@ -489,7 +508,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
 
         // 叠绘离线 E5 俯视车模纹理
-        if (carTextureId != 0 && carQuadBuffer != null) {
+        if (carProgram != 0 && carTextureId != 0 && carQuadBuffer != null) {
             GLES20.glEnable(GLES20.GL_BLEND);
             GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
             GLES20.glUseProgram(carProgram);
@@ -572,6 +591,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                int indexCount,
                                int camSlot,
                                @NonNull String camPos) {
+        if (patchProgram == 0 || indexCount <= 0) return;
         GLES20.glUseProgram(patchProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[camSlot]);
@@ -594,7 +614,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     }
 
     private void drawGuidanceBatch(@Nullable FloatBuffer vb, @Nullable int[] stripCounts) {
-        if (vb == null || stripCounts == null || stripCounts.length == 0) return;
+        if (colorProgram == 0 || vb == null || stripCounts == null || stripCounts.length == 0) return;
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
         GLES20.glUseProgram(colorProgram);
@@ -756,10 +776,15 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     /** 退出模式 A 或退后台时释放全部 GL 资源、SurfaceTexture 与 OES 纹理，保证非模式 A 下零驻留。 */
     public void releaseGlResources() {
         released = true;
+        rendererAttached = false;
         releaseSurfacesOnly();
         try {
-            if (oesTextureIds[0] != 0) GLES20.glDeleteTextures(4, oesTextureIds, 0);
-            for (int i = 0; i < 4; i++) oesTextureIds[i] = 0;
+            for (int i = 0; i < 4; i++) {
+                if (oesTextureIds[i] != 0) {
+                    GLES20.glDeleteTextures(1, oesTextureIds, i);
+                    oesTextureIds[i] = 0;
+                }
+            }
             if (carTextureId != 0) {
                 GLES20.glDeleteTextures(1, new int[]{carTextureId}, 0);
                 carTextureId = 0;
@@ -782,23 +807,32 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
     }
 
+    /** 兜底释放 SurfaceTexture/Surface（例如窗口提前分离、GL 线程无法再调度 queueEvent 时）。 */
+    public void releaseSurfacesFallback() {
+        released = true;
+        rendererAttached = false;
+        releaseSurfacesOnly();
+    }
+
     private void releaseSurfacesOnly() {
-        for (int i = 0; i < 4; i++) {
-            frameAvailableFlags[i] = false;
-            if (inputSurfaces[i] != null) {
-                try {
-                    inputSurfaces[i].release();
-                } catch (Exception ignored) {
+        synchronized (surfaceReleaseLock) {
+            for (int i = 0; i < 4; i++) {
+                frameAvailableFlags[i] = false;
+                if (inputSurfaces[i] != null) {
+                    try {
+                        inputSurfaces[i].release();
+                    } catch (Exception ignored) {
+                    }
+                    inputSurfaces[i] = null;
                 }
-                inputSurfaces[i] = null;
-            }
-            if (surfaceTextures[i] != null) {
-                try {
-                    surfaceTextures[i].setOnFrameAvailableListener(null);
-                    surfaceTextures[i].release();
-                } catch (Exception ignored) {
+                if (surfaceTextures[i] != null) {
+                    try {
+                        surfaceTextures[i].setOnFrameAvailableListener(null);
+                        surfaceTextures[i].release();
+                    } catch (Exception ignored) {
+                    }
+                    surfaceTextures[i] = null;
                 }
-                surfaceTextures[i] = null;
             }
         }
     }

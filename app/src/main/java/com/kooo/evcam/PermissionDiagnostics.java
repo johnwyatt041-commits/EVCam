@@ -367,7 +367,7 @@ public final class PermissionDiagnostics {
                 Category.SPECIAL,
                 Priority.RECOMMENDED,
                 "悬浮窗权限",
-                "转向补盲浮窗、独立预览小窗、录制悬浮按钮及 R/D 换挡自动弹出",
+                "转向补盲浮窗、独立预览小窗、录制悬浮按钮及 D 档自动弹出",
                 env.overlayGranted ? Status.GRANTED : Status.DENIED,
                 env.overlayGranted ? "已授权 ✓" : "未授权 - 悬浮窗与后台自动唤醒不可用",
                 env.overlayGranted ? "已授权" : "去授权",

@@ -72,6 +72,8 @@ public final class VhalProtoBatchReader {
                 case 80:
                     availability = (int) r.varint();
                     break;
+                // AOSP VehicleHalProto.proto: repeated sint32 int32_values = 5 (zigzag encoded).
+                // Verified against both EVCam libvhal_decoder.so (0xd70) and Smartcam libvhal_proto_parser.so.
                 case 40: {
                     long v = r.varint();
                     if (integer == null) {

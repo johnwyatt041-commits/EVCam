@@ -177,9 +177,15 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
         btnDeleteSelected.setOnClickListener(v -> deleteSelected());
         btnShareSelected.setOnClickListener(v -> shareSelected());
 
-        btnFilterAll.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_ALL));
-        btnFilterToday.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_TODAY));
-        btnFilterLocked.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_LOCKED));
+        if (btnFilterAll != null) {
+            btnFilterAll.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_ALL));
+        }
+        if (btnFilterToday != null) {
+            btnFilterToday.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_TODAY));
+        }
+        if (btnFilterLocked != null) {
+            btnFilterLocked.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_LOCKED));
+        }
 
         adapter.setOnItemClickListener((group, position) -> loadPhotoGroup(group));
         adapter.setOnItemSelectedListener(group -> updateSelectedCount());

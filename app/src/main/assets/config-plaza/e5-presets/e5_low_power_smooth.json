@@ -71,6 +71,8 @@
         "vehicle_status_watermark": false,
         "watermark_speed_enabled": false,
         "watermark_gear_turn_enabled": false,
+        "watermark_gear_enabled": false,
+        "watermark_turn_signal_enabled": false,
         "watermark_custom_text_enabled": false,
         "video_watermark_position": "BOTTOM_RIGHT",
         "video_watermark_style": "TEXT",
@@ -98,7 +100,6 @@
         "turn_signal_timeout": 8,
         "turn_signal_reuse_main_floating": true,
         "t04_blind_spot_suppress_on_360": true,
-        "blind_spot_status_bar_style": 0,
         "out_mirror_main_back_h": true
       }
     },

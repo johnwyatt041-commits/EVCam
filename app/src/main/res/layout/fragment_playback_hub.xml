@@ -21,11 +21,12 @@
         <Button
             android:id="@+id/btn_tab_video"
             android:layout_width="wrap_content"
-            android:layout_height="48dp"
+            android:layout_height="@dimen/ui_playback_tab_height"
+            android:minHeight="@dimen/ui_playback_tab_height"
             android:minWidth="120dp"
             android:layout_marginEnd="12dp"
             android:text="视频回看"
-            android:textSize="18sp"
+            android:textSize="@dimen/ui_playback_tab_text_size"
             android:fontFamily="sans-serif-medium"
             android:textAllCaps="false"
             android:elevation="0dp" />
@@ -33,10 +34,11 @@
         <Button
             android:id="@+id/btn_tab_photo"
             android:layout_width="wrap_content"
-            android:layout_height="48dp"
+            android:layout_height="@dimen/ui_playback_tab_height"
+            android:minHeight="@dimen/ui_playback_tab_height"
             android:minWidth="120dp"
             android:text="照片回看"
-            android:textSize="18sp"
+            android:textSize="@dimen/ui_playback_tab_text_size"
             android:fontFamily="sans-serif-medium"
             android:textAllCaps="false"
             android:elevation="0dp" />
@@ -49,10 +51,11 @@
         <Button
             android:id="@+id/btn_lan_share"
             android:layout_width="wrap_content"
-            android:layout_height="48dp"
+            android:layout_height="@dimen/ui_playback_tab_height"
+            android:minHeight="@dimen/ui_playback_tab_height"
             android:minWidth="148dp"
             android:text="Wi-Fi 分享到手机"
-            android:textSize="15sp"
+            android:textSize="@dimen/ui_button_text_size"
             android:backgroundTint="@color/button_background"
             android:textColor="@color/button_text"
             android:fontFamily="sans-serif-medium"

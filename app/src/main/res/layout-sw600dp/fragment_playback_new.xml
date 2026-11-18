@@ -163,31 +163,74 @@
         android:orientation="horizontal">
 
         <!-- 左侧：视频列表（权重比例 2:8） -->
-        <FrameLayout
+        <LinearLayout
             android:id="@+id/list_container"
             android:layout_width="0dp"
             android:layout_height="match_parent"
             android:layout_weight="2"
+            android:orientation="vertical"
             android:background="@color/page_background">
 
-            <androidx.recyclerview.widget.RecyclerView
-                android:id="@+id/video_list"
+            <LinearLayout
+                android:id="@+id/filter_bar"
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:padding="4dp"
-                android:clipToPadding="false" />
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:paddingHorizontal="6dp"
+                android:paddingVertical="6dp"
+                android:gravity="center_vertical">
 
-            <!-- 空状态 -->
-            <TextView
-                android:id="@+id/empty_text"
+                <Button
+                    android:id="@+id/btn_filter_all"
+                    style="@style/Widget.EVCam.CompactFilterButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:text="全部" />
+
+                <Button
+                    android:id="@+id/btn_filter_today"
+                    style="@style/Widget.EVCam.CompactFilterButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:layout_marginEnd="4dp"
+                    android:text="今日" />
+
+                <Button
+                    android:id="@+id/btn_filter_locked"
+                    style="@style/Widget.EVCam.CompactFilterButton"
+                    android:layout_width="0dp"
+                    android:layout_height="38dp"
+                    android:layout_weight="1"
+                    android:text="已锁定" />
+            </LinearLayout>
+
+            <FrameLayout
                 android:layout_width="match_parent"
-                android:layout_height="match_parent"
-                android:gravity="center"
-                android:text="暂无录制文件"
-                android:textColor="@color/text_secondary"
-                android:textSize="16sp"
-                android:visibility="gone" />
-        </FrameLayout>
+                android:layout_height="0dp"
+                android:layout_weight="1">
+
+                <androidx.recyclerview.widget.RecyclerView
+                    android:id="@+id/video_list"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:padding="4dp"
+                    android:clipToPadding="false" />
+
+                <!-- 空状态 -->
+                <TextView
+                    android:id="@+id/empty_text"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:gravity="center"
+                    android:text="暂无录制文件"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="16sp"
+                    android:visibility="gone" />
+            </FrameLayout>
+        </LinearLayout>
 
         <!-- 右侧：预览区（权重增大） -->
         <LinearLayout
@@ -410,6 +453,13 @@
                         android:layout_height="match_parent"
                         android:layout_gravity="center" />
 
+                    <TextureView
+                        android:id="@+id/texture_single"
+                        android:layout_width="match_parent"
+                        android:layout_height="match_parent"
+                        android:layout_gravity="center"
+                        android:visibility="gone" />
+
                     <TextView
                         android:id="@+id/label_single"
                         android:layout_width="wrap_content"
@@ -525,6 +575,22 @@
                     android:textSize="16sp"
                     android:backgroundTint="@color/button_background"
                     android:textColor="@color/button_text" />
+
+                <Button
+                    android:id="@+id/btn_lock_toggle"
+                    android:layout_width="wrap_content"
+                    android:layout_height="48dp"
+                    android:minWidth="76dp"
+                    android:layout_marginStart="8dp"
+                    android:text="锁定"
+                    android:textSize="15sp"
+                    android:backgroundTint="@color/button_background"
+                    android:textColor="@color/button_text"
+                    android:minHeight="48dp"
+                    android:elevation="0dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:textAllCaps="false"
+                    android:visibility="gone" />
             </LinearLayout>
         </LinearLayout>
     </LinearLayout>

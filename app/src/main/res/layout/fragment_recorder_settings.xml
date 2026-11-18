@@ -56,47 +56,31 @@
         android:background="@color/page_background">
         <Button
             android:id="@+id/btn_tab_record_31"
+            style="@style/Widget.EVCam.RecorderTab"
             android:layout_width="0dp"
-            android:layout_height="42dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="录制"
-            android:textSize="14sp"
-            android:elevation="0dp"
-            android:fontFamily="sans-serif-medium"
-            android:textAllCaps="false" />
+            android:text="录制" />
         <Button
             android:id="@+id/btn_tab_image_32"
+            style="@style/Widget.EVCam.RecorderTab"
             android:layout_width="0dp"
-            android:layout_height="42dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="画面"
-            android:textSize="14sp"
-            android:elevation="0dp"
-            android:fontFamily="sans-serif-medium"
-            android:textAllCaps="false" />
+            android:text="画面" />
         <Button
             android:id="@+id/btn_tab_display_33"
+            style="@style/Widget.EVCam.RecorderTab"
             android:layout_width="0dp"
-            android:layout_height="42dp"
             android:layout_weight="1"
             android:layout_marginEnd="8dp"
-            android:text="显示"
-            android:textSize="14sp"
-            android:elevation="0dp"
-            android:fontFamily="sans-serif-medium"
-            android:textAllCaps="false" />
+            android:text="显示" />
         <Button
             android:id="@+id/btn_tab_sound_34"
+            style="@style/Widget.EVCam.RecorderTab"
             android:layout_width="0dp"
-            android:layout_height="42dp"
             android:layout_weight="1"
-            android:text="提示音"
-            android:textSize="14sp"
-            android:elevation="0dp"
-            android:fontFamily="sans-serif-medium"
-            android:textAllCaps="false" />
+            android:text="提示音" />
     </LinearLayout>
 
     <ScrollView
@@ -159,8 +143,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="自定义界面配置"
-                    android:textSize="16sp"
-                    android:minHeight="48dp"
                     android:backgroundTint="@color/button_background"
                     android:textColor="@color/button_text"
                     android:layout_marginBottom="16dp"
@@ -342,8 +324,6 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:text="进入 →"
-                        android:textSize="16sp"
-                        android:minHeight="48dp"
                         android:backgroundTint="@color/button_background"
                         android:textColor="@color/button_text"
                         android:elevation="0dp"
@@ -467,8 +447,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="检测存储设备"
-                    android:textSize="16sp"
-                    android:minHeight="48dp"
                     android:backgroundTint="@color/button_background"
                     android:textColor="@color/button_text"
                     android:layout_marginBottom="16dp"
@@ -814,7 +792,7 @@
                         android:layout_marginStart="16dp" />
                 </LinearLayout>
 
-                <!-- T06: 3.1 R/D 换挡自动弹出记录仪并在 X 秒后自动退后台 -->
+                <!-- T06/包D: 3.1 前进档（D 档）自动弹出记录仪并在 X 秒后自动退后台 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -835,14 +813,14 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="R/D 换挡自动弹出记录仪"
+                                android:text="前进档（D 档）自动弹出记录仪"
                                 android:textColor="@color/text_primary"
                                 android:textSize="18sp"
                                 android:fontFamily="sans-serif-medium" />
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="后台驻留期间挂入 R 或 D 挡（250ms 去抖）自动弹出记录仪画面，倒计时结束后自动退后台；切换页面或操作立即取消自动退后台"
+                                android:text="后台驻留期间从其他档位挂入前进档（D 档，250ms 去抖）自动弹出记录仪画面，倒计时结束后自动退后台；切换页面或操作立即取消自动退后台（倒车档 R 不触发）"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="15sp"
                                 android:layout_marginTop="4dp" />
@@ -1218,8 +1196,6 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="恢复默认画面参数"
-                    android:textSize="15sp"
-                    android:minHeight="48dp"
                     android:backgroundTint="@color/button_background"
                     android:textColor="@color/button_text"
                     android:elevation="0dp"
@@ -1270,7 +1246,7 @@
                         android:layout_marginStart="16dp" />
                 </LinearLayout>
 
-                <!-- 4 模块水印卡片 -->
+                <!-- 独立开关视频水印卡片（时间 / 车速 / 档位 / 转向灯 + 自定义文字） -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -1284,7 +1260,14 @@
                         android:text="视频水印（单纹理合并层 · 按秒刷新）"
                         android:textColor="@color/text_primary"
                         android:textSize="18sp"
-                        android:fontFamily="sans-serif-medium"
+                        android:fontFamily="sans-serif-medium" />
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="四项可独立开关，默认全部关闭；车机未推送对应信号时显示未知或 --"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13sp"
+                        android:layout_marginTop="4dp"
                         android:layout_marginBottom="12dp" />
 
                     <LinearLayout
@@ -1292,7 +1275,7 @@
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
                         android:gravity="center_vertical"
-                        android:layout_marginBottom="12dp">
+                        android:layout_marginBottom="10dp">
                         <LinearLayout
                             android:layout_width="0dp"
                             android:layout_height="wrap_content"
@@ -1301,7 +1284,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="日期与时间"
+                                android:text="时间（日期与时间）"
                                 android:textColor="@color/text_primary"
                                 android:textSize="16sp" />
                             <TextView
@@ -1313,6 +1296,99 @@
                         </LinearLayout>
                         <com.google.android.material.switchmaterial.SwitchMaterial
                             android:id="@+id/switch_timestamp_watermark"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="车速 (km/h)"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="显示当前车速（km/h）"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_watermark_speed"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="档位"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="显示 P / R / N / D 挡位状态"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_watermark_gear"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:layout_marginStart="16dp" />
+                    </LinearLayout>
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="转向灯"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp" />
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="显示左 / 右转向灯开关状态"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+                        </LinearLayout>
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_watermark_turn_signal"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
                             android:layout_marginStart="16dp" />
@@ -1352,60 +1428,6 @@
                         android:paddingStart="12dp"
                         android:paddingEnd="12dp"
                         android:layout_marginBottom="12dp" />
-
-                    <LinearLayout
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:gravity="center_vertical"
-                        android:layout_marginBottom="8dp">
-                        <LinearLayout
-                            android:layout_width="0dp"
-                            android:layout_height="wrap_content"
-                            android:layout_weight="1"
-                            android:orientation="vertical">
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="录像车辆状态水印"
-                                android:textColor="@color/text_primary"
-                                android:textSize="16sp" />
-                            <TextView
-                                android:layout_width="wrap_content"
-                                android:layout_height="wrap_content"
-                                android:text="默认关闭；未收到车机有效信号时显示未知"
-                                android:textColor="@color/text_secondary"
-                                android:textSize="13sp" />
-                        </LinearLayout>
-                        <com.google.android.material.switchmaterial.SwitchMaterial
-                            android:id="@+id/switch_vehicle_status_watermark"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:layout_marginStart="16dp" />
-                    </LinearLayout>
-
-                    <LinearLayout
-                        android:id="@+id/layout_watermark_vehicle_suboptions"
-                        android:layout_width="match_parent"
-                        android:layout_height="wrap_content"
-                        android:orientation="horizontal"
-                        android:layout_marginBottom="12dp">
-                        <CheckBox
-                            android:id="@+id/cb_watermark_speed"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="车速 (km/h)"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp"
-                            android:layout_marginEnd="16dp" />
-                        <CheckBox
-                            android:id="@+id/cb_watermark_gear_turn"
-                            android:layout_width="wrap_content"
-                            android:layout_height="wrap_content"
-                            android:text="档位 / 刹车 / 转向"
-                            android:textColor="@color/text_primary"
-                            android:textSize="14sp" />
-                    </LinearLayout>
 
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -1747,21 +1769,20 @@
                         <Button
                             android:id="@+id/btn_pick_start_sound"
                             android:layout_width="0dp"
-                            android:layout_height="44dp"
+                            android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:layout_marginEnd="10dp"
                             android:text="从 Download 选择音频"
-                            android:textSize="14sp"
                             android:backgroundTint="@color/button_background"
                             android:textColor="@color/button_text"
                             android:elevation="0dp"
                             android:textAllCaps="false" />
                         <Button
                             android:id="@+id/btn_test_start_sound"
-                            android:layout_width="96dp"
-                            android:layout_height="44dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="@dimen/ui_button_min_width"
                             android:text="试听"
-                            android:textSize="14sp"
                             android:backgroundTint="@color/button_accent"
                             android:textColor="@color/ui_on_accent"
                             android:elevation="0dp"
@@ -1819,21 +1840,20 @@
                         <Button
                             android:id="@+id/btn_pick_stop_sound"
                             android:layout_width="0dp"
-                            android:layout_height="44dp"
+                            android:layout_height="wrap_content"
                             android:layout_weight="1"
                             android:layout_marginEnd="10dp"
                             android:text="从 Download 选择音频"
-                            android:textSize="14sp"
                             android:backgroundTint="@color/button_background"
                             android:textColor="@color/button_text"
                             android:elevation="0dp"
                             android:textAllCaps="false" />
                         <Button
                             android:id="@+id/btn_test_stop_sound"
-                            android:layout_width="96dp"
-                            android:layout_height="44dp"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:minWidth="@dimen/ui_button_min_width"
                             android:text="试听"
-                            android:textSize="14sp"
                             android:backgroundTint="@color/button_accent"
                             android:textColor="@color/ui_on_accent"
                             android:elevation="0dp"

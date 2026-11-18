@@ -103,12 +103,17 @@ public final class SurroundLayoutCalculator {
         int innerW = Math.max(120, containerWidth - outerPad * 2);
         int innerH = Math.max(120, containerHeight - outerPad * 2);
 
-        // 根据实际地面覆盖物理长宽比推导左侧 360 鸟瞰区宽度，并约束在总宽度的 31% ~ 42% 之间
-        int effectiveLengthCm = Math.max(420, groundLengthCm) + Math.max(0, groundFrontExtensionCm);
-        float birdWorldAspect = (float) Math.max(160, groundWidthCm) / (float) effectiveLengthCm;
-        int idealBirdWidth = Math.round(innerH * birdWorldAspect * 1.18f);
-        int minBirdWidth = Math.round(innerW * 0.31f);
-        int maxBirdWidth = Math.round(innerW * 0.42f);
+        // 根据包含车周路面边距的实际视场物理长宽比推导左侧 360 鸟瞰区宽度，并约束在总宽度的 30% ~ 39% 之间
+        double effectiveWidthCm = Math.max(160, groundWidthCm)
+                + SurroundCalibrationProfile.BIRD_SIDE_MARGIN_CM * 2.0;
+        double effectiveLengthCm = Math.max(420, groundLengthCm)
+                + SurroundCalibrationProfile.BIRD_REAR_MARGIN_CM
+                + SurroundCalibrationProfile.BIRD_FRONT_MARGIN_CM
+                + Math.max(0, groundFrontExtensionCm);
+        float birdWorldAspect = (float) (effectiveWidthCm / effectiveLengthCm);
+        int idealBirdWidth = Math.round(innerH * birdWorldAspect);
+        int minBirdWidth = Math.round(innerW * 0.30f);
+        int maxBirdWidth = Math.round(innerW * 0.39f);
         int birdWidth = Math.max(minBirdWidth, Math.min(maxBirdWidth, idealBirdWidth));
 
         ViewportBox birdBox = new ViewportBox(outerPad, outerPad, birdWidth, innerH);
@@ -124,8 +129,8 @@ public final class SurroundLayoutCalculator {
                     birdBox, topBox, collapsedBar, empty, empty, empty, true, effectiveBottomMode);
         }
 
-        // 右侧上下分割：上方道路视角占 56%，下方轮位/侧视区占 44%
-        int topHeight = Math.round((innerH - gap) * 0.56f);
+        // 右侧上下分割：上方道路视角占 55%，下方轮位/侧视区占 45%
+        int topHeight = Math.round((innerH - gap) * 0.55f);
         int bottomTop = outerPad + topHeight + gap;
         int bottomHeight = Math.max(60, outerPad + innerH - bottomTop);
 
@@ -142,8 +147,8 @@ public final class SurroundLayoutCalculator {
                     birdBox, topBox, bottomBand, leftSide, centerEmpty, rightSide, false, effectiveBottomMode);
         }
 
-        // 前轮 / 后轮三列切分：左轮 | 中央切换控卡 | 右轮
-        int centerCardW = Math.max(96, Math.min(Math.round(rightWidth * 0.24f), 196));
+        // 前轮 / 后轮三列切分：左轮 | 中央切换控卡 | 右轮（中央控卡保持紧凑宽度，给两侧轮位留足视口）
+        int centerCardW = Math.max(104, Math.min(Math.round(rightWidth * 0.16f), 168));
         int wheelWidth = Math.max(40, (rightWidth - centerCardW - gap * 2) / 2);
         ViewportBox leftWheel = new ViewportBox(rightLeft, bottomTop, wheelWidth, bottomHeight);
         int centerLeft = leftWheel.right() + gap;

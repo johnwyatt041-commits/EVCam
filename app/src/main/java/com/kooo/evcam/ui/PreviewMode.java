@@ -9,7 +9,8 @@ package com.kooo.evcam.ui;
 public enum PreviewMode {
     MODE_B("mode_b", "分栏 B"),
     MODE_C("mode_c", "三路 C"),
-    MODE_A("mode_a", "360 A");
+    MODE_A("mode_a", "360 A"),
+    MODE_D("mode_d", "模式 D");
 
     public final String key;
     public final String label;
@@ -20,8 +21,11 @@ public enum PreviewMode {
     }
 
     public static PreviewMode fromKey(String key) {
-        if (MODE_C.key.equals(key)) return MODE_C;
-        if (MODE_A.key.equals(key)) return MODE_A;
+        for (PreviewMode mode : values()) {
+            if (mode.key.equals(key)) {
+                return mode;
+            }
+        }
         return MODE_B;
     }
 }

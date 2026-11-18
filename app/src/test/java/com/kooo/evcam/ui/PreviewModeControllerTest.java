@@ -1,7 +1,6 @@
 package com.kooo.evcam.ui;
 
 import com.kooo.evcam.AppConfig;
-import com.kooo.evcam.vehicle.VehicleSignalSnapshot.Gear;
 
 import org.junit.Test;
 
@@ -14,39 +13,44 @@ import static org.junit.Assert.*;
 public class PreviewModeControllerTest {
 
     @Test
-    public void modeCPrimaryResolvesReverseToBackAndOtherGearsToFront() {
-        assertEquals(PreviewLayoutModel.BACK,
-                PreviewModeController.resolveDefaultPrimaryForGear(Gear.REVERSE));
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveDefaultPrimaryForGear(Gear.DRIVE));
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveDefaultPrimaryForGear(Gear.PARK));
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveDefaultPrimaryForGear(Gear.NEUTRAL));
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveDefaultPrimaryForGear(Gear.UNKNOWN));
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveDefaultPrimaryForGear(null));
+    public void modeDSideCameraSwitchesLeftAndRightWithDeadbandHysteresis() {
+        // Negative steering angle -> left turn -> LEFT camera
+        assertEquals(PreviewLayoutModel.LEFT,
+                PreviewModeController.resolveModeDSideCamera(-5.0f, PreviewLayoutModel.RIGHT,
+                        PreviewModeController.MODE_D_STEER_DEADBAND_DEG));
+        // Positive steering angle -> right turn -> RIGHT camera
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCamera(4.5f, PreviewLayoutModel.LEFT,
+                        PreviewModeController.MODE_D_STEER_DEADBAND_DEG));
+        // Inside deadband (-1.2, +1.2) -> preserves current side to avoid flicker
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCamera(0.4f, PreviewLayoutModel.RIGHT,
+                        PreviewModeController.MODE_D_STEER_DEADBAND_DEG));
+        assertEquals(PreviewLayoutModel.LEFT,
+                PreviewModeController.resolveModeDSideCamera(-0.8f, PreviewLayoutModel.LEFT,
+                        PreviewModeController.MODE_D_STEER_DEADBAND_DEG));
+        // NaN/Infinity safety falls back to valid side
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCamera(Float.NaN, PreviewLayoutModel.RIGHT,
+                        PreviewModeController.MODE_D_STEER_DEADBAND_DEG));
     }
 
     @Test
-    public void manualSwapOverrideAppliesOnlyUntilGearChanges() {
-        // User manually peeks at rear while in DRIVE.
-        assertEquals(PreviewLayoutModel.BACK,
-                PreviewModeController.resolveEffectiveModeCPrimary(
-                        Gear.DRIVE, Gear.DRIVE, PreviewLayoutModel.BACK));
-        // Shifting into REVERSE follows REVERSE rule.
-        assertEquals(PreviewLayoutModel.BACK,
-                PreviewModeController.resolveEffectiveModeCPrimary(
-                        Gear.REVERSE, null, null));
-        // Even if stale override from PARK lingered, shifting to DRIVE resets to FRONT.
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveEffectiveModeCPrimary(
-                        Gear.DRIVE, Gear.PARK, PreviewLayoutModel.BACK));
-        // User manually peeks at front while in REVERSE.
-        assertEquals(PreviewLayoutModel.FRONT,
-                PreviewModeController.resolveEffectiveModeCPrimary(
-                        Gear.REVERSE, Gear.REVERSE, PreviewLayoutModel.FRONT));
+    public void modeDSteeringSubscriptionRunsOnlyInForegroundWithMainPreviewEnabled() {
+        assertTrue(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_D, true, true));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_D, false, true));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_D, true, false));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_C, true, true));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_B, true, true));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(PreviewMode.MODE_A, true, true));
+    }
+
+    @Test
+    public void modeAOffPreviewShowsDisabledGuideInsteadOfFallingBackToModeB() {
+        assertTrue(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_A, false));
+        assertFalse(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_A, true));
+        assertFalse(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_B, false));
+        assertFalse(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_D, false));
     }
 
     @Test
@@ -89,16 +93,23 @@ public class PreviewModeControllerTest {
     @Test
     public void modeAActivatesGlOnlyWhenHostEligibleAndMainPreviewEnabled() {
         assertEquals(PreviewMode.MODE_A, PreviewModeController.normalizeSupportedMode(PreviewMode.MODE_A));
+        assertEquals(PreviewMode.MODE_D, PreviewModeController.normalizeSupportedMode(PreviewMode.MODE_D));
         assertEquals(PreviewMode.MODE_B, PreviewModeController.normalizeSupportedMode(null));
 
         assertTrue(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, true, true));
         assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_B, true, true));
         assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_C, true, true));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_D, true, true));
         assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, false, true));
         assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_A, true, false));
 
         assertTrue(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, true));
         assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, false));
         assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_B, true));
+
+        // Mode A visibility mask is deferred until GLThread finishes creating surround OES surfaces.
+        assertTrue(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(true, false));
+        assertFalse(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(true, true));
+        assertFalse(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(false, false));
     }
 }

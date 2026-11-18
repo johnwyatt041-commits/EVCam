@@ -62,6 +62,8 @@ public final class SurroundModeAView extends FrameLayout {
     private GLSurfaceView glSurfaceView;
     @Nullable
     private SurroundGlRenderer glRenderer;
+    @Nullable
+    private SurroundGlRenderer pendingTeardownRenderer;
 
     private volatile boolean active = false;
     private volatile boolean surfacesReady = false;
@@ -129,7 +131,7 @@ public final class SurroundModeAView extends FrameLayout {
         this.appConfig = new AppConfig(context);
         this.density = getResources().getDisplayMetrics().density;
         this.gapPx = Math.max(6, dp(10));
-        setBackgroundColor(Color.parseColor("#0D1017"));
+        setBackgroundColor(Color.parseColor("#0B0F17"));
 
         this.overlayRoot = new FrameLayout(context);
         this.overlayRoot.setLayoutParams(new LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.MATCH_PARENT));
@@ -138,15 +140,19 @@ public final class SurroundModeAView extends FrameLayout {
         this.topDetailOverlay = createPaneContainer(context);
         this.tvTopBadge = createBadgeText(context, "前视 · 随档位");
         LayoutParams topBadgeLp = new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.WRAP_CONTENT, Gravity.TOP | Gravity.START);
-        topBadgeLp.setMargins(dp(12), dp(12), dp(12), dp(12));
+        topBadgeLp.setMargins(dp(14), dp(12), dp(14), dp(12));
         topDetailOverlay.addView(tvTopBadge, topBadgeLp);
+
+        int pillHeightPx = Math.max(dp(38),
+                getResources().getDimensionPixelSize(R.dimen.ui_surround_pill_height));
+        int pillRadiusPx = Math.max(dp(19), pillHeightPx / 2);
 
         this.topButtonsGroup = new LinearLayout(context);
         topButtonsGroup.setOrientation(LinearLayout.HORIZONTAL);
         topButtonsGroup.setPadding(dp(4), dp(4), dp(4), dp(4));
-        topButtonsGroup.setBackground(createCapsuleBg(0xB8111622, dp(16), 0x4DFFFFFF));
-        LayoutParams topBtnsLp = new LayoutParams(LayoutParams.WRAP_CONTENT, dp(34), Gravity.TOP | Gravity.END);
-        topBtnsLp.setMargins(dp(12), dp(12), dp(12), dp(12));
+        topButtonsGroup.setBackground(createCapsuleBg(0xCC111824, pillRadiusPx, 0x66FFFFFF));
+        LayoutParams topBtnsLp = new LayoutParams(LayoutParams.WRAP_CONTENT, pillHeightPx, Gravity.TOP | Gravity.END);
+        topBtnsLp.setMargins(dp(14), dp(12), dp(14), dp(12));
 
         this.btnTopFront = createSwitchPill(context, "前视", v -> {
             manualTopOverride = SurroundViewMode.FRONT;
@@ -169,9 +175,13 @@ public final class SurroundModeAView extends FrameLayout {
             appConfig.setSurroundWheelsCollapsed(false);
             refreshLayoutAndRenderState();
         });
-        btnWheelExpandFloating.setBackground(createCapsuleBg(0xCC111622, dp(14), 0x4DFFFFFF));
-        LayoutParams expandLp = new LayoutParams(LayoutParams.WRAP_CONTENT, dp(30), Gravity.BOTTOM | Gravity.END);
-        expandLp.setMargins(dp(12), dp(12), dp(12), dp(12));
+        btnWheelExpandFloating.setMinWidth(dp(96));
+        btnWheelExpandFloating.setPadding(dp(14), dp(6), dp(14), dp(6));
+        btnWheelExpandFloating.setBackground(createCapsuleBg(0xD8111824, pillRadiusPx, 0x66FFFFFF));
+        btnWheelExpandFloating.setTextColor(Color.WHITE);
+        btnWheelExpandFloating.setTypeface(null, Typeface.BOLD);
+        LayoutParams expandLp = new LayoutParams(LayoutParams.WRAP_CONTENT, pillHeightPx, Gravity.BOTTOM | Gravity.END);
+        expandLp.setMargins(dp(14), dp(14), dp(14), dp(14));
         topDetailOverlay.addView(btnWheelExpandFloating, expandLp);
 
         // ---- 右下左轮/左侧视叠加层 ----
@@ -192,8 +202,8 @@ public final class SurroundModeAView extends FrameLayout {
         this.bottomCenterCard = new LinearLayout(context);
         bottomCenterCard.setOrientation(LinearLayout.VERTICAL);
         bottomCenterCard.setGravity(Gravity.CENTER);
-        bottomCenterCard.setPadding(dp(10), dp(10), dp(10), dp(10));
-        bottomCenterCard.setBackground(createCapsuleBg(0xE6141923, dp(14), 0x33FFFFFF));
+        bottomCenterCard.setPadding(dp(8), dp(8), dp(8), dp(8));
+        bottomCenterCard.setBackground(createCapsuleBg(0xEC141923, dp(14), 0x4DFFFFFF));
 
         this.btnWheelFront = createCenterWheelBtn(context, "前轮", v -> {
             manualBottomOverride = SurroundViewMode.FRONT_WHEELS;
@@ -280,6 +290,7 @@ public final class SurroundModeAView extends FrameLayout {
                     }
                 }));
         glView.setRenderer(renderer);
+        renderer.markRendererAttached();
         glView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);
 
         this.glSurfaceView = glView;
@@ -315,6 +326,12 @@ public final class SurroundModeAView extends FrameLayout {
 
     /** 退出模式 A、打开全屏他页或退后台时立即解绑相机 Surface 并销毁 GL 上下文。 */
     public void deactivateModeA(@Nullable MultiCameraManager cameraManager) {
+        deactivateModeA(cameraManager, null);
+    }
+
+    /** 退出模式 A、打开全屏他页或退后台时立即解绑相机 Surface，延迟销毁 GL 上下文后执行收尾回调。 */
+    public void deactivateModeA(@Nullable MultiCameraManager cameraManager,
+                                @Nullable Runnable afterTeardown) {
         MultiCameraManager targetManager = cameraManager != null ? cameraManager : this.boundCameraManager;
         if (targetManager != null) {
             targetManager.clearSurroundPreviewSurfaces();
@@ -328,6 +345,9 @@ public final class SurroundModeAView extends FrameLayout {
         cachedLeftSt = null;
         cachedRightSt = null;
         if (!active && glSurfaceView == null) {
+            if (afterTeardown != null) {
+                afterTeardown.run();
+            }
             return;
         }
         active = false;
@@ -339,16 +359,25 @@ public final class SurroundModeAView extends FrameLayout {
         final SurroundGlRenderer rendererToRelease = this.glRenderer;
         this.glSurfaceView = null;
         this.glRenderer = null;
+        this.pendingTeardownRenderer = rendererToRelease;
 
         if (viewToRelease != null) {
             mainHandler.postDelayed(() -> {
+                if (pendingTeardownRenderer == rendererToRelease) {
+                    pendingTeardownRenderer = null;
+                }
                 if (rendererToRelease != null) {
                     viewToRelease.queueEvent(rendererToRelease::releaseGlResources);
                 }
                 viewToRelease.onPause();
                 removeView(viewToRelease);
                 AppLog.i(TAG, "Mode A 360 GL context destroyed cleanly");
+                if (afterTeardown != null) {
+                    afterTeardown.run();
+                }
             }, TEARDOWN_SURFACE_DELAY_MS);
+        } else if (afterTeardown != null) {
+            afterTeardown.run();
         }
     }
 
@@ -393,6 +422,15 @@ public final class SurroundModeAView extends FrameLayout {
     @Override
     protected void onDetachedFromWindow() {
         releaseSteeringAngleSubscription();
+        SurroundGlRenderer current = this.glRenderer;
+        if (current != null) {
+            current.releaseSurfacesFallback();
+        }
+        SurroundGlRenderer pending = this.pendingTeardownRenderer;
+        if (pending != null) {
+            pending.releaseSurfacesFallback();
+            this.pendingTeardownRenderer = null;
+        }
         super.onDetachedFromWindow();
     }
 
@@ -412,7 +450,8 @@ public final class SurroundModeAView extends FrameLayout {
         boolean wheelsCollapsed = appConfig.isSurroundWheelsCollapsed();
         boolean stretchRoad = appConfig.isSurroundStretchRoadViews();
         boolean guidanceEnabled = appConfig.isPreviewGuidanceEnabled();
-        boolean showOverlayButtons = appConfig.isSurroundOverlayButtonsVisible();
+        boolean showOverlayButtons = appConfig.isPreviewViewShortcutsEnabled()
+                && appConfig.isSurroundOverlayButtonsVisible();
 
         SurroundViewMode effTop = SurroundViewMode.resolveEffectiveTopView(
                 configuredTop, inReverseGear, manualTopOverride);
@@ -446,6 +485,7 @@ public final class SurroundModeAView extends FrameLayout {
         styleCenterWheelBtn(btnWheelFront, effBottom == SurroundViewMode.FRONT_WHEELS);
         styleCenterWheelBtn(btnWheelRear, effBottom == SurroundViewMode.REAR_WHEELS);
         styleCenterWheelBtn(btnWheelSides, effBottom == SurroundViewMode.SIDES);
+        styleCenterWheelBtn(btnWheelCollapse, false);
 
         if (glRenderer != null) {
             glRenderer.updateRenderState(
@@ -523,7 +563,7 @@ public final class SurroundModeAView extends FrameLayout {
         tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         tv.setTypeface(null, Typeface.BOLD);
         tv.setPadding(dp(10), dp(5), dp(10), dp(5));
-        tv.setBackground(createCapsuleBg(0xB00F141E, dp(10), 0x30FFFFFF));
+        tv.setBackground(createCapsuleBg(0xBF0F141E, dp(10), 0x40FFFFFF));
         return tv;
     }
 
@@ -532,9 +572,10 @@ public final class SurroundModeAView extends FrameLayout {
                                     @NonNull OnClickListener clickListener) {
         TextView tv = new TextView(context);
         tv.setText(label);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.ui_surround_pill_text_size));
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(10), dp(4), dp(10), dp(4));
+        tv.setPadding(dp(12), dp(4), dp(12), dp(4));
         tv.setClickable(true);
         tv.setFocusable(true);
         tv.setOnClickListener(clickListener);
@@ -550,27 +591,29 @@ public final class SurroundModeAView extends FrameLayout {
                                           @NonNull OnClickListener clickListener) {
         TextView tv = new TextView(context);
         tv.setText(label);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(10), dp(6), dp(10), dp(6));
+        tv.setMinHeight(dp(32));
+        tv.setPadding(dp(8), dp(4), dp(8), dp(4));
         tv.setClickable(true);
         tv.setFocusable(true);
         tv.setOnClickListener(clickListener);
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT);
-        lp.bottomMargin = dp(6);
+                LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f);
+        lp.topMargin = dp(3);
+        lp.bottomMargin = dp(3);
         tv.setLayoutParams(lp);
         return tv;
     }
 
     private void styleSwitchPillSelection(@NonNull TextView tv, boolean selected) {
         if (selected) {
-            tv.setBackground(createCapsuleBg(ContextCompat.getColor(getContext(), R.color.button_accent), dp(12), 0));
+            tv.setBackground(createCapsuleBg(ContextCompat.getColor(getContext(), R.color.button_accent), dp(15), 0));
             tv.setTextColor(ContextCompat.getColor(getContext(), R.color.ui_on_accent));
             tv.setTypeface(null, Typeface.BOLD);
         } else {
             tv.setBackground(null);
-            tv.setTextColor(0xFFE2E8F0);
+            tv.setTextColor(Color.WHITE);
             tv.setTypeface(null, Typeface.NORMAL);
         }
     }
@@ -581,8 +624,8 @@ public final class SurroundModeAView extends FrameLayout {
             tv.setTextColor(ContextCompat.getColor(getContext(), R.color.ui_on_accent));
             tv.setTypeface(null, Typeface.BOLD);
         } else {
-            tv.setBackground(createCapsuleBg(0xFF1F2735, dp(10), 0x26FFFFFF));
-            tv.setTextColor(0xFFE2E8F0);
+            tv.setBackground(createCapsuleBg(0xFF242E40, dp(10), 0x40FFFFFF));
+            tv.setTextColor(Color.WHITE);
             tv.setTypeface(null, Typeface.NORMAL);
         }
     }

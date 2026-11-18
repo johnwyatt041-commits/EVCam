@@ -17,13 +17,13 @@
             android:id="@+id/tv_settings_sidebar_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:paddingStart="20dp"
+            android:paddingStart="@dimen/ui_page_padding"
             android:paddingEnd="16dp"
-            android:paddingTop="18dp"
-            android:paddingBottom="12dp"
+            android:paddingTop="@dimen/ui_toolbar_padding_top"
+            android:paddingBottom="@dimen/ui_toolbar_padding_bottom"
             android:text="设置"
             android:textColor="@color/text_primary"
-            android:textSize="22sp"
+            android:textSize="@dimen/ui_settings_sidebar_title_size"
             android:fontFamily="sans-serif-medium" />
 
         <ScrollView

@@ -24,6 +24,8 @@ import androidx.fragment.app.FragmentTransaction;
 import com.kooo.evcam.ui.AppearanceSettingsFragment;
 import com.kooo.evcam.ui.SettingsCatalog;
 import com.kooo.evcam.ui.SettingsCatalog.Entry;
+import com.kooo.evcam.ui.UiScaleController;
+import com.kooo.evcam.ui.UiScaleHelper;
 import com.kooo.evcam.ui.UiThemeController;
 
 import java.util.HashMap;
@@ -33,7 +35,8 @@ import java.util.Map;
  * SC 风格双栏设置页（Master-Detail）：
  * 左侧分类栏固定展示已实装分类，右侧容器原地呈现当前选中分类的详情页与二级子页。
  */
-public class SettingsFragment extends Fragment implements UiThemeController.ThemeAware {
+public class SettingsFragment extends Fragment
+        implements UiThemeController.ThemeAware, UiScaleController.ScaleAware {
     private static final String ARG_INITIAL_CATEGORY = "initial_category";
     private static final String STATE_ACTIVE_CATEGORY = "active_category";
 
@@ -80,6 +83,7 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
 
         buildCatalogSidebar(inflater.getContext());
         applySidebarTheme(inflater.getContext());
+        applySidebarScale(inflater.getContext(), UiScaleController.getSavedScaleFactor(inflater.getContext()));
 
         if (savedInstanceState == null
                 || getChildFragmentManager().findFragmentById(R.id.settings_detail_container) == null) {
@@ -98,6 +102,17 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
         applySidebarTheme(themedContext);
+    }
+
+    @Override
+    public void onUiScaleApplied(float scaleFactor) {
+        Context context = getContext();
+        if (context == null || getView() == null) return;
+        applySidebarScale(context, scaleFactor);
+        for (Fragment child : getChildFragmentManager().getFragments()) {
+            if (child == null || child.getView() == null) continue;
+            applyToolbarScale(child.getView(), scaleFactor);
+        }
     }
 
     /** 切换当前高亮分类并加载对应的详情 Fragment。 */
@@ -169,8 +184,8 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
         View toolbar = root.findViewById(R.id.toolbar);
         if (toolbar == null) return;
         Context ctx = root.getContext();
+        float scale = UiScaleController.getSavedScaleFactor(ctx);
         toolbar.setBackgroundColor(ContextCompat.getColor(ctx, R.color.page_background));
-        toolbar.setPadding(dpStatic(ctx, 20), dpStatic(ctx, 18), dpStatic(ctx, 20), dpStatic(ctx, 10));
 
         hideButton(root.findViewById(R.id.btn_back));
         hideButton(root.findViewById(R.id.btn_menu));
@@ -180,11 +195,11 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
             TextView heading = findFirstHeadingText((ViewGroup) toolbar);
             if (heading != null) {
                 heading.setText(cleanTitle);
-                heading.setTextSize(TypedValue.COMPLEX_UNIT_SP, 22);
                 heading.setTypeface(null, Typeface.BOLD);
                 heading.setTextColor(ContextCompat.getColor(ctx, R.color.text_primary));
             }
         }
+        applyToolbarScale(root, scale);
     }
 
     /** 在双栏详情容器中显示的二级子页，保留返回按钮并隐藏多余的菜单/主页按钮。 */
@@ -198,7 +213,29 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
         if (toolbar != null) {
             Context ctx = root.getContext();
             toolbar.setBackgroundColor(ContextCompat.getColor(ctx, R.color.page_background));
-            toolbar.setPadding(dpStatic(ctx, 16), dpStatic(ctx, 14), dpStatic(ctx, 20), dpStatic(ctx, 10));
+            applyToolbarScale(root, UiScaleController.getSavedScaleFactor(ctx));
+        }
+    }
+
+    private static void applyToolbarScale(@Nullable View root, float scaleFactor) {
+        if (root == null) return;
+        View toolbar = root.findViewById(R.id.toolbar);
+        if (toolbar == null) return;
+        Context ctx = root.getContext();
+        int padH = UiScaleHelper.dimPx(ctx, R.dimen.ui_page_padding, scaleFactor);
+        int padTop = UiScaleHelper.dimPx(ctx, R.dimen.ui_toolbar_padding_top, scaleFactor);
+        int padBottom = UiScaleHelper.dimPx(ctx, R.dimen.ui_toolbar_padding_bottom, scaleFactor);
+        toolbar.setPadding(padH, padTop, padH, padBottom);
+        if (toolbar instanceof ViewGroup) {
+            View backBtn = root.findViewById(R.id.btn_back);
+            boolean isEmbeddedTopPage = (backBtn == null || backBtn.getVisibility() == View.GONE);
+            if (isEmbeddedTopPage) {
+                TextView heading = findFirstHeadingText((ViewGroup) toolbar);
+                if (heading != null) {
+                    heading.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                            UiScaleHelper.dimFloat(ctx, R.dimen.ui_page_title_text_size, scaleFactor));
+                }
+            }
         }
     }
 
@@ -231,11 +268,14 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
         titleViews.clear();
         chevronViews.clear();
 
-        int rowHeight = dpStatic(context, 46);
-        int rowGap = dpStatic(context, 6);
-        int paddingH = dpStatic(context, 12);
-        int iconSize = dpStatic(context, 18);
-        int iconGap = dpStatic(context, 10);
+        float scale = UiScaleController.getSavedScaleFactor(context);
+        int rowHeight = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_height, scale);
+        int rowGap = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_gap, scale);
+        int paddingH = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_padding_h, scale);
+        int iconSize = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_icon_size, scale);
+        int iconGap = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_icon_gap, scale);
+        float titleSizePx = UiScaleHelper.dimFloat(context, R.dimen.ui_settings_row_text_size, scale);
+        float chevronSizePx = UiScaleHelper.dimFloat(context, R.dimen.ui_settings_row_chevron_size, scale);
 
         for (Entry entry : SettingsCatalog.getImplementedEntries()) {
             LinearLayout row = new LinearLayout(context);
@@ -258,14 +298,14 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
 
             TextView titleView = new TextView(context);
             titleView.setText(entry.displayTitle);
-            titleView.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+            titleView.setTextSize(TypedValue.COMPLEX_UNIT_PX, titleSizePx);
             titleView.setMaxLines(1);
             titleView.setLayoutParams(new LinearLayout.LayoutParams(
                     0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
             TextView chevron = new TextView(context);
             chevron.setText("›");
-            chevron.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+            chevron.setTextSize(TypedValue.COMPLEX_UNIT_PX, chevronSizePx);
 
             row.addView(icon);
             row.addView(titleView);
@@ -277,6 +317,68 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
             iconViews.put(entry.id, icon);
             titleViews.put(entry.id, titleView);
             chevronViews.put(entry.id, chevron);
+        }
+    }
+
+    private void applySidebarScale(@NonNull Context context, float scaleFactor) {
+        float scale = UiScaleHelper.normalizeScale(scaleFactor);
+        if (sidebarView != null) {
+            int sidebarPad = UiScaleHelper.dimPx(context, R.dimen.ui_page_padding, scale);
+            sidebarView.setPadding(sidebarPad, sidebarPad, sidebarPad, sidebarPad);
+            ViewGroup.LayoutParams lp = sidebarView.getLayoutParams();
+            int targetWidth = UiScaleHelper.dimPx(context, R.dimen.ui_settings_sidebar_width, scale);
+            if (lp != null && lp.width != targetWidth) {
+                lp.width = targetWidth;
+                sidebarView.setLayoutParams(lp);
+            }
+        }
+        if (sidebarTitle != null) {
+            sidebarTitle.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                    UiScaleHelper.dimFloat(context, R.dimen.ui_settings_sidebar_title_size, scale));
+        }
+
+        int rowHeight = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_height, scale);
+        int rowGap = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_gap, scale);
+        int paddingH = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_padding_h, scale);
+        int iconSize = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_icon_size, scale);
+        int iconGap = UiScaleHelper.dimPx(context, R.dimen.ui_settings_row_icon_gap, scale);
+        float titleSizePx = UiScaleHelper.dimFloat(context, R.dimen.ui_settings_row_text_size, scale);
+        float chevronSizePx = UiScaleHelper.dimFloat(context, R.dimen.ui_settings_row_chevron_size, scale);
+
+        for (Entry entry : SettingsCatalog.getImplementedEntries()) {
+            View row = rowViews.get(entry.id);
+            if (row != null) {
+                row.setPadding(paddingH, 0, paddingH, 0);
+                ViewGroup.LayoutParams lp = row.getLayoutParams();
+                if (lp instanceof ViewGroup.MarginLayoutParams) {
+                    ViewGroup.MarginLayoutParams mlp = (ViewGroup.MarginLayoutParams) lp;
+                    boolean changed = mlp.height != rowHeight || mlp.bottomMargin != rowGap;
+                    mlp.height = rowHeight;
+                    mlp.bottomMargin = rowGap;
+                    if (changed) {
+                        row.setLayoutParams(mlp);
+                    }
+                }
+            }
+            ImageView icon = iconViews.get(entry.id);
+            if (icon != null && icon.getLayoutParams() instanceof ViewGroup.MarginLayoutParams) {
+                ViewGroup.MarginLayoutParams ilp = (ViewGroup.MarginLayoutParams) icon.getLayoutParams();
+                boolean changed = ilp.width != iconSize || ilp.height != iconSize || ilp.getMarginEnd() != iconGap;
+                ilp.width = iconSize;
+                ilp.height = iconSize;
+                ilp.setMarginEnd(iconGap);
+                if (changed) {
+                    icon.setLayoutParams(ilp);
+                }
+            }
+            TextView titleView = titleViews.get(entry.id);
+            if (titleView != null) {
+                titleView.setTextSize(TypedValue.COMPLEX_UNIT_PX, titleSizePx);
+            }
+            TextView chevron = chevronViews.get(entry.id);
+            if (chevron != null) {
+                chevron.setTextSize(TypedValue.COMPLEX_UNIT_PX, chevronSizePx);
+            }
         }
     }
 
@@ -378,12 +480,5 @@ public class SettingsFragment extends Fragment implements UiThemeController.Them
             default:
                 return null;
         }
-    }
-
-    private static int dpStatic(@NonNull Context context, int dp) {
-        return Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP,
-                dp,
-                context.getResources().getDisplayMetrics()));
     }
 }

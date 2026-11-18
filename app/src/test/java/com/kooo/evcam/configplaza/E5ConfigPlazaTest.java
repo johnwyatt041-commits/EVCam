@@ -223,6 +223,26 @@ public class E5ConfigPlazaTest {
     }
 
     @Test
+    public void legacyRecordingPresetMigratesIndependentWatermarkSwitchesWithoutNewKeys() throws Exception {
+        JsonObject base = loadBalancedPresetJson();
+        JsonObject recVals = base.getAsJsonObject("sections")
+                .getAsJsonObject("recording")
+                .getAsJsonObject("values");
+        recVals.remove("watermark_gear_enabled");
+        recVals.remove("watermark_turn_signal_enabled");
+        recVals.addProperty("vehicle_status_watermark", true);
+        recVals.addProperty("watermark_speed_enabled", false);
+        recVals.addProperty("watermark_gear_turn_enabled", true);
+
+        E5ConfigSchema.ValidationResult res = E5ConfigSchema.validateJsonObject(base);
+        assertTrue(res.errorMessage, res.valid && res.snapshot != null);
+        Map<String, Object> parsed = res.snapshot.getSection(E5ConfigSection.RECORDING).values;
+        assertEquals(Boolean.FALSE, parsed.get("watermark_speed_enabled"));
+        assertEquals(Boolean.TRUE, parsed.get("watermark_gear_enabled"));
+        assertEquals(Boolean.TRUE, parsed.get("watermark_turn_signal_enabled"));
+    }
+
+    @Test
     public void rejectsExportWhenCarModelIsNotGalaxyE5AndCameraMappingSelected() {
         InMemoryConfigTarget l7Target = InMemoryConfigTarget.createDefaultE5Target();
         l7Target.carModel = AppConfig.CAR_MODEL_L7;

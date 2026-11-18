@@ -144,9 +144,8 @@ public class RecorderSettingsFragment extends Fragment {
     private SwitchMaterial switchImageMirror;
     private boolean isUpdatingImageUi = false;
 
-    // T05: 3.3 四模块水印 + 位置 + 样式
-    private LinearLayout layoutWatermarkVehicleSuboptions;
-    private android.widget.CheckBox cbWatermarkSpeed, cbWatermarkGearTurn;
+    // T05/包D: 3.3 独立水印开关（时间 / 车速 / 档位 / 转向灯）+ 自定义文字 + 位置 + 样式
+    private SwitchMaterial switchWatermarkSpeed, switchWatermarkGear, switchWatermarkTurnSignal;
     private SwitchMaterial switchWatermarkCustomText;
     private EditText etWatermarkCustomText;
     private boolean isUpdatingDisplayUi = false;
@@ -265,31 +264,15 @@ public class RecorderSettingsFragment extends Fragment {
                 appConfig.setTimestampWatermarkEnabled(isChecked);
                 notifyActiveRecorders();
                 if (!isUpdatingDisplayUi) {
-                    String message = isChecked ? "时间角标已开启" : "时间角标已关闭";
+                    String message = isChecked ? "时间水印已开启" : "时间水印已关闭";
                     Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
                     AppLog.d("SettingsFragment", message);
                 }
             }
         });
 
-        // 默认关闭的录像车辆状态水印
         TextView recordingExperiment = view.findViewById(R.id.recording_experiment_description);
         recordingExperiment.setText(com.kooo.evcam.camera.RecordingExperiment.description());
-        SwitchMaterial vehicleStatusSwitch = view.findViewById(R.id.switch_vehicle_status_watermark);
-        vehicleStatusSwitch.setChecked(appConfig.isVehicleStatusWatermarkEnabled());
-        vehicleStatusSwitch.setOnCheckedChangeListener((buttonView, checked) -> {
-            appConfig.setVehicleStatusWatermarkEnabled(checked);
-            updateWatermarkVehicleSuboptionsVisibility(checked);
-            MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
-            if (manager != null) {
-                manager.setVehicleStatusWatermarkEnabled(checked);
-                manager.refreshActiveRecorderSettings();
-            }
-            if (!isUpdatingDisplayUi) {
-                Toast.makeText(getContext(), checked ? "车辆状态水印已开启，未读取到的信号显示未知"
-                        : "车辆状态水印已关闭", Toast.LENGTH_SHORT).show();
-            }
-        });
 
         // 初始化 3.3 扩展水印配置与 3.4 提示音配置
         initDisplayWatermarkExtensions(view);
@@ -2254,9 +2237,9 @@ public class RecorderSettingsFragment extends Fragment {
 
         switchWatermarkCustomText = view.findViewById(R.id.switch_watermark_custom_text);
         etWatermarkCustomText = view.findViewById(R.id.et_watermark_custom_text);
-        layoutWatermarkVehicleSuboptions = view.findViewById(R.id.layout_watermark_vehicle_suboptions);
-        cbWatermarkSpeed = view.findViewById(R.id.cb_watermark_speed);
-        cbWatermarkGearTurn = view.findViewById(R.id.cb_watermark_gear_turn);
+        switchWatermarkSpeed = view.findViewById(R.id.switch_watermark_speed);
+        switchWatermarkGear = view.findViewById(R.id.switch_watermark_gear);
+        switchWatermarkTurnSignal = view.findViewById(R.id.switch_watermark_turn_signal);
         Spinner posSpinner = view.findViewById(R.id.spinner_watermark_position);
         Spinner styleSpinner = view.findViewById(R.id.spinner_watermark_style);
 
@@ -2286,21 +2269,31 @@ public class RecorderSettingsFragment extends Fragment {
                     }
                 });
             }
-            updateWatermarkVehicleSuboptionsVisibility(appConfig.isVehicleStatusWatermarkEnabled());
-            if (cbWatermarkSpeed != null) {
-                cbWatermarkSpeed.setChecked(appConfig.isWatermarkSpeedEnabled());
-                cbWatermarkSpeed.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (switchWatermarkSpeed != null) {
+                switchWatermarkSpeed.setChecked(appConfig.isWatermarkSpeedEnabled());
+                switchWatermarkSpeed.setOnCheckedChangeListener((buttonView, isChecked) -> {
                     if (isUpdatingDisplayUi) return;
                     appConfig.setWatermarkSpeedEnabled(isChecked);
                     notifyActiveRecorders();
+                    Toast.makeText(ctx, isChecked ? "车速水印已开启，未收到信号时显示 --" : "车速水印已关闭", Toast.LENGTH_SHORT).show();
                 });
             }
-            if (cbWatermarkGearTurn != null) {
-                cbWatermarkGearTurn.setChecked(appConfig.isWatermarkGearTurnEnabled());
-                cbWatermarkGearTurn.setOnCheckedChangeListener((buttonView, isChecked) -> {
+            if (switchWatermarkGear != null) {
+                switchWatermarkGear.setChecked(appConfig.isWatermarkGearEnabled());
+                switchWatermarkGear.setOnCheckedChangeListener((buttonView, isChecked) -> {
                     if (isUpdatingDisplayUi) return;
-                    appConfig.setWatermarkGearTurnEnabled(isChecked);
+                    appConfig.setWatermarkGearEnabled(isChecked);
                     notifyActiveRecorders();
+                    Toast.makeText(ctx, isChecked ? "档位水印已开启，未收到信号时显示未知" : "档位水印已关闭", Toast.LENGTH_SHORT).show();
+                });
+            }
+            if (switchWatermarkTurnSignal != null) {
+                switchWatermarkTurnSignal.setChecked(appConfig.isWatermarkTurnSignalEnabled());
+                switchWatermarkTurnSignal.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                    if (isUpdatingDisplayUi) return;
+                    appConfig.setWatermarkTurnSignalEnabled(isChecked);
+                    notifyActiveRecorders();
+                    Toast.makeText(ctx, isChecked ? "转向灯水印已开启，未收到信号时显示未知" : "转向灯水印已关闭", Toast.LENGTH_SHORT).show();
                 });
             }
 
@@ -2359,12 +2352,6 @@ public class RecorderSettingsFragment extends Fragment {
             }
         } finally {
             isUpdatingDisplayUi = false;
-        }
-    }
-
-    private void updateWatermarkVehicleSuboptionsVisibility(boolean visible) {
-        if (layoutWatermarkVehicleSuboptions != null) {
-            layoutWatermarkVehicleSuboptions.setVisibility(visible ? View.VISIBLE : View.GONE);
         }
     }
 
@@ -2558,7 +2545,7 @@ public class RecorderSettingsFragment extends Fragment {
         notifyActiveRecorders();
     }
 
-    // ==================== T06: 3.1 保摄像头恢复 / R-D 换挡自动弹出 / 车辆触发规则 ====================
+    // ==================== T06/包D: 3.1 保摄像头恢复 / 前进档（D 档）自动弹出 / 车辆触发规则 ====================
 
     private static final int[] RD_POPUP_SECONDS_VALUES = {3, 5, 10, 15, 30};
     private static final String[] RD_POPUP_SECONDS_LABELS = {"3 秒", "5 秒（默认）", "10 秒", "15 秒", "30 秒"};
@@ -2606,7 +2593,7 @@ public class RecorderSettingsFragment extends Fragment {
                     rdSecondsLayout.setVisibility(isChecked ? View.VISIBLE : View.GONE);
                 }
                 syncAutomationAfterSettingsChange(ctx);
-                Toast.makeText(ctx, isChecked ? "已开启 R/D 换挡自动弹出记录仪" : "已关闭 R/D 换挡自动弹出", Toast.LENGTH_SHORT).show();
+                Toast.makeText(ctx, isChecked ? "已开启前进档（D 档）自动弹出记录仪" : "已关闭前进档（D 档）自动弹出", Toast.LENGTH_SHORT).show();
             });
         }
 
@@ -2633,7 +2620,7 @@ public class RecorderSettingsFragment extends Fragment {
                     if (nextSeconds != appConfig.getRdShiftPopupSeconds()) {
                         appConfig.setRdShiftPopupSeconds(nextSeconds);
                         syncAutomationAfterSettingsChange(ctx);
-                        Toast.makeText(ctx, "R/D 弹出自动退后台时间已设为 " + nextSeconds + " 秒", Toast.LENGTH_SHORT).show();
+                        Toast.makeText(ctx, "前进档（D 档）弹出自动退后台时间已设为 " + nextSeconds + " 秒", Toast.LENGTH_SHORT).show();
                     }
                 }
 

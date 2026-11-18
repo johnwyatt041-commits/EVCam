@@ -1,6 +1,6 @@
 # 当前有效的坑与约束
 
-最近更新：2026-11-18 08:52:00 +08:00。历史首次发现时刻未记录；表内时间是各次复核时间，不冒充发现时间。最多20条，失效项归档；详见 [进度规范](PROGRESS_RULES.md)。
+最近更新：2026-11-18 16:48:00 +08:00。历史首次发现时刻未记录；表内时间是各次复核时间，不冒充发现时间。最多20条，失效项归档；详见 [进度规范](PROGRESS_RULES.md)。
 
 | ID | 复核时间（+08:00） | 触发/后果 → 正确做法 | 证据 |
 | --- | --- | --- | --- |
@@ -19,3 +19,6 @@
 | P013 | 2026-11-15 00:13:32 | 开R8后仅构建通过不保证冷启动。当前WorkManager/Room组合会裁掉`WorkDatabase_Impl`反射无参构造器，须精确保留并测试冷启动；Debug AndroidX runner不能直接链接混淆后的Kotlin，Release用平台Instrumentation。 | [优化与失败证据](archive/2026-11/tasks/ab-test-preoptimization.md) |
 | P014 | 2026-11-15 00:13:32 | “心跳推图”与无障碍保活心跳不同；HUD仍复用旧鱼眼配置键。删功能须核对实际调用，保留保活定时器及HUD访问器，不能按同名批量裁剪共享能力。 | [优化边界](archive/2026-11/tasks/ab-test-preoptimization.md) |
 | P015 | 2026-11-15 02:41:26 | 用户确认本次EPERM由车机权限不足引起，已要求撤销存储改造。受限模拟器可复现，不等于必须改App文件协议；先核对目标车机授权，不能只凭EPERM判为应用缺陷。0220候选已撤回。 | [用户更正/撤回](archive/2026-11/tasks/recording-storage-eperm.md) |
+| P016 | 2026-11-18 13:10:00 | 多分辨率布局（`sw600dp`/`port`）遗漏按钮或 `texture_single`、或 `GLSurfaceView` 构造期触发 `requestRender()`（`mGLThread` 为空）会在开预览切回放/`360 A` 时 NPE 闪退；`SingleCamera` 重复附着同 Surface 会引发重建。须全分辨率同步 ID、延后渲染并在 `OutputConfiguration` 判重。 | [包A任务](tasks/fix-pack-a-crashes-and-reverse-signal.md) |
+| P017 | 2026-11-18 13:10:00 | E5 `libvhal_decoder.so` 与 Smartcam `libvhal_proto_parser.so` 的 `field 5` 均是 `sint32` ZigZag（不能改普通 `int32`），但 `GEAR` 不限于 `area==0` 且 `0x11400400`/`0x11400401` 不应共用状态相互覆盖；未开补盲而用 VHAL 规则/随档位视图也须持有 VHAL 租约。 | [包A任务](tasks/fix-pack-a-crashes-and-reverse-signal.md) |
+| P018 | 2026-11-18 16:48:00 | `360 A` 退出时若立即在 `backgroundHandler` 清 surround Surface，此时 `TextureView.isAvailable()` 尚未完成绘制就绪会触发 `closeIfUnused()` 并在同线程 `join()` 自锁 2s；另外运行中直接 `wm size reset` 触发重启重建时 `PlaybackImageMemory.clearViews` 对已销毁 Activity 调 `Glide.with()` 会崩。前者已加锁跳过自等并延迟一帧解绑，后者切分辨率前应先停进程或另案处理。 | [包B任务](tasks/fix-pack-b-preview-and-mode-d.md) |

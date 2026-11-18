@@ -303,9 +303,15 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
         btnDeleteSelected.setOnClickListener(v -> deleteSelected());
         btnShareSelected.setOnClickListener(v -> shareSelected());
 
-        btnFilterAll.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_ALL));
-        btnFilterToday.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_TODAY));
-        btnFilterLocked.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_LOCKED));
+        if (btnFilterAll != null) {
+            btnFilterAll.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_ALL));
+        }
+        if (btnFilterToday != null) {
+            btnFilterToday.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_TODAY));
+        }
+        if (btnFilterLocked != null) {
+            btnFilterLocked.setOnClickListener(v -> switchFilterMode(PlaybackTimelineBuilder.FILTER_LOCKED));
+        }
 
         adapter.setOnItemClickListener((group, position) -> loadVideoGroup(group));
         adapter.setOnItemSelectedListener(group -> updateSelectedCount());

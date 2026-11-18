@@ -9,6 +9,7 @@ import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.surround.SurroundViewMode;
 import com.kooo.evcam.ui.PreviewLayoutModel;
+import com.kooo.evcam.ui.PreviewMode;
 import com.kooo.evcam.ui.UiThemeController;
 import com.kooo.evcam.vehicle.rule.VehicleTriggerRule;
 
@@ -90,6 +91,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
     private Map<String, Object> readAppearance() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("theme_mode", UiThemeController.savedThemeMode(context).key);
+        m.put("ui_scale_mode", appConfig.getUiScaleMode());
         m.put("default_start_page", appConfig.getDefaultStartPage());
         m.put("preview_mode", appConfig.getPreviewMode());
         m.put("preview_presentation", appConfig.getPreviewPresentationKey());
@@ -108,6 +110,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             mode = UiThemeController.ThemeMode.FOLLOW_SYSTEM;
         }
         UiThemeController.saveThemeMode(context, mode);
+        appConfig.setUiScaleMode(str(v, "ui_scale_mode", AppConfig.UI_SCALE_STANDARD));
         appConfig.setDefaultStartPage(str(v, "default_start_page", AppConfig.START_PAGE_RECORDING));
         appConfig.setPreviewMode(str(v, "preview_mode", AppConfig.PREVIEW_MODE_B));
         appConfig.setPreviewPresentationKey(str(v, "preview_presentation", "sidebar"));
@@ -127,11 +130,12 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             m.put("recording_camera_" + pos + "_enabled", appConfig.isRecordingCameraEnabled(pos));
             m.put("camera_" + pos + "_visible", appConfig.isCameraVisible(pos));
         }
-        m.put("mode_b_panes", readPaneList(true));
+        m.put("mode_b_panes", readPaneList(PreviewMode.MODE_B));
         m.put("mode_b_visible", readModeBVisibleList());
-        m.put("mode_c_panes", readPaneList(false));
+        m.put("mode_c_panes", readPaneList(PreviewMode.MODE_C));
         m.put("mode_c_show_left", layoutPrefs.getBoolean("c_vis_left", true));
         m.put("mode_c_show_right", layoutPrefs.getBoolean("c_vis_right", true));
+        m.put("mode_d_panes", readPaneList(PreviewMode.MODE_D));
         return m;
     }
 
@@ -167,21 +171,39 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         }
         editor.putBoolean("c_vis_left", bool(v, "mode_c_show_left", true));
         editor.putBoolean("c_vis_right", bool(v, "mode_c_show_right", true));
+        List<Float> dPanes = (List<Float>) v.get("mode_d_panes");
+        if (dPanes != null && dPanes.size() == 16) {
+            editor.putBoolean("d_saved", true);
+            for (int i = 0; i < 16; i++) {
+                editor.putFloat("d_pane_" + i, dPanes.get(i));
+            }
+        }
         editor.apply();
     }
 
-    private List<Float> readPaneList(boolean modeB) {
-        PreviewLayoutModel model = new PreviewLayoutModel(
-                modeB ? PreviewLayoutModel.PRESET_MODE_B_THREE_COL : PreviewLayoutModel.PRESET_MODE_C_FRONT);
+    private List<Float> readPaneList(PreviewMode mode) {
+        int defaultPreset;
+        if (mode == PreviewMode.MODE_D) {
+            defaultPreset = PreviewLayoutModel.PRESET_MODE_D_DUAL;
+        } else if (mode == PreviewMode.MODE_C) {
+            defaultPreset = PreviewLayoutModel.PRESET_MODE_C_FRONT;
+        } else {
+            defaultPreset = PreviewLayoutModel.PRESET_MODE_B_THREE_COL;
+        }
+        PreviewLayoutModel model = new PreviewLayoutModel(defaultPreset);
         String prefix = null;
-        if (modeB) {
+        if (mode == PreviewMode.MODE_B) {
             if (layoutPrefs.getBoolean("b_saved", false)) {
                 prefix = "b_pane_";
             } else if (layoutPrefs.getBoolean("saved", false)) {
                 prefix = "pane_";
             }
-        } else if (layoutPrefs.getBoolean("c_saved", false)) {
-            prefix = "c_pane_";
+        } else if (mode == PreviewMode.MODE_C) {
+            if (layoutPrefs.getBoolean("c_saved", false)) {
+                prefix = "c_pane_";
+            }
+        } else if (mode == PreviewMode.MODE_D && layoutPrefs.getBoolean("d_saved", false)) {
+            prefix = "d_pane_";
         }
         if (prefix != null) {
             float[] vals = new float[16];
@@ -247,6 +269,8 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         m.put("vehicle_status_watermark", appConfig.isVehicleStatusWatermarkEnabled());
         m.put("watermark_speed_enabled", appConfig.isWatermarkSpeedEnabled());
         m.put("watermark_gear_turn_enabled", appConfig.isWatermarkGearTurnEnabled());
+        m.put("watermark_gear_enabled", appConfig.isWatermarkGearEnabled());
+        m.put("watermark_turn_signal_enabled", appConfig.isWatermarkTurnSignalEnabled());
         m.put("watermark_custom_text_enabled", appConfig.isWatermarkCustomTextEnabled());
         m.put("watermark_custom_text", appConfig.getWatermarkCustomText());
         m.put("video_watermark_position", appConfig.getWatermarkPosition());
@@ -293,9 +317,22 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             appConfig.setPhysicalMirrorV(pos, bool(v, "phys_mirror_v_" + pos, false));
         }
         appConfig.setTimestampWatermarkEnabled(bool(v, "timestamp_watermark_enabled", false));
-        appConfig.setVehicleStatusWatermarkEnabled(bool(v, "vehicle_status_watermark", false));
-        appConfig.setWatermarkSpeedEnabled(bool(v, "watermark_speed_enabled", true));
-        appConfig.setWatermarkGearTurnEnabled(bool(v, "watermark_gear_turn_enabled", true));
+        boolean hasNewIndependentWatermark = v.containsKey("watermark_gear_enabled")
+                || v.containsKey("watermark_turn_signal_enabled");
+        boolean legacyMasterWatermark = bool(v, "vehicle_status_watermark", false);
+        boolean legacyGearTurnWatermark = bool(v, "watermark_gear_turn_enabled", false);
+        boolean speedWatermark = hasNewIndependentWatermark
+                ? bool(v, "watermark_speed_enabled", false)
+                : (legacyMasterWatermark && bool(v, "watermark_speed_enabled", true));
+        boolean gearWatermark = hasNewIndependentWatermark
+                ? bool(v, "watermark_gear_enabled", false)
+                : (legacyMasterWatermark && legacyGearTurnWatermark);
+        boolean turnWatermark = hasNewIndependentWatermark
+                ? bool(v, "watermark_turn_signal_enabled", false)
+                : (legacyMasterWatermark && legacyGearTurnWatermark);
+        appConfig.setWatermarkSpeedEnabled(speedWatermark);
+        appConfig.setWatermarkGearEnabled(gearWatermark);
+        appConfig.setWatermarkTurnSignalEnabled(turnWatermark);
         appConfig.setWatermarkCustomTextEnabled(bool(v, "watermark_custom_text_enabled", false));
         appConfig.setWatermarkCustomText(str(v, "watermark_custom_text", ""));
         appConfig.setWatermarkPosition(str(v, "video_watermark_position", "BOTTOM_RIGHT"));
@@ -363,9 +400,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         m.put("t04_blind_spot_suppress_on_360", appConfig.isBlindSpotSuppressOn360());
         m.put("avm_avoidance_enabled", appConfig.isAvmAvoidanceEnabled());
         m.put("avm_avoidance_activity", appConfig.getAvmAvoidanceActivity());
-        m.put("blind_spot_status_bar_style", appConfig.getBlindSpotStatusBarStyle());
-        m.put("blind_spot_status_bar_color", appConfig.getBlindSpotStatusBarColor());
-        m.put("blind_spot_status_bar_bg_opacity", appConfig.getBlindSpotStatusBarBgOpacity());
+        m.put("blind_spot_use_same_side_position", appConfig.isBlindSpotUseSameSidePosition());
         m.put("blind_spot_correction_enabled", appConfig.isBlindSpotCorrectionEnabled());
         for (String pos : POSITIONS) {
             m.put("blind_spot_correction_" + pos + "_scale_x", appConfig.getBlindSpotCorrectionScaleX(pos));
@@ -373,6 +408,10 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             m.put("blind_spot_correction_" + pos + "_translate_x", appConfig.getBlindSpotCorrectionTranslateX(pos));
             m.put("blind_spot_correction_" + pos + "_translate_y", appConfig.getBlindSpotCorrectionTranslateY(pos));
             m.put("blind_spot_correction_" + pos + "_rotation", appConfig.getBlindSpotCorrectionRotation(pos));
+            m.put("blind_spot_correction_" + pos + "_crop_left", appConfig.getBlindSpotCorrectionCropLeft(pos));
+            m.put("blind_spot_correction_" + pos + "_crop_top", appConfig.getBlindSpotCorrectionCropTop(pos));
+            m.put("blind_spot_correction_" + pos + "_crop_right", appConfig.getBlindSpotCorrectionCropRight(pos));
+            m.put("blind_spot_correction_" + pos + "_crop_bottom", appConfig.getBlindSpotCorrectionCropBottom(pos));
         }
         for (MirrorTarget target : MirrorTarget.values()) {
             for (String pos : POSITIONS) {
@@ -439,9 +478,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         appConfig.setBlindSpotSuppressOn360(bool(v, "t04_blind_spot_suppress_on_360", true));
         appConfig.setAvmAvoidanceEnabled(bool(v, "avm_avoidance_enabled", false));
         appConfig.setAvmAvoidanceActivity(str(v, "avm_avoidance_activity", "com.geely.avm_app.AvmRenderActivity"));
-        appConfig.setBlindSpotStatusBarStyle(numInt(v, "blind_spot_status_bar_style", 1));
-        appConfig.setBlindSpotStatusBarColor(numInt(v, "blind_spot_status_bar_color", 0xFFFFBF40));
-        appConfig.setBlindSpotStatusBarBgOpacity(numInt(v, "blind_spot_status_bar_bg_opacity", 31));
+        appConfig.setBlindSpotUseSameSidePosition(bool(v, "blind_spot_use_same_side_position", false));
         appConfig.setBlindSpotCorrectionEnabled(bool(v, "blind_spot_correction_enabled", false));
         for (String pos : POSITIONS) {
             appConfig.setBlindSpotCorrectionScaleX(pos, numFloat(v, "blind_spot_correction_" + pos + "_scale_x", 1.0f));
@@ -449,6 +486,10 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             appConfig.setBlindSpotCorrectionTranslateX(pos, numFloat(v, "blind_spot_correction_" + pos + "_translate_x", 0.0f));
             appConfig.setBlindSpotCorrectionTranslateY(pos, numFloat(v, "blind_spot_correction_" + pos + "_translate_y", 0.0f));
             appConfig.setBlindSpotCorrectionRotation(pos, numInt(v, "blind_spot_correction_" + pos + "_rotation", 0));
+            appConfig.setBlindSpotCorrectionCropLeft(pos, numFloat(v, "blind_spot_correction_" + pos + "_crop_left", 0.0f));
+            appConfig.setBlindSpotCorrectionCropTop(pos, numFloat(v, "blind_spot_correction_" + pos + "_crop_top", 0.0f));
+            appConfig.setBlindSpotCorrectionCropRight(pos, numFloat(v, "blind_spot_correction_" + pos + "_crop_right", 0.0f));
+            appConfig.setBlindSpotCorrectionCropBottom(pos, numFloat(v, "blind_spot_correction_" + pos + "_crop_bottom", 0.0f));
         }
         for (MirrorTarget target : MirrorTarget.values()) {
             for (String pos : POSITIONS) {

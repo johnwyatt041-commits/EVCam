@@ -81,11 +81,13 @@ public final class CompositeQuadrantTextureController implements TextureView.Sur
         }
     };
 
-    public CompositeQuadrantTextureController(@NonNull Context context, @NonNull TextureView textureView) {
+    public CompositeQuadrantTextureController(@NonNull Context context, @Nullable TextureView textureView) {
         this.context = context.getApplicationContext();
         this.textureView = textureView;
-        this.textureView.setSurfaceTextureListener(this);
-        this.textureView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> applyTransform());
+        if (this.textureView != null) {
+            this.textureView.setSurfaceTextureListener(this);
+            this.textureView.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> applyTransform());
+        }
     }
 
     public void setCallback(@Nullable Callback callback) {
@@ -133,6 +135,9 @@ public final class CompositeQuadrantTextureController implements TextureView.Sur
 
     @Nullable
     public String handleDoubleTap(float x, float y) {
+        if (textureView == null) {
+            return null;
+        }
         if (!VideoGroup.POSITION_COMBINED.equals(getCurrentQuadrant())) {
             setQuadrant(VideoGroup.POSITION_COMBINED);
             return VideoGroup.POSITION_COMBINED;
@@ -150,7 +155,7 @@ public final class CompositeQuadrantTextureController implements TextureView.Sur
     }
 
     private void prepareInternal() {
-        if (currentFile == null || !currentFile.exists()) {
+        if (textureView == null || currentFile == null || !currentFile.exists()) {
             return;
         }
         SurfaceTexture st = textureView.getSurfaceTexture();
@@ -355,6 +360,9 @@ public final class CompositeQuadrantTextureController implements TextureView.Sur
     }
 
     private void applyTransform() {
+        if (textureView == null) {
+            return;
+        }
         int vw = textureView.getWidth();
         int vh = textureView.getHeight();
         if (vw <= 0 || vh <= 0 || videoWidth <= 0 || videoHeight <= 0) {
