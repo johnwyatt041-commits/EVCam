@@ -553,7 +553,7 @@ public class LanShareService extends Service {
                 PendingIntent.FLAG_IMMUTABLE);
 
         return new NotificationCompat.Builder(this, CHANNEL_ID)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_launcher_foreground)
                 .setContentTitle("Wi-Fi 录像与照片分享")
                 .setContentText(contentText)
                 .setOngoing(true)
