@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-19 02:31:36 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已完成 `1.6.6-test-11190207` 默认车模替换与 SAF 导入修复并同步推至 fork `codex/e5-recording-startup-fix`；GitHub Releases 仍以 **`build13`** Pre-release 为准）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-19 02:35:00 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已完成 **`build15`** `1.6.6-test-11190207` 封包至 `outputs/` 并上传 GitHub Pre-release）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`（包含 `W1`、`build14` 包 A–E 与 `1.6.6-test-11190207` 车模/SAF 导入提交，以 Git 为准） |
-| 本地交付 | `outputs/` 顶层留 `build13` + **`build14`**（`1.6.6-test-11190102`）；最新 `1.6.6-test-11190207` A/B Release APK 位于 `app/build/outputs/apk/{independent,composite}/release/` |
-| GitHub | `johnwyatt041-commits/EVCam` 的 `codex/e5-recording-startup-fix` 同步最新代码，Releases 页尚未单独创建新 Pre-release（仍为 `build13`） |
+| 分支与提交 | `codex/e5-recording-startup-fix`；源码基线 `111c1cb`（Tag `v1.6.6-test-11190207-build15`，已推 fork） |
+| 本地交付 | **`build15`：`1.6.6-test-11190207`**（`versionCode = 83`，A `7,269,290` B / B `7,285,674` B，已签过 `apksigner` 含 `libvhal_decoder.so`）；`outputs/` 顶层留 `build14` + `build15`（`build13` 移入 `outputs/archive/`） |
+| GitHub | `johnwyatt041-commits/EVCam` 已推送最新 `codex/e5-recording-startup-fix` 并发布 Pre-release `v1.6.6-test-11190207-build15` |
 | 离线与模拟器验证 | `1.6.6-test-11190207` 通过双风味 `470` 测 `0` 失败、Lint `0 errors`（`2076` warnings）、Release A/B 编译与 `apksigner` 校验；`emulator-5556` 已实测新默认车模与 `OpenDocument`/Download 导入 |
-| 实车状态 | `build01`–`build14`、`1.6.6-test-11190207` 车模/导入、包 A（VHAL 倒车流）、包 B（四路拼接/转角）、包 C（EVCC/转向灯）、包 D（D 档/水印）与包 E（实屏触控）均**尚未上车实测** |
+| 实车状态 | `build01`–`build15`、默认 E5 车模/SAF 导入、包 A（VHAL 倒车流）、包 B（四路拼接/转角）、包 C（EVCC/转向灯）、包 D（D 档/水印）与包 E（实屏触控）均**尚未上车实测** |
 
 ## 当前结论与确认边界
 
@@ -23,7 +23,7 @@
 
 ## 下一步
 
-1. 如需车机直接下载新版本，按需将 `1.6.6-test-11190207` 封包导出至 `outputs/` 并发布新 Pre-release；或先使用本地构建的 `app/build/outputs/apk/{independent,composite}/release/` 核验默认车模与 SAF 导入后上车按 [build13 验收清单](archive/2026-11/tasks/build12-e5-acceptance-and-lint-cleanup.md) 联测。
+1. 下载并安装 **`build15`**（独立版 A / 共存版 B 先后覆盖，切勿并行）到银河 E5 实车按 [build13 验收清单](archive/2026-11/tasks/build12-e5-acceptance-and-lint-cleanup.md) 联测默认车模、SAF 导入与包 A–E 全部实车项。
 2. 结合实车情况决定是否优化 `P019`（设置页切 `A/D` 主线程同步关闭相机卡顿）。
 
 ## 最近更新（最多5条）
