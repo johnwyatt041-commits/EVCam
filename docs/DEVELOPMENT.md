@@ -31,7 +31,7 @@
 
 两版同包名同签名，按顺序覆盖安装，共享偏好；不要用不同包名同时运行两套摄像头。A 是整改后的三路独立文件，B 日常三路合成 H.264 单文件；B 的飞书四路仍分别录制。`RecordingExperiment` 和 flavor 的 `BuildConfig.SMARTCAM_COMPOSITE` 决定方法，不能只改 APK 文件名冒充不同架构。详见 [recording-ab.md](archive/2026-11/tasks/recording-ab.md)。
 
-Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生产密钥。`outputs/` 顶层仅保留最新基线（`build12`/`build13`），历史包与说明均归档在 `outputs/archive/`（见该目录下 `INDEX.md`）。构建不应修改历史已发布归档产物。
+Release 使用仓库自带的**公开 AOSP 测试签名**，别当作私人生产密钥。`outputs/` 顶层仅保留最新基线（`build15`/`build16`），历史包与说明均归档在 `outputs/archive/`（见 `outputs/archive/INDEX.md`）。构建不应修改历史已发布归档产物。
 
 文档限长与相对链接校验可通过 `python tools/check_docs.py` 执行。
 

@@ -1,6 +1,6 @@
 # EVCam E5 项目入口
 
-更新：2026-11-19 01:16:00 +08:00。项目根目录：`E:\GPT\EVCam`（银河 E5，`2560×1600`）。
+更新：2026-11-19 11:26:00 +08:00。项目根目录：`E:\GPT\EVCam`（银河 E5，`2560×1600`）。
 
 ## 开局必读（精简 4 步）
 
@@ -17,8 +17,8 @@
 | `docs/`、`docs/tasks/` | 当前规范、活跃任务；历史在 `docs/archive/`（按需） |
 | `tools/` | `verify.ps1` 构建校验与 `check_docs.py` 文档检查 |
 | `assets/`、`gradle/`、`keystore/` | 工程依赖资源、Gradle 包装器与签名配置 |
-| `outputs/`、`outputs/archive/` | 顶层仅留最新基线（`build13`/`build14`）；早期包在 `archive/` |
-| `work/`、`work/archive/` | 本机工具/参考/3.0.56 反编译；历史脚本与轮次在 `archive/` |
+| `outputs/`、`outputs/archive/` | 顶层仅留最新基线（`build15`/`build16`）；早期包在 `archive/`（索引见 `outputs/archive/INDEX.md`） |
+| `work/`、`work/archive/` | 本机工具/参考/3.0.56 反编译；历史脚本与轮次在 `archive/`（本机索引 `work/archive/INDEX.md`） |
 | `work/tmp/<task-id>/` | 新任务可清理临时文件；收尾必须清理 |
 | `.codex-attachments/` | 用户原始附件，保留且不提交 |
 
@@ -26,7 +26,7 @@
 
 - 规范与约束：[进度规范](docs/PROGRESS_RULES.md) · [需求边界](docs/REQUIREMENTS.md) · [协作规范](docs/COLLABORATION.md) · [有效坑表](docs/PITFALLS.md)
 - 开发与参考：[开发/构建](docs/DEVELOPMENT.md) · [架构定位](docs/ARCHITECTURE.md) · [本机资料与 Smartcam](docs/AI_HANDOFF.md) · [3.0.56 类映射](docs/SMARTCAM_V3.0.56_DIFF.md)
-- 历史报告、旧 `T01`–`T10` 任务与阶段快照均已归档至 `docs/archive/2026-11/`，仅按链接按需读取。
+- 历史归档索引：历史报告、旧 `T01`–`T10` 与已收官清理任务均已归档至 [docs/archive/2026-11/INDEX.md](docs/archive/2026-11/INDEX.md)，仅按需查阅。
 
 ## 新 AI 开场模板
 

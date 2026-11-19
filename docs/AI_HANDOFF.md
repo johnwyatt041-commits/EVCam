@@ -25,6 +25,6 @@ Smartcam 包名 `com.yuan.smartcam`，**后续统一以版本 `3.0.56` 为准**�
 ## 后续分析与证据落点
 
 - `work/`、`outputs/` 被 Git 忽略，不随 GitHub clone 或独立工作树复制；同机工作树按 `E:\GPT\EVCam\...` 绝对路径读。用户原附件保存在 `.codex-attachments/`，不上传。
-- 新一轮分析证据放 `work/<task-id>/`，临时文件中转放 `work/tmp/<task-id>/` 并于收尾清理；历史轮次已归档至 `work/archive/2026-11-runs/`。
-- 原作者相机快照：`E:\GPT\EVCam\work\archive\2026-11-runs\e5-startup\upstream\`；近期验证日志：`E:\GPT\EVCam\work\verification\`；最新交付：`E:\GPT\EVCam\outputs\`（历史构建已归档至 `outputs/archive/`）。
+- 新一轮分析证据放 `work/<task-id>/`，临时文件中转放 `work/tmp/<task-id>/` 并于收尾清理；历史轮次与早期日志已归档至 `work/archive/2026-11-runs/`（本地总索引：`E:\GPT\EVCam\work\archive\INDEX.md`）。
+- 原作者相机快照：`E:\GPT\EVCam\work\archive\2026-11-runs\e5-startup\upstream\`；当天验证日志：`E:\GPT\EVCam\work\verification\`；最新交付：`E:\GPT\EVCam\outputs\`（历史构建归档见 `outputs/archive/INDEX.md`，历史文档归档见 [docs/archive/2026-11/INDEX.md](archive/2026-11/INDEX.md)）。
 - 构建参数与辅助脚本见 [DEVELOPMENT](DEVELOPMENT.md)；旧版一次性改写与发布脚本已归档至 `work/archive/legacy-scripts-and-logs/`，**不要重跑**。
