@@ -1,6 +1,6 @@
 # EVCam E5 项目入口
 
-更新：2026-11-19 12:08:00 +08:00。项目根目录：`E:\GPT\EVCam`（银河 E5，`2560×1600`）。
+更新：2026-11-19 14:25:30 +08:00。项目根目录：`E:\GPT\EVCam`（银河 E5，`2560×1600`）。
 
 ## 开局必读（精简 4 步）
 
@@ -17,7 +17,7 @@
 | `docs/`、`docs/tasks/` | 当前规范、活跃任务；历史在 `docs/archive/`（按需） |
 | `tools/` | `verify.ps1` 构建校验与 `check_docs.py` 文档检查 |
 | `assets/`、`gradle/`、`keystore/` | 工程依赖资源、Gradle 包装器与签名配置 |
-| `outputs/`、`outputs/archive/` | 顶层仅留最新基线（`build16`/`build17`）；早期包在 `archive/`（索引见 `outputs/archive/INDEX.md`） |
+| `outputs/`、`outputs/archive/` | 顶层仅留最新基线（`build17`/`build18`）；早期包在 `archive/`（索引见 `outputs/archive/INDEX.md`） |
 | `work/`、`work/archive/` | 本机工具/参考/3.0.56 反编译；历史脚本与轮次在 `archive/`（本机索引 `work/archive/INDEX.md`） |
 | `work/tmp/<task-id>/` | 新任务可清理临时文件；收尾必须清理 |
 | `.codex-attachments/` | 用户原始附件，保留且不提交 |
