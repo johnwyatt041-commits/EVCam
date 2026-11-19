@@ -1,6 +1,8 @@
 package com.kooo.evcam.surround;
 
 import com.kooo.evcam.surround.SurroundCalibrationManager.ImportResult;
+import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
+import com.kooo.evcam.surround.SurroundExtrinsicAdjustment.CameraOffset;
 import com.kooo.evcam.surround.SurroundGuidanceCalculator.LineStripBatch;
 import com.kooo.evcam.surround.SurroundMeshBuilder.GridMeshData;
 
@@ -93,23 +95,99 @@ public class SurroundCalibrationAndGuidanceTest {
     public void guidanceStripsCurveWithSteeringAngleAndPngSignatureCheckWorksOffline() {
         SurroundCalibrationProfile profile = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
 
-        LineStripBatch straight = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, true, 10);
-        LineStripBatch rightTurn = SurroundGuidanceCalculator.buildRoadGuidanceStrips(25f, true, 10);
-        assertEquals(5, straight.stripVertexCounts.length); // 2 rails + 3 distance bars
+        int roadSteps = 10;
+        LineStripBatch straight = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, true, roadSteps);
+        LineStripBatch rightTurn = SurroundGuidanceCalculator.buildRoadGuidanceStrips(25f, true, roadSteps);
+        LineStripBatch leftTurn = SurroundGuidanceCalculator.buildRoadGuidanceStrips(-25f, false, roadSteps);
+        // 图 2 风格：4 条纯两侧双层引导带（左内粗/左外细/右内粗/右外细），中间无横线
+        assertEquals(4, straight.stripVertexCounts.length);
         assertEquals(straight.triangleStripVertices.length, rightTurn.triangleStripVertices.length);
+        assertEquals(straight.triangleStripVertices.length, leftTurn.triangleStripVertices.length);
 
-        // 右转远端中点相对直行向右偏移
-        int lastLeftIdx = 10 * 2 * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
-        assertTrue(rightTurn.triangleStripVertices[lastLeftIdx] > straight.triangleStripVertices[lastLeftIdx]);
+        // 验证近端左右完全分居两侧、中间彻底留空
+        int floatsPerStep = 2 * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
+        int strip0Floats = straight.stripVertexCounts[0] * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
+        float straightLeftNearX = centerXAtStep(straight, 0, 0);
+        float straightLeftOuterNearX = centerXAtStep(straight, strip0Floats, 0);
+        float straightRightNearX = centerXAtStep(straight, strip0Floats * 2, 0);
+        float straightRightOuterNearX = centerXAtStep(straight, strip0Floats * 3, 0);
+        assertTrue(straightLeftOuterNearX < straightLeftNearX && straightLeftNearX < -0.4f);
+        assertTrue(straightRightOuterNearX > straightRightNearX && straightRightNearX > 0.4f);
 
-        LineStripBatch bird = SurroundGuidanceCalculator.buildBirdGuidanceStrips(-20f, true, profile, 12);
-        assertEquals(2, bird.stripVertexCounts.length);
-        assertTrue(bird.triangleStripVertices.length > 0);
+        // 右转远端相对直行向右侧(+X)偏移；左转远端向左侧(-X)偏移
+        float straightFarLeftX = centerXAtStep(straight, 0, roadSteps);
+        float rightFarLeftX = centerXAtStep(rightTurn, 0, roadSteps);
+        float leftFarLeftX = centerXAtStep(leftTurn, 0, roadSteps);
+        assertTrue(rightFarLeftX > straightFarLeftX);
+        assertTrue(leftFarLeftX < straightFarLeftX);
+
+        // 验证前/后视引导线宽度调节及上下界钳位（50% ~ 150%）
+        LineStripBatch narrowRoad = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 0.60f, roadSteps);
+        LineStripBatch wideRoad = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 1.40f, roadSteps);
+        LineStripBatch clampedLow = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 0.10f, roadSteps);
+        LineStripBatch exactLow = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 0.50f, roadSteps);
+        LineStripBatch clampedHigh = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 3.00f, roadSteps);
+        LineStripBatch exactHigh = SurroundGuidanceCalculator.buildRoadGuidanceStrips(0f, false, 1.50f, roadSteps);
+        assertEquals(4, narrowRoad.stripVertexCounts.length);
+        assertEquals(4, wideRoad.stripVertexCounts.length);
+        float narrowLeftX = centerXAtStep(narrowRoad, 0, 0);
+        float normalLeftX = centerXAtStep(straight, 0, 0);
+        float wideLeftX = centerXAtStep(wideRoad, 0, 0);
+        float narrowRightX = centerXAtStep(narrowRoad, strip0Floats * 2, 0);
+        float normalRightX = centerXAtStep(straight, strip0Floats * 2, 0);
+        float wideRightX = centerXAtStep(wideRoad, strip0Floats * 2, 0);
+        assertTrue(wideLeftX < normalLeftX && normalLeftX < narrowLeftX && narrowLeftX < 0f);
+        assertTrue(wideRightX > normalRightX && normalRightX > narrowRightX && narrowRightX > 0f);
+        assertEquals(centerXAtStep(exactLow, 0, 0), centerXAtStep(clampedLow, 0, 0), 1e-4f);
+        assertEquals(centerXAtStep(exactHigh, 0, 0), centerXAtStep(clampedHigh, 0, 0), 1e-4f);
+
+        // 鸟瞰 4 象限阿克曼方向验证（含修复前进右转反折 Bug）及倒车外摆弧线
+        int birdSteps = 12;
+        LineStripBatch birdFwdStraight = SurroundGuidanceCalculator.buildBirdGuidanceStrips(0f, false, profile, birdSteps);
+        LineStripBatch birdFwdRight = SurroundGuidanceCalculator.buildBirdGuidanceStrips(25f, false, profile, birdSteps);
+        LineStripBatch birdFwdLeft = SurroundGuidanceCalculator.buildBirdGuidanceStrips(-25f, false, profile, birdSteps);
+        assertEquals(2, birdFwdStraight.stripVertexCounts.length);
+        assertEquals(2, birdFwdRight.stripVertexCounts.length);
+        assertEquals(2, birdFwdLeft.stripVertexCounts.length);
+
+        assertTrue(centerYAtStep(birdFwdRight, 0, birdSteps) > centerYAtStep(birdFwdRight, 0, 0));
+        assertTrue(centerXAtStep(birdFwdRight, 0, birdSteps) > centerXAtStep(birdFwdStraight, 0, birdSteps));
+        assertTrue(centerYAtStep(birdFwdLeft, 0, birdSteps) > centerYAtStep(birdFwdLeft, 0, 0));
+        assertTrue(centerXAtStep(birdFwdLeft, 0, birdSteps) < centerXAtStep(birdFwdStraight, 0, birdSteps));
+
+        LineStripBatch birdRevSmall = SurroundGuidanceCalculator.buildBirdGuidanceStrips(-3f, true, profile, birdSteps);
+        assertEquals(2, birdRevSmall.stripVertexCounts.length);
+
+        LineStripBatch birdRevRight = SurroundGuidanceCalculator.buildBirdGuidanceStrips(25f, true, profile, birdSteps);
+        LineStripBatch birdRevLeft = SurroundGuidanceCalculator.buildBirdGuidanceStrips(-25f, true, profile, birdSteps);
+        assertEquals(3, birdRevRight.stripVertexCounts.length); // 含前左外摆弧
+        assertEquals(3, birdRevLeft.stripVertexCounts.length);  // 含前右外摆弧
+
+        int birdStrip0Floats = birdRevRight.stripVertexCounts[0] * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
+        assertTrue(centerYAtStep(birdRevRight, 0, birdSteps) < centerYAtStep(birdRevRight, 0, 0));
+        assertTrue(centerXAtStep(birdRevRight, 0, birdSteps) > centerXAtStep(birdRevRight, 0, 0));
+        assertTrue(centerXAtStep(birdRevRight, birdStrip0Floats * 2, 0) < 0f); // 倒车右转前外摆弧在左侧(-X)
+        assertTrue(centerYAtStep(birdRevLeft, 0, birdSteps) < centerYAtStep(birdRevLeft, 0, 0));
+        assertTrue(centerXAtStep(birdRevLeft, 0, birdSteps) < centerXAtStep(birdRevLeft, 0, 0));
+        assertTrue(centerXAtStep(birdRevLeft, birdStrip0Floats * 2, 0) > 0f);  // 倒车左转前外摆弧在右侧(+X)
+        assertEquals(floatsPerStep > 0, birdRevRight.triangleStripVertices.length > 0);
 
         byte[] validPngHeader = {(byte) 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A};
         byte[] fakeJpgHeader = {(byte) 0xFF, (byte) 0xD8, (byte) 0xFF, (byte) 0xE0, 0, 0, 0, 0};
         assertTrue(SurroundCarModelRepository.isValidPngSignatureBytes(validPngHeader));
         assertFalse(SurroundCarModelRepository.isValidPngSignatureBytes(fakeJpgHeader));
+    }
+
+    private static float centerXAtStep(LineStripBatch batch, int stripFloatOffset, int step) {
+        int base = stripFloatOffset + step * 2 * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
+        return (batch.triangleStripVertices[base]
+                + batch.triangleStripVertices[base + SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX]) * 0.5f;
+    }
+
+    private static float centerYAtStep(LineStripBatch batch, int stripFloatOffset, int step) {
+        int base = stripFloatOffset + step * 2 * SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX;
+        return (batch.triangleStripVertices[base + 1]
+                + batch.triangleStripVertices[base + SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX + 1]) * 0.5f;
     }
 
     @Test
@@ -301,5 +379,106 @@ public class SurroundCalibrationAndGuidanceTest {
         }
         assertEquals(-1.0f, minX, 0.01f);
         assertEquals(1.0f, maxX, 0.01f);
+    }
+
+    @Test
+    public void extrinsicAdjustmentRotatesCameraAccuratelyAndPreservesOrthogonality() {
+        SurroundCalibrationProfile base = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
+        assertSame(base, SurroundExtrinsicAdjustment.IDENTITY.applyToProfile(base));
+        assertFalse(base.hasExtrinsicAdjustments);
+
+        // 验证 0.5° 步进舍入、越界钳位与 Z 最小安全高度
+        CameraOffset rounded = new CameraOffset(3.26f, -3.24f, 99.0f, -100, 200, -900);
+        assertEquals(3.5f, rounded.pitchDeg, 1e-4f);
+        assertEquals(-3.0f, rounded.yawDeg, 1e-4f);
+        assertEquals(SurroundExtrinsicAdjustment.MAX_ROLL_DEG, rounded.rollDeg, 1e-4f);
+        assertEquals(SurroundExtrinsicAdjustment.MIN_POS_X_CM, rounded.posXCm);
+        assertEquals(SurroundExtrinsicAdjustment.MAX_POS_Y_CM, rounded.posYCm);
+        assertEquals(SurroundExtrinsicAdjustment.MIN_POS_Z_CM, rounded.posZCm);
+
+        SurroundExtrinsicAdjustment adj = SurroundExtrinsicAdjustment.IDENTITY
+                .withCamera("front", new CameraOffset(7.0f, 5.0f, -3.0f, 0, 0, 0))
+                .withCamera("back", new CameraOffset(-8.0f, 0.0f, 2.0f, 0, 0, -24));
+        SurroundCalibrationProfile tuned = adj.applyToProfile(base);
+        assertTrue(tuned.hasExtrinsicAdjustments);
+
+        for (String key : new String[]{"front", "back", "left", "right"}) {
+            CameraCalibration c = tuned.getCamera(key);
+            assertNotNull(c);
+            double det = c.r0[0] * (c.r1[1] * c.r2[2] - c.r1[2] * c.r2[1])
+                    - c.r0[1] * (c.r1[0] * c.r2[2] - c.r1[2] * c.r2[0])
+                    + c.r0[2] * (c.r1[0] * c.r2[1] - c.r1[1] * c.r2[0]);
+            assertEquals(1.0, det, 1e-6);
+        }
+
+        // 前摄 +7°（更平/减少向下俯角）：前方 2m 地面点在原图像素纵向更靠下（v = 1 - py/H 减小）
+        CameraCalibration baseFront = base.getCamera("front");
+        CameraCalibration tunedFront = tuned.getCamera("front");
+        assertNotNull(baseFront);
+        assertNotNull(tunedFront);
+        double[] baseFrontUv = baseFront.projectWorldToUv(0.0, baseFront.posYCm + 200.0, 0.0);
+        double[] tunedFrontUv = tunedFront.projectWorldToUv(0.0, baseFront.posYCm + 200.0, 0.0);
+        assertTrue(tunedFrontUv[1] < baseFrontUv[1]);
+
+        // 后摄 -8° + 高度 -24cm（更低更陡）：后方 2m 地面点在原图像素纵向更靠上（v = 1 - py/H 增大）
+        CameraCalibration baseBack = base.getCamera("back");
+        CameraCalibration tunedBack = tuned.getCamera("back");
+        assertNotNull(baseBack);
+        assertNotNull(tunedBack);
+        double[] baseBackUv = baseBack.projectWorldToUv(0.0, baseBack.posYCm - 200.0, 0.0);
+        double[] tunedBackUv = tunedBack.projectWorldToUv(0.0, baseBack.posYCm - 200.0, 0.0);
+        assertTrue(tunedBackUv[1] > baseBackUv[1]);
+    }
+
+    @Test
+    public void extrinsicAdjustmentJsonSerializationAndExportRoundTrip() {
+        assertEquals(SurroundExtrinsicAdjustment.IDENTITY, SurroundExtrinsicAdjustment.fromJson(null));
+        assertEquals(SurroundExtrinsicAdjustment.IDENTITY, SurroundExtrinsicAdjustment.fromJson(""));
+        assertEquals(SurroundExtrinsicAdjustment.IDENTITY, SurroundExtrinsicAdjustment.fromJson("{broken"));
+
+        SurroundExtrinsicAdjustment adj = SurroundExtrinsicAdjustment.IDENTITY
+                .withCamera("front", new CameraOffset(6.5f, -1.5f, 1.0f, 4, 25, -8))
+                .withCamera("back", new CameraOffset(-7.0f, 2.0f, -1.0f, -6, -35, -20));
+        assertEquals(2, adj.countNonZeroCameras());
+        String serialized = adj.toJson();
+        assertEquals(adj, SurroundExtrinsicAdjustment.fromJson(serialized));
+
+        SurroundCalibrationProfile base = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
+        SurroundCalibrationProfile tuned = adj.applyToProfile(base);
+        String exportedJson = SurroundCalibrationManager.exportCalibrationJson(tuned);
+        SurroundCalibrationProfile reparsed =
+                SurroundCalibrationManager.parseCalibrationJson(exportedJson, 206, 530, 0);
+
+        for (String key : new String[]{"front", "back", "left", "right"}) {
+            CameraCalibration expected = tuned.getCamera(key);
+            CameraCalibration actual = reparsed.getCamera(key);
+            assertNotNull(expected);
+            assertNotNull(actual);
+            assertEquals(expected.posXCm, actual.posXCm, 1e-3);
+            assertEquals(expected.posYCm, actual.posYCm, 1e-3);
+            assertEquals(expected.posZCm, actual.posZCm, 1e-3);
+            for (int i = 0; i < 3; i++) {
+                assertEquals(expected.r0[i], actual.r0[i], 1e-5);
+                assertEquals(expected.r1[i], actual.r1[i], 1e-5);
+                assertEquals(expected.r2[i], actual.r2[i], 1e-5);
+            }
+        }
+    }
+
+    @Test
+    public void extrinsicAdjustmentProceduralMeshGeneratesValidBirdGeometry() {
+        SurroundCalibrationProfile base = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
+        SurroundExtrinsicAdjustment adj = SurroundExtrinsicAdjustment.IDENTITY
+                .withCamera("front", new CameraOffset(5.0f, 0f, 0f, 0, 0, 0));
+        SurroundCalibrationProfile tuned = adj.applyToProfile(base);
+        assertTrue(tuned.hasExtrinsicAdjustments);
+        assertTrue(tuned.useBuiltInMeshes);
+
+        GridMeshData bird = SurroundMeshBuilder.buildBirdGroundMesh(tuned, 44, 68);
+        assertEquals(45 * 69 * SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX, bird.vertices.length);
+        assertEquals(44 * 68 * 6, bird.indices.length);
+        for (float v : bird.vertices) {
+            assertTrue(Float.isFinite(v));
+        }
     }
 }

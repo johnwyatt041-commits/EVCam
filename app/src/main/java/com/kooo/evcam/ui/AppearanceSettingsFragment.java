@@ -61,6 +61,8 @@ public class AppearanceSettingsFragment extends Fragment
     private Button btnCornerNavHidden;
     private SwitchMaterial viewShortcutsSwitch;
     private boolean suppressShortcutListener = false;
+    private SwitchMaterial guidanceEnabledSwitch;
+    private boolean suppressGuidanceListener = false;
     private SwitchMaterial accessibilityOverlaySwitch;
     private SwitchMaterial confirmDoorExitSwitch;
     private Button btnDoorExit3s;
@@ -105,6 +107,7 @@ public class AppearanceSettingsFragment extends Fragment
         btnCornerNavAlways = view.findViewById(R.id.btn_corner_nav_always);
         btnCornerNavHidden = view.findViewById(R.id.btn_corner_nav_hidden);
         viewShortcutsSwitch = view.findViewById(R.id.switch_view_shortcuts);
+        guidanceEnabledSwitch = view.findViewById(R.id.switch_appearance_guidance_enabled);
         accessibilityOverlaySwitch = view.findViewById(R.id.switch_accessibility_overlay);
         confirmDoorExitSwitch = view.findViewById(R.id.switch_confirm_door_exit);
         btnDoorExit3s = view.findViewById(R.id.btn_door_exit_3s);
@@ -178,6 +181,19 @@ public class AppearanceSettingsFragment extends Fragment
             });
         }
 
+        if (appConfig != null && guidanceEnabledSwitch != null) {
+            suppressGuidanceListener = true;
+            guidanceEnabledSwitch.setChecked(appConfig.isPreviewGuidanceEnabled());
+            suppressGuidanceListener = false;
+            guidanceEnabledSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (suppressGuidanceListener) return;
+                if (appConfig != null) {
+                    appConfig.setPreviewGuidanceEnabled(isChecked);
+                    notifyHostPreviewSettingsChanged();
+                }
+            });
+        }
+
         if (appConfig != null && accessibilityOverlaySwitch != null) {
             accessibilityOverlaySwitch.setChecked(appConfig.isAccessibilityOverlayEnabled());
             accessibilityOverlaySwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
@@ -224,6 +240,14 @@ public class AppearanceSettingsFragment extends Fragment
         }
         SettingsFragment.configureEmbeddedToolbar(this, view, "外观与交互");
         return view;
+    }
+
+    @Override
+    public void onResume() {
+        super.onResume();
+        if (getContext() != null && getView() != null) {
+            refreshPreviewOptionsUi(getContext());
+        }
     }
 
     @Nullable
@@ -397,6 +421,11 @@ public class AppearanceSettingsFragment extends Fragment
             viewShortcutsSwitch.setChecked(
                     appConfig.isPreviewViewShortcutsEnabled() && appConfig.isSurroundOverlayButtonsVisible());
             suppressShortcutListener = false;
+        }
+        if (guidanceEnabledSwitch != null && appConfig != null) {
+            suppressGuidanceListener = true;
+            guidanceEnabledSwitch.setChecked(appConfig.isPreviewGuidanceEnabled());
+            suppressGuidanceListener = false;
         }
 
         String cornerMode = appConfig != null

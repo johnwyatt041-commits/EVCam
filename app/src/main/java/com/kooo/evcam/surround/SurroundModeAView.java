@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.opengl.GLSurfaceView;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -21,7 +22,6 @@ import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
@@ -29,6 +29,7 @@ import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.SurroundLayoutSpec;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.ViewportBox;
+import com.kooo.evcam.ui.UiScaleController;
 import com.kooo.evcam.vehicle.SurroundSteeringAngleSource;
 import com.kooo.evcam.vehicle.VehicleSignalHub;
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
@@ -49,9 +50,26 @@ public final class SurroundModeAView extends FrameLayout {
     private static final String TAG = "SurroundModeAView";
     private static final long TEARDOWN_SURFACE_DELAY_MS = 100L;
 
+    private static final int BASE_GROUP_FILL = 0xFF101620;
+    private static final int BASE_GROUP_STROKE = 0x39FFFFFF;
+    private static final int BASE_CARD_BG = 0xC8101620;
+    private static final int BASE_CARD_STROKE = 0x30FFFFFF;
+    private static final int BASE_DIVIDER = 0x26FFFFFF;
+    private static final int BASE_BTN_SELECTED_FILL = 0xFF2B7AE8;
+    private static final int BASE_BTN_SELECTED_STROKE = 0x6A8AC4FF;
+    private static final int BASE_BTN_IDLE_FILL = 0xE61B2331;
+    private static final int BASE_BTN_IDLE_STROKE = 0x1EFFFFFF;
+    private static final int COLOR_BTN_IDLE_TEXT = 0xFFDCE5F2;
+    private static final int BASE_BTN_COLLAPSE_FILL = 0xCC151C28;
+    private static final int BASE_BTN_COLLAPSE_STROKE = 0x28FFFFFF;
+    private static final int COLOR_BTN_COLLAPSE_TEXT = 0xFFA2B3CA;
+    private static final int BASE_BADGE_FILL = 0xE60E141E;
+    private static final int BASE_BADGE_STROKE = 0x32FFFFFF;
+
     private final AppConfig appConfig;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private final float density;
+    private final float surroundPillTextPx;
     private final int gapPx;
 
     @Nullable
@@ -110,8 +128,11 @@ public final class SurroundModeAView extends FrameLayout {
     private final TextView btnWheelFront;
     private final TextView btnWheelSides;
     private final TextView btnWheelRear;
+    private final View wheelDivider;
     private final TextView btnWheelCollapse;
     private final TextView btnWheelExpandFloating;
+    private final int pillRadiusPx;
+    private int overlayBgAlphaPercent = AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT;
 
     private final VehicleSignalHub.Listener signalListener = snapshot -> mainHandler.post(() -> {
         if (snapshot == null) return;
@@ -130,6 +151,8 @@ public final class SurroundModeAView extends FrameLayout {
         super(context, attrs);
         this.appConfig = new AppConfig(context);
         this.density = getResources().getDisplayMetrics().density;
+        this.surroundPillTextPx = getResources().getDimension(R.dimen.ui_surround_pill_text_size)
+                * UiScaleController.getSavedScaleFactor(context);
         this.gapPx = Math.max(6, dp(10));
         setBackgroundColor(Color.parseColor("#0B0F17"));
 
@@ -145,12 +168,16 @@ public final class SurroundModeAView extends FrameLayout {
 
         int pillHeightPx = Math.max(dp(38),
                 getResources().getDimensionPixelSize(R.dimen.ui_surround_pill_height));
-        int pillRadiusPx = Math.max(dp(19), pillHeightPx / 2);
+        this.pillRadiusPx = Math.max(dp(19), pillHeightPx / 2);
+        this.overlayBgAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
 
         this.topButtonsGroup = new LinearLayout(context);
         topButtonsGroup.setOrientation(LinearLayout.HORIZONTAL);
         topButtonsGroup.setPadding(dp(4), dp(4), dp(4), dp(4));
-        topButtonsGroup.setBackground(createCapsuleBg(0xCC111824, pillRadiusPx, 0x66FFFFFF));
+        topButtonsGroup.setBackground(createCapsuleBg(
+                AppConfig.applyColorAlphaPercent(BASE_GROUP_FILL, overlayBgAlphaPercent),
+                pillRadiusPx,
+                AppConfig.applyColorAlphaPercent(BASE_GROUP_STROKE, overlayBgAlphaPercent)));
         LayoutParams topBtnsLp = new LayoutParams(LayoutParams.WRAP_CONTENT, pillHeightPx, Gravity.TOP | Gravity.END);
         topBtnsLp.setMargins(dp(14), dp(12), dp(14), dp(12));
 
@@ -177,7 +204,10 @@ public final class SurroundModeAView extends FrameLayout {
         });
         btnWheelExpandFloating.setMinWidth(dp(96));
         btnWheelExpandFloating.setPadding(dp(14), dp(6), dp(14), dp(6));
-        btnWheelExpandFloating.setBackground(createCapsuleBg(0xD8111824, pillRadiusPx, 0x66FFFFFF));
+        btnWheelExpandFloating.setBackground(createCapsuleBg(
+                AppConfig.applyColorAlphaPercent(BASE_GROUP_FILL, overlayBgAlphaPercent),
+                pillRadiusPx,
+                AppConfig.applyColorAlphaPercent(BASE_GROUP_STROKE, overlayBgAlphaPercent)));
         btnWheelExpandFloating.setTextColor(Color.WHITE);
         btnWheelExpandFloating.setTypeface(null, Typeface.BOLD);
         LayoutParams expandLp = new LayoutParams(LayoutParams.WRAP_CONTENT, pillHeightPx, Gravity.BOTTOM | Gravity.END);
@@ -202,31 +232,41 @@ public final class SurroundModeAView extends FrameLayout {
         this.bottomCenterCard = new LinearLayout(context);
         bottomCenterCard.setOrientation(LinearLayout.VERTICAL);
         bottomCenterCard.setGravity(Gravity.CENTER);
-        bottomCenterCard.setPadding(dp(8), dp(8), dp(8), dp(8));
-        bottomCenterCard.setBackground(createCapsuleBg(0xEC141923, dp(14), 0x4DFFFFFF));
+        bottomCenterCard.setPadding(dp(10), dp(10), dp(10), dp(10));
+        bottomCenterCard.setBackground(createCapsuleBg(
+                AppConfig.applyColorAlphaPercent(BASE_CARD_BG, overlayBgAlphaPercent),
+                dp(16),
+                AppConfig.applyColorAlphaPercent(BASE_CARD_STROKE, overlayBgAlphaPercent)));
 
-        this.btnWheelFront = createCenterWheelBtn(context, "前轮", v -> {
+        this.btnWheelFront = createCenterWheelBtn(context, "前轮", surroundPillTextPx * 0.90f, v -> {
             manualBottomOverride = SurroundViewMode.FRONT_WHEELS;
             appConfig.setSurroundDetailViews(appConfig.getSurroundTopView(), SurroundViewMode.FRONT_WHEELS);
             refreshLayoutAndRenderState();
         });
-        this.btnWheelRear = createCenterWheelBtn(context, "后轮", v -> {
+        this.btnWheelRear = createCenterWheelBtn(context, "后轮", surroundPillTextPx * 0.90f, v -> {
             manualBottomOverride = SurroundViewMode.REAR_WHEELS;
             appConfig.setSurroundDetailViews(appConfig.getSurroundTopView(), SurroundViewMode.REAR_WHEELS);
             refreshLayoutAndRenderState();
         });
-        this.btnWheelSides = createCenterWheelBtn(context, "双侧", v -> {
+        this.btnWheelSides = createCenterWheelBtn(context, "双侧", surroundPillTextPx * 0.90f, v -> {
             manualBottomOverride = SurroundViewMode.SIDES;
             appConfig.setSurroundDetailViews(appConfig.getSurroundTopView(), SurroundViewMode.SIDES);
             refreshLayoutAndRenderState();
         });
-        this.btnWheelCollapse = createCenterWheelBtn(context, "收起轮位", v -> {
+        this.wheelDivider = new View(context);
+        wheelDivider.setBackgroundColor(AppConfig.applyColorAlphaPercent(BASE_DIVIDER, overlayBgAlphaPercent));
+        LinearLayout.LayoutParams divLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT, Math.max(1, dp(1)));
+        divLp.setMargins(dp(6), dp(4), dp(6), dp(4));
+
+        this.btnWheelCollapse = createCenterWheelBtn(context, "收起轮位", surroundPillTextPx * 0.82f, v -> {
             appConfig.setSurroundWheelsCollapsed(true);
             refreshLayoutAndRenderState();
         });
         bottomCenterCard.addView(btnWheelFront);
         bottomCenterCard.addView(btnWheelRear);
         bottomCenterCard.addView(btnWheelSides);
+        bottomCenterCard.addView(wheelDivider, divLp);
         bottomCenterCard.addView(btnWheelCollapse);
 
         overlayRoot.addView(topDetailOverlay);
@@ -389,6 +429,24 @@ public final class SurroundModeAView extends FrameLayout {
         refreshLayoutAndRenderState();
     }
 
+    /** 拖动 360 编辑器引导线宽度滑条时即时重绘道路引导线。 */
+    public void updateRoadGuidanceWidthScale(float widthScale) {
+        SurroundGlRenderer renderer = this.glRenderer;
+        if (renderer != null) {
+            renderer.updateRoadGuidanceWidthScale(widthScale);
+        }
+    }
+
+    /** 拖动底色透明度滑条时即时刷新画面内按钮与状态标签底色。 */
+    public void updateOverlayBgAlphaPercent(int alphaPercent) {
+        this.overlayBgAlphaPercent = AppConfig.normalizePreviewOverlayBgAlphaPercent(alphaPercent);
+        applyOverlayButtonStyling(
+                appConfig.getSurroundTopView(),
+                SurroundViewMode.resolveEffectiveBottomView(
+                        appConfig.getSurroundTopView(), appConfig.getSurroundBottomView(),
+                        inReverseGear, manualBottomOverride));
+    }
+
     public void updateSteeringWheelAngle(float angleDeg) {
         float clamped = Math.max(-45f, Math.min(45f, angleDeg));
         this.currentWheelAngleDeg = clamped;
@@ -450,6 +508,8 @@ public final class SurroundModeAView extends FrameLayout {
         boolean wheelsCollapsed = appConfig.isSurroundWheelsCollapsed();
         boolean stretchRoad = appConfig.isSurroundStretchRoadViews();
         boolean guidanceEnabled = appConfig.isPreviewGuidanceEnabled();
+        float roadWidthScale = appConfig.getSurroundRoadGuidanceWidthScale();
+        this.overlayBgAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
         boolean showOverlayButtons = appConfig.isPreviewViewShortcutsEnabled()
                 && appConfig.isSurroundOverlayButtonsVisible();
 
@@ -463,12 +523,6 @@ public final class SurroundModeAView extends FrameLayout {
         tvTopBadge.setText(SurroundViewMode.formatTopBadgeText(effTop, followingGear, inReverseGear));
 
         topButtonsGroup.setVisibility(showOverlayButtons ? View.VISIBLE : View.GONE);
-        styleSwitchPillSelection(btnTopFront, manualTopOverride == SurroundViewMode.FRONT
-                || (manualTopOverride == null && configuredTop == SurroundViewMode.FRONT));
-        styleSwitchPillSelection(btnTopRear, manualTopOverride == SurroundViewMode.REAR
-                || (manualTopOverride == null && configuredTop == SurroundViewMode.REAR));
-        styleSwitchPillSelection(btnTopDrive, followingGear);
-
         btnWheelExpandFloating.setVisibility(
                 (wheelsCollapsed && showOverlayButtons) ? View.VISIBLE : View.GONE);
 
@@ -482,15 +536,13 @@ public final class SurroundModeAView extends FrameLayout {
             tvBottomLeftBadge.setText("左侧 · 前轮");
             tvBottomRightBadge.setText("右侧 · 前轮");
         }
-        styleCenterWheelBtn(btnWheelFront, effBottom == SurroundViewMode.FRONT_WHEELS);
-        styleCenterWheelBtn(btnWheelRear, effBottom == SurroundViewMode.REAR_WHEELS);
-        styleCenterWheelBtn(btnWheelSides, effBottom == SurroundViewMode.SIDES);
-        styleCenterWheelBtn(btnWheelCollapse, false);
+        applyOverlayButtonStyling(configuredTop, effBottom);
 
         if (glRenderer != null) {
             glRenderer.updateRenderState(
                     effTop, effBottom, wheelsCollapsed, stretchRoad,
-                    guidanceEnabled, currentWheelAngleDeg, inReverseGear, gapPx);
+                    guidanceEnabled, roadWidthScale, showOverlayButtons,
+                    currentWheelAngleDeg, inReverseGear, gapPx);
         }
 
         if (w <= 0 || h <= 0) {
@@ -500,6 +552,7 @@ public final class SurroundModeAView extends FrameLayout {
                 w, h,
                 effBottom,
                 wheelsCollapsed,
+                showOverlayButtons,
                 appConfig.getSurroundGroundWidthCm(),
                 appConfig.getSurroundGroundLengthCm(),
                 appConfig.getSurroundGroundFrontExtensionCm(),
@@ -556,14 +609,54 @@ public final class SurroundModeAView extends FrameLayout {
         return frame;
     }
 
+    private void applyOverlayButtonStyling(@NonNull SurroundViewMode configuredTop,
+                                           @NonNull SurroundViewMode effBottom) {
+        int alphaPct = overlayBgAlphaPercent;
+        int groupFill = AppConfig.applyColorAlphaPercent(BASE_GROUP_FILL, alphaPct);
+        int groupStroke = AppConfig.applyColorAlphaPercent(BASE_GROUP_STROKE, alphaPct);
+        topButtonsGroup.setBackground(createCapsuleBg(groupFill, pillRadiusPx, groupStroke));
+        btnWheelExpandFloating.setBackground(createCapsuleBg(groupFill, pillRadiusPx, groupStroke));
+
+        bottomCenterCard.setBackground(createCapsuleBg(
+                AppConfig.applyColorAlphaPercent(BASE_CARD_BG, alphaPct),
+                dp(16),
+                AppConfig.applyColorAlphaPercent(BASE_CARD_STROKE, alphaPct)));
+        wheelDivider.setBackgroundColor(AppConfig.applyColorAlphaPercent(BASE_DIVIDER, alphaPct));
+
+        int badgeFill = AppConfig.applyColorAlphaPercent(BASE_BADGE_FILL, alphaPct);
+        int badgeStroke = AppConfig.applyColorAlphaPercent(BASE_BADGE_STROKE, alphaPct);
+        tvTopBadge.setBackground(createCapsuleBg(badgeFill, dp(10), badgeStroke));
+        tvBottomLeftBadge.setBackground(createCapsuleBg(badgeFill, dp(10), badgeStroke));
+        tvBottomRightBadge.setBackground(createCapsuleBg(badgeFill, dp(10), badgeStroke));
+
+        boolean followingGear = (manualTopOverride == null && configuredTop == SurroundViewMode.DRIVE)
+                || manualTopOverride == SurroundViewMode.DRIVE;
+        styleSwitchPillSelection(btnTopFront, manualTopOverride == SurroundViewMode.FRONT
+                || (manualTopOverride == null && configuredTop == SurroundViewMode.FRONT));
+        styleSwitchPillSelection(btnTopRear, manualTopOverride == SurroundViewMode.REAR
+                || (manualTopOverride == null && configuredTop == SurroundViewMode.REAR));
+        styleSwitchPillSelection(btnTopDrive, followingGear);
+
+        styleCenterWheelBtn(btnWheelFront, effBottom == SurroundViewMode.FRONT_WHEELS, false);
+        styleCenterWheelBtn(btnWheelRear, effBottom == SurroundViewMode.REAR_WHEELS, false);
+        styleCenterWheelBtn(btnWheelSides, effBottom == SurroundViewMode.SIDES, false);
+        styleCenterWheelBtn(btnWheelCollapse, false, true);
+    }
+
     private TextView createBadgeText(@NonNull Context context, @NonNull String text) {
         TextView tv = new TextView(context);
         tv.setText(text);
-        tv.setTextColor(Color.WHITE);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
-        tv.setTypeface(null, Typeface.BOLD);
-        tv.setPadding(dp(10), dp(5), dp(10), dp(5));
-        tv.setBackground(createCapsuleBg(0xBF0F141E, dp(10), 0x40FFFFFF));
+        tv.setTextColor(0xFFF1F5F9);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Math.max(dp(12), surroundPillTextPx * 0.76f));
+        tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        tv.setSingleLine(true);
+        tv.setIncludeFontPadding(false);
+        tv.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
+        tv.setPadding(dp(11), dp(5), dp(11), dp(5));
+        tv.setBackground(createCapsuleBg(
+                AppConfig.applyColorAlphaPercent(BASE_BADGE_FILL, overlayBgAlphaPercent),
+                dp(10),
+                AppConfig.applyColorAlphaPercent(BASE_BADGE_STROKE, overlayBgAlphaPercent)));
         return tv;
     }
 
@@ -572,10 +665,12 @@ public final class SurroundModeAView extends FrameLayout {
                                     @NonNull OnClickListener clickListener) {
         TextView tv = new TextView(context);
         tv.setText(label);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.ui_surround_pill_text_size));
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, surroundPillTextPx);
         tv.setGravity(Gravity.CENTER);
-        tv.setPadding(dp(12), dp(4), dp(12), dp(4));
+        tv.setSingleLine(true);
+        tv.setIncludeFontPadding(false);
+        tv.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
+        tv.setPadding(dp(14), dp(4), dp(14), dp(4));
         tv.setClickable(true);
         tv.setFocusable(true);
         tv.setOnClickListener(clickListener);
@@ -588,11 +683,16 @@ public final class SurroundModeAView extends FrameLayout {
 
     private TextView createCenterWheelBtn(@NonNull Context context,
                                           @NonNull String label,
+                                          float textSizePx,
                                           @NonNull OnClickListener clickListener) {
         TextView tv = new TextView(context);
         tv.setText(label);
-        tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 13);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX, Math.max(dp(12), textSizePx));
         tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setEllipsize(TextUtils.TruncateAt.END);
+        tv.setIncludeFontPadding(false);
+        tv.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
         tv.setMinHeight(dp(32));
         tv.setPadding(dp(8), dp(4), dp(8), dp(4));
         tv.setClickable(true);
@@ -608,25 +708,37 @@ public final class SurroundModeAView extends FrameLayout {
 
     private void styleSwitchPillSelection(@NonNull TextView tv, boolean selected) {
         if (selected) {
-            tv.setBackground(createCapsuleBg(ContextCompat.getColor(getContext(), R.color.button_accent), dp(15), 0));
-            tv.setTextColor(ContextCompat.getColor(getContext(), R.color.ui_on_accent));
+            int fill = AppConfig.applyColorAlphaPercent(BASE_BTN_SELECTED_FILL, overlayBgAlphaPercent);
+            int stroke = AppConfig.applyColorAlphaPercent(BASE_BTN_SELECTED_STROKE, overlayBgAlphaPercent);
+            tv.setBackground(createCapsuleBg(fill, dp(16), stroke));
+            tv.setTextColor(overlayBgAlphaPercent < 20 ? 0xFF60A5FA : Color.WHITE);
             tv.setTypeface(null, Typeface.BOLD);
         } else {
             tv.setBackground(null);
-            tv.setTextColor(Color.WHITE);
-            tv.setTypeface(null, Typeface.NORMAL);
+            tv.setTextColor(COLOR_BTN_IDLE_TEXT);
+            tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         }
     }
 
-    private void styleCenterWheelBtn(@NonNull TextView tv, boolean selected) {
+    private void styleCenterWheelBtn(@NonNull TextView tv, boolean selected, boolean isCollapse) {
         if (selected) {
-            tv.setBackground(createCapsuleBg(ContextCompat.getColor(getContext(), R.color.button_accent), dp(10), 0));
-            tv.setTextColor(ContextCompat.getColor(getContext(), R.color.ui_on_accent));
+            int fill = AppConfig.applyColorAlphaPercent(BASE_BTN_SELECTED_FILL, overlayBgAlphaPercent);
+            int stroke = AppConfig.applyColorAlphaPercent(BASE_BTN_SELECTED_STROKE, overlayBgAlphaPercent);
+            tv.setBackground(createCapsuleBg(fill, dp(12), stroke));
+            tv.setTextColor(overlayBgAlphaPercent < 20 ? 0xFF60A5FA : Color.WHITE);
             tv.setTypeface(null, Typeface.BOLD);
+        } else if (isCollapse) {
+            int fill = AppConfig.applyColorAlphaPercent(BASE_BTN_COLLAPSE_FILL, overlayBgAlphaPercent);
+            int stroke = AppConfig.applyColorAlphaPercent(BASE_BTN_COLLAPSE_STROKE, overlayBgAlphaPercent);
+            tv.setBackground(createCapsuleBg(fill, dp(12), stroke));
+            tv.setTextColor(COLOR_BTN_COLLAPSE_TEXT);
+            tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         } else {
-            tv.setBackground(createCapsuleBg(0xFF242E40, dp(10), 0x40FFFFFF));
-            tv.setTextColor(Color.WHITE);
-            tv.setTypeface(null, Typeface.NORMAL);
+            int fill = AppConfig.applyColorAlphaPercent(BASE_BTN_IDLE_FILL, overlayBgAlphaPercent);
+            int stroke = AppConfig.applyColorAlphaPercent(BASE_BTN_IDLE_STROKE, overlayBgAlphaPercent);
+            tv.setBackground(createCapsuleBg(fill, dp(12), stroke));
+            tv.setTextColor(COLOR_BTN_IDLE_TEXT);
+            tv.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
         }
     }
 

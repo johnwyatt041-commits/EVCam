@@ -52,6 +52,9 @@ public final class VehicleAutomationCoordinator {
                                                @NonNull Runnable onConfirmExit);
 
         void moveRecordingToBackgroundForGearShift();
+
+        default void onSurroundGuidanceChangedForAutomation(boolean enabled, @NonNull String reason) {
+        }
     }
 
     private static final VehicleAutomationCoordinator INSTANCE = new VehicleAutomationCoordinator();
@@ -240,8 +243,7 @@ public final class VehicleAutomationCoordinator {
             mainHandler.post(() -> onSignalSnapshotOnMain(snapshot));
 
     private final Runnable ruleDelayTickRunnable = () -> {
-        VehicleRuleEngine.TriggerEvent event = ruleEngine.tick(SystemClock.uptimeMillis());
-        if (event != null) {
+        for (VehicleRuleEngine.TriggerEvent event : ruleEngine.tickAll(SystemClock.uptimeMillis())) {
             handleRuleTrigger(event);
         }
         scheduleNextRuleDelayLocked();
@@ -451,8 +453,7 @@ public final class VehicleAutomationCoordinator {
         }
         gearPopupCoordinator.onSnapshot(snapshot);
         reversePreviewCoordinator.onSnapshot(snapshot);
-        VehicleRuleEngine.TriggerEvent event = ruleEngine.evaluate(snapshot, SystemClock.uptimeMillis());
-        if (event != null) {
+        for (VehicleRuleEngine.TriggerEvent event : ruleEngine.evaluateAll(snapshot, SystemClock.uptimeMillis())) {
             handleRuleTrigger(event);
         }
         scheduleNextRuleDelayLocked();
@@ -536,6 +537,15 @@ public final class VehicleAutomationCoordinator {
                     host.requestDoorExitConfirmationDialog(config.getDoorExitDelaySeconds(), reason, performExit);
                 } else {
                     performExit.run();
+                }
+                break;
+
+            case ENABLE_GUIDANCE:
+            case DISABLE_GUIDANCE:
+                boolean guidanceEnabled = (event.action == RuleAction.ENABLE_GUIDANCE);
+                config.setPreviewGuidanceEnabled(guidanceEnabled);
+                if (host != null) {
+                    host.onSurroundGuidanceChangedForAutomation(guidanceEnabled, reason);
                 }
                 break;
         }

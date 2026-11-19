@@ -5,6 +5,7 @@ import android.content.res.ColorStateList;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.Button;
+import android.widget.SeekBar;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -20,17 +21,31 @@ import com.kooo.evcam.R;
 
 import java.util.Locale;
 import java.util.function.Consumer;
+import java.util.function.IntConsumer;
+import java.util.function.IntSupplier;
 
 /** Editor controls are inflated on entry and removed on exit. */
 public final class PreviewEditorController {
+    private enum SubMode {
+        LAYOUT,
+        CROP,
+        OPACITY
+    }
+
     private final AppCompatActivity activity;
     private final EditablePreviewLayout layout;
     private final ViewGroup host;
     private final Consumer<Boolean> changed;
     private final AppConfig appConfig;
     @Nullable
+    private PreviewModeController previewModeController;
+    @Nullable
     private View controls;
     private boolean collapsed = false;
+    private boolean modeAEditing = false;
+    private SubMode subMode = SubMode.LAYOUT;
+    private int beforeEditingWidthPercent = AppConfig.DEFAULT_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT;
+    private int beforeEditingAlphaPercent = AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT;
 
     public PreviewEditorController(AppCompatActivity activity, Consumer<Boolean> changed) {
         this.activity = activity;
@@ -40,26 +55,41 @@ public final class PreviewEditorController {
         this.appConfig = new AppConfig(activity);
     }
 
+    public void setPreviewModeController(@Nullable PreviewModeController controller) {
+        this.previewModeController = controller;
+    }
+
     public boolean isAvailable() {
         return layout != null && host != null;
     }
 
     public boolean isEditing() {
-        return isAvailable() && layout.isEditing();
+        return modeAEditing || (isAvailable() && layout.isEditing());
     }
 
     public void begin() {
         if (!isAvailable() || isEditing()) return;
+        PreviewMode currentMode = previewModeController != null
+                ? previewModeController.getCurrentPreviewMode()
+                : PreviewMode.fromKey(appConfig.getPreviewMode());
         collapsed = false;
-        layout.beginEditing();
+        beforeEditingWidthPercent = appConfig.getSurroundRoadGuidanceWidthPercent();
+        beforeEditingAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
+        modeAEditing = (currentMode == PreviewMode.MODE_A);
+        subMode = modeAEditing ? SubMode.OPACITY : SubMode.LAYOUT;
+
+        if (!modeAEditing) {
+            layout.beginEditing();
+            layout.setOnEditorSelectionListener(idx -> refreshCropControls(activity));
+        }
+
         controls = activity.getLayoutInflater().inflate(R.layout.ui_preview_editor, host, false);
         host.addView(controls);
         host.setVisibility(View.VISIBLE);
 
-        layout.setOnEditorSelectionListener(idx -> refreshCropControls(activity));
-
-        controls.findViewById(R.id.ui_editor_tab_layout).setOnClickListener(v -> switchSubMode(false));
-        controls.findViewById(R.id.ui_editor_tab_crop).setOnClickListener(v -> switchSubMode(true));
+        controls.findViewById(R.id.ui_editor_tab_layout).setOnClickListener(v -> switchSubMode(SubMode.LAYOUT));
+        controls.findViewById(R.id.ui_editor_tab_crop).setOnClickListener(v -> switchSubMode(SubMode.CROP));
+        controls.findViewById(R.id.ui_editor_tab_opacity).setOnClickListener(v -> switchSubMode(SubMode.OPACITY));
         controls.findViewById(R.id.ui_editor_collapse).setOnClickListener(v -> toggleCollapse());
 
         bindVisibilityButton(controls.findViewById(R.id.ui_vis_front), PreviewLayoutModel.FRONT);
@@ -81,6 +111,26 @@ public final class PreviewEditorController {
             refreshCropControls(activity);
         });
 
+        bindPercentSliderRow(
+                R.id.ui_width_seekbar, R.id.ui_width_minus, R.id.ui_width_plus,
+                R.id.ui_width_reset, R.id.ui_width_value,
+                AppConfig.MIN_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                AppConfig.MAX_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                AppConfig.DEFAULT_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                5,
+                appConfig::getSurroundRoadGuidanceWidthPercent,
+                this::applyRoadGuidanceWidthPercent);
+
+        bindPercentSliderRow(
+                R.id.ui_opacity_seekbar, R.id.ui_opacity_minus, R.id.ui_opacity_plus,
+                R.id.ui_opacity_reset, R.id.ui_opacity_value,
+                AppConfig.MIN_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                AppConfig.MAX_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                10,
+                appConfig::getPreviewOverlayBgAlphaPercent,
+                this::applyOverlayAlphaPercent);
+
         controls.findViewById(R.id.ui_layout_cancel).setOnClickListener(v -> finish(false));
         controls.findViewById(R.id.ui_layout_save).setOnClickListener(v -> finish(true));
 
@@ -89,12 +139,107 @@ public final class PreviewEditorController {
         changed.accept(true);
     }
 
-    private void switchSubMode(boolean cropMode) {
-        layout.setCropEditMode(cropMode);
+    private void switchSubMode(@NonNull SubMode target) {
+        if (modeAEditing) return;
+        this.subMode = target;
+        layout.setCropEditMode(target == SubMode.CROP);
+        if (previewModeController != null) {
+            previewModeController.setOpacityPreviewMode(target == SubMode.OPACITY);
+        }
         if (collapsed) {
             collapsed = false;
         }
         refreshAllEditorControls(activity);
+    }
+
+    private void applyRoadGuidanceWidthPercent(int percent) {
+        int clamped = AppConfig.normalizeSurroundRoadGuidanceWidthPercent(percent);
+        appConfig.setSurroundRoadGuidanceWidthPercent(clamped);
+        if (previewModeController != null) {
+            previewModeController.updateSurroundRoadGuidanceWidthLive(clamped / 100.0f);
+        }
+    }
+
+    private void applyOverlayAlphaPercent(int percent) {
+        int clamped = AppConfig.normalizePreviewOverlayBgAlphaPercent(percent);
+        appConfig.setPreviewOverlayBgAlphaPercent(clamped);
+        if (previewModeController != null) {
+            previewModeController.updateOverlayBgAlphaPercentLive(clamped);
+        }
+    }
+
+    private void bindPercentSliderRow(int seekBarId,
+                                      int minusId,
+                                      int plusId,
+                                      int resetId,
+                                      int valueTextId,
+                                      int minPercent,
+                                      int maxPercent,
+                                      int defaultPercent,
+                                      int stepPercent,
+                                      @NonNull IntSupplier getter,
+                                      @NonNull IntConsumer updater) {
+        if (controls == null) return;
+        SeekBar seekBar = controls.findViewById(seekBarId);
+        TextView valueText = controls.findViewById(valueTextId);
+        View minusBtn = controls.findViewById(minusId);
+        View plusBtn = controls.findViewById(plusId);
+        View resetBtn = controls.findViewById(resetId);
+        int range = Math.max(1, maxPercent - minPercent);
+
+        Runnable syncUi = () -> {
+            int val = Math.max(minPercent, Math.min(maxPercent, getter.getAsInt()));
+            if (seekBar != null) {
+                seekBar.setMax(range);
+                int targetProgress = val - minPercent;
+                if (seekBar.getProgress() != targetProgress) {
+                    seekBar.setProgress(targetProgress);
+                }
+            }
+            if (valueText != null) {
+                valueText.setText(String.format(Locale.US, "%d%%", val));
+            }
+        };
+        syncUi.run();
+
+        if (seekBar != null) {
+            seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+                @Override
+                public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
+                    int val = minPercent + progress;
+                    if (valueText != null) {
+                        valueText.setText(String.format(Locale.US, "%d%%", val));
+                    }
+                    if (fromUser) {
+                        updater.accept(val);
+                    }
+                }
+
+                @Override
+                public void onStartTrackingTouch(SeekBar bar) {}
+
+                @Override
+                public void onStopTrackingTouch(SeekBar bar) {}
+            });
+        }
+        if (minusBtn != null) {
+            minusBtn.setOnClickListener(v -> {
+                updater.accept(getter.getAsInt() - stepPercent);
+                syncUi.run();
+            });
+        }
+        if (plusBtn != null) {
+            plusBtn.setOnClickListener(v -> {
+                updater.accept(getter.getAsInt() + stepPercent);
+                syncUi.run();
+            });
+        }
+        if (resetBtn != null) {
+            resetBtn.setOnClickListener(v -> {
+                updater.accept(defaultPercent);
+                syncUi.run();
+            });
+        }
     }
 
     private void toggleCollapse() {
@@ -184,8 +329,21 @@ public final class PreviewEditorController {
 
     public void finish(boolean save) {
         if (!isEditing()) return;
-        layout.setOnEditorSelectionListener(null);
-        layout.finishEditing(save);
+        if (!save) {
+            applyOverlayAlphaPercent(beforeEditingAlphaPercent);
+            if (modeAEditing) {
+                applyRoadGuidanceWidthPercent(beforeEditingWidthPercent);
+            }
+        }
+        if (modeAEditing) {
+            modeAEditing = false;
+        } else {
+            layout.setOnEditorSelectionListener(null);
+            layout.finishEditing(save);
+        }
+        if (previewModeController != null) {
+            previewModeController.setOpacityPreviewMode(false);
+        }
         host.removeAllViews();
         controls = null;
         collapsed = false;
@@ -208,7 +366,6 @@ public final class PreviewEditorController {
 
     private void refreshAllEditorControls(@NonNull Context ctx) {
         if (controls == null) return;
-        boolean cropMode = layout.isCropEditMode();
 
         View body = controls.findViewById(R.id.ui_editor_body);
         if (body != null) {
@@ -220,23 +377,63 @@ public final class PreviewEditorController {
             styleOptionButton(collapseBtn, ctx, false);
         }
 
-        styleOptionButton(controls.findViewById(R.id.ui_editor_tab_layout), ctx, !cropMode);
-        styleOptionButton(controls.findViewById(R.id.ui_editor_tab_crop), ctx, cropMode);
+        View modeABadge = controls.findViewById(R.id.ui_editor_mode_a_badge);
+        Button tabLayout = controls.findViewById(R.id.ui_editor_tab_layout);
+        Button tabCrop = controls.findViewById(R.id.ui_editor_tab_crop);
+        Button tabOpacity = controls.findViewById(R.id.ui_editor_tab_opacity);
+        if (modeABadge != null) modeABadge.setVisibility(modeAEditing ? View.VISIBLE : View.GONE);
+        int tabVis = modeAEditing ? View.GONE : View.VISIBLE;
+        if (tabLayout != null) {
+            tabLayout.setVisibility(tabVis);
+            styleOptionButton(tabLayout, ctx, subMode == SubMode.LAYOUT);
+        }
+        if (tabCrop != null) {
+            tabCrop.setVisibility(tabVis);
+            styleOptionButton(tabCrop, ctx, subMode == SubMode.CROP);
+        }
+        if (tabOpacity != null) {
+            tabOpacity.setVisibility(tabVis);
+            styleOptionButton(tabOpacity, ctx, subMode == SubMode.OPACITY);
+        }
 
         TextView hint = controls.findViewById(R.id.ui_layout_editor_hint);
         if (hint != null) {
-            hint.setText(cropMode
-                    ? "点击选中画框，框内单指拖动平移、双指或 +/- 缩放。"
-                    : "拖动画面自动避让换位，拖动右下角调尺寸。");
+            if (modeAEditing) {
+                hint.setText("实时调节 360 前/后视引导线宽度，以及全部视图通用的按键底色透明度。");
+            } else if (subMode == SubMode.CROP) {
+                hint.setText("点击选中画框，框内单指拖动平移、双指或 +/- 缩放。");
+            } else if (subMode == SubMode.OPACITY) {
+                hint.setText("统一调节 360 A / 分栏 B / 三路 C / 模式 D 画面内按键与标签底色透明度。");
+            } else {
+                hint.setText("拖动画面自动避让换位，拖动右下角调尺寸。");
+            }
         }
 
         View layoutRow = controls.findViewById(R.id.ui_editor_layout_controls);
         View cropRow = controls.findViewById(R.id.ui_editor_crop_controls);
-        if (layoutRow != null) layoutRow.setVisibility(cropMode ? View.GONE : View.VISIBLE);
-        if (cropRow != null) cropRow.setVisibility(cropMode ? View.VISIBLE : View.GONE);
+        View widthRow = controls.findViewById(R.id.ui_editor_guidance_width_row);
+        View opacityRow = controls.findViewById(R.id.ui_editor_opacity_row);
+        if (layoutRow != null) {
+            layoutRow.setVisibility(!modeAEditing && subMode == SubMode.LAYOUT ? View.VISIBLE : View.GONE);
+        }
+        if (cropRow != null) {
+            cropRow.setVisibility(!modeAEditing && subMode == SubMode.CROP ? View.VISIBLE : View.GONE);
+        }
+        if (widthRow != null) {
+            widthRow.setVisibility(modeAEditing ? View.VISIBLE : View.GONE);
+        }
+        if (opacityRow != null) {
+            opacityRow.setVisibility((modeAEditing || subMode == SubMode.OPACITY) ? View.VISIBLE : View.GONE);
+        }
 
         refreshVisibilityButtons(ctx);
         refreshCropControls(ctx);
+        styleOptionButton(controls.findViewById(R.id.ui_width_minus), ctx, false);
+        styleOptionButton(controls.findViewById(R.id.ui_width_plus), ctx, false);
+        styleOptionButton(controls.findViewById(R.id.ui_width_reset), ctx, false);
+        styleOptionButton(controls.findViewById(R.id.ui_opacity_minus), ctx, false);
+        styleOptionButton(controls.findViewById(R.id.ui_opacity_plus), ctx, false);
+        styleOptionButton(controls.findViewById(R.id.ui_opacity_reset), ctx, false);
     }
 
     private void refreshCropControls(@NonNull Context ctx) {

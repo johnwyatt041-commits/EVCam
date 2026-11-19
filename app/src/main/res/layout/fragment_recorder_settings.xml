@@ -874,7 +874,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="4dp"
-                        android:text="仅基于 4 类核心信号（档位 / 车速 / 四车门 / 转向灯）触发；任一停止或退出规则生效时优先压制开始录制，退后台仍保持信号监听。"
+                        android:text="仅基于 4 类核心信号（档位 / 车速 / 四车门 / 转向灯）触发；支持录制启停、退后台与「开启/关闭 360 引导线」（如低速开、高速关）。录制域与引导线域独立仲裁互不压制，退后台仍保持监听。"
                         android:textColor="@color/text_secondary"
                         android:textSize="14sp" />
 

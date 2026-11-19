@@ -4,15 +4,17 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
+import com.kooo.evcam.vehicle.rule.RuleAction.ActionGroup;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.EnumMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /**
- * 车辆状态规则评估与仲裁引擎（纯 Java 状态机，支持边沿触发、持续延迟与停止类规则压制 START）。
+ * 车辆状态规则评估与仲裁引擎（纯 Java 状态机，支持边沿触发、持续延迟，以及录制域/引导线域独立仲裁）。
  */
 public final class VehicleRuleEngine {
 
@@ -59,16 +61,16 @@ public final class VehicleRuleEngine {
     }
 
     /**
-     * 评估输入信号快照，返回本轮边沿触发的获胜动作（无新触发则返回 null）。
+     * 评估输入信号快照，按动作域（RECORDING / GUIDANCE）分别仲裁并返回本轮新触发的事件列表。
      */
-    @Nullable
-    public synchronized TriggerEvent evaluate(@Nullable VehicleSignalSnapshot snapshot, long nowMs) {
+    @NonNull
+    public synchronized List<TriggerEvent> evaluateAll(@Nullable VehicleSignalSnapshot snapshot, long nowMs) {
         this.lastSnapshot = snapshot;
         if (snapshot == null || rules.isEmpty()) {
-            return null;
+            return Collections.emptyList();
         }
 
-        List<VehicleTriggerRule> eligibleRules = new ArrayList<>();
+        EnumMap<ActionGroup, List<VehicleTriggerRule>> groupedEligible = new EnumMap<>(ActionGroup.class);
         boolean hasStopOrExitEligible = false;
 
         for (VehicleTriggerRule rule : rules) {
@@ -98,21 +100,48 @@ public final class VehicleRuleEngine {
 
             long requiredMs = rule.delaySeconds * 1000L;
             if (nowMs - runtime.matchStartMs >= requiredMs) {
-                eligibleRules.add(rule);
+                List<VehicleTriggerRule> bucket = groupedEligible.get(rule.action.group);
+                if (bucket == null) {
+                    bucket = new ArrayList<>();
+                    groupedEligible.put(rule.action.group, bucket);
+                }
+                bucket.add(rule);
                 if (rule.action.isStopOrExit()) {
                     hasStopOrExitEligible = true;
                 }
             }
         }
 
-        if (eligibleRules.isEmpty()) {
-            return null;
+        if (groupedEligible.isEmpty()) {
+            return Collections.emptyList();
         }
 
-        // SC Lgk1.m() 仲裁语义：只要存在任何停止/退出类规则已满足生效，则压制 START 类规则
+        List<TriggerEvent> events = new ArrayList<>(groupedEligible.size());
+        for (ActionGroup group : ActionGroup.values()) {
+            List<VehicleTriggerRule> bucket = groupedEligible.get(group);
+            if (bucket == null || bucket.isEmpty()) {
+                continue;
+            }
+            VehicleTriggerRule winner = arbitrateGroup(group, bucket, hasStopOrExitEligible);
+            if (winner == null) {
+                continue;
+            }
+            RuleRuntime winnerRuntime = runtimes.get(winner.id);
+            if (winnerRuntime != null && !winnerRuntime.fired) {
+                winnerRuntime.fired = true;
+                events.add(new TriggerEvent(winner, winner.action));
+            }
+        }
+        return events;
+    }
+
+    @Nullable
+    private VehicleTriggerRule arbitrateGroup(@NonNull ActionGroup group,
+                                              @NonNull List<VehicleTriggerRule> bucket,
+                                              boolean hasStopOrExitEligible) {
         VehicleTriggerRule winner = null;
-        for (VehicleTriggerRule candidate : eligibleRules) {
-            if (hasStopOrExitEligible && candidate.action == RuleAction.START) {
+        for (VehicleTriggerRule candidate : bucket) {
+            if (group == ActionGroup.RECORDING && hasStopOrExitEligible && candidate.action == RuleAction.START) {
                 RuleRuntime startRuntime = runtimes.get(candidate.id);
                 if (startRuntime != null) {
                     // 被压制期间清除 fired，待退出条件消失若仍在 D 挡可恢复边沿重评
@@ -124,17 +153,38 @@ public final class VehicleRuleEngine {
                 winner = candidate;
             }
         }
-
         if (winner == null) {
             return null;
         }
-
-        RuleRuntime winnerRuntime = runtimes.get(winner.id);
-        if (winnerRuntime != null && !winnerRuntime.fired) {
-            winnerRuntime.fired = true;
-            return new TriggerEvent(winner, winner.action);
+        // 同域内高优先级胜出时，重置被压制的低优先级规则 fired 标记，确保高优先级条件解除后可恢复边沿重评
+        for (VehicleTriggerRule candidate : bucket) {
+            if (candidate != winner && candidate.action.priority < winner.action.priority) {
+                RuleRuntime suppressed = runtimes.get(candidate.id);
+                if (suppressed != null) {
+                    suppressed.fired = false;
+                }
+            }
         }
-        return null;
+        return winner;
+    }
+
+    /**
+     * 评估输入信号快照，返回本轮边沿触发的单个代表动作（优先返回 RECORDING 域事件，兼容旧调用方）。
+     */
+    @Nullable
+    public synchronized TriggerEvent evaluate(@Nullable VehicleSignalSnapshot snapshot, long nowMs) {
+        return pickPrimaryEvent(evaluateAll(snapshot, nowMs));
+    }
+
+    /**
+     * 使用最近一次快照按最新时间重新推进延迟计时规则（返回各动作域到期的全部新触发事件）。
+     */
+    @NonNull
+    public synchronized List<TriggerEvent> tickAll(long nowMs) {
+        if (lastSnapshot == null) {
+            return Collections.emptyList();
+        }
+        return evaluateAll(lastSnapshot, nowMs);
     }
 
     /**
@@ -142,10 +192,20 @@ public final class VehicleRuleEngine {
      */
     @Nullable
     public synchronized TriggerEvent tick(long nowMs) {
-        if (lastSnapshot == null) {
+        return pickPrimaryEvent(tickAll(nowMs));
+    }
+
+    @Nullable
+    private static TriggerEvent pickPrimaryEvent(@NonNull List<TriggerEvent> events) {
+        if (events.isEmpty()) {
             return null;
         }
-        return evaluate(lastSnapshot, nowMs);
+        for (TriggerEvent event : events) {
+            if (event.action.group == ActionGroup.RECORDING) {
+                return event;
+            }
+        }
+        return events.get(0);
     }
 
     /**

@@ -95,4 +95,28 @@ public class SurroundLayoutCalculatorTest {
 
         assertTrue(SurroundLayoutCalculator.calculateBirdOnlyBox(0, 900, 206, 530, 0, 12).isEmpty());
     }
+
+    @Test
+    public void hidingCenterCardExpandsWheelPanesToEliminateEmptyGap() {
+        SurroundLayoutSpec withCard = SurroundLayoutCalculator.calculate(
+                1920, 1080,
+                SurroundViewMode.FRONT_WHEELS,
+                false,
+                true,
+                206, 530, 0,
+                16);
+        SurroundLayoutSpec noCard = SurroundLayoutCalculator.calculate(
+                1920, 1080,
+                SurroundViewMode.FRONT_WHEELS,
+                false,
+                false,
+                206, 530, 0,
+                16);
+
+        assertFalse(withCard.bottomCenterCardBox.isEmpty());
+        assertTrue(noCard.bottomCenterCardBox.isEmpty());
+        assertTrue(noCard.bottomLeftBox.width > withCard.bottomLeftBox.width);
+        assertTrue(noCard.bottomRightBox.width > withCard.bottomRightBox.width);
+        assertEquals(noCard.bottomRightBox.left - noCard.bottomLeftBox.right(), 16);
+    }
 }

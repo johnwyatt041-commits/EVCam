@@ -311,15 +311,16 @@ public final class SurroundCalibrationPreviewView extends FrameLayout {
     }
 
     private void updateBadgeText() {
-        boolean customCalib = AppConfig.SURROUND_CALIBRATION_E5_CUSTOM.equals(appConfig.getSurroundCalibrationSource())
-                && !appConfig.getSurroundCustomCalibrationPath().isEmpty();
+        SurroundCalibrationProfile profile = SurroundCalibrationManager.resolveActiveProfile(appConfig);
         String modeLabel = birdOnlyMode ? "鸟瞰大图" : "完整模式 A";
-        String calibLabel = customCalib ? "本地校准" : "E5 内置";
+        String calibLabel = profile.isCustomCalibration ? "本地校准" : "E5 内置";
+        String tunedSuffix = profile.hasExtrinsicAdjustments ? " · 已微调" : "";
         tvLiveBadge.setText(String.format(
                 Locale.US,
-                "%s · %s · %d×%d (+%d) cm",
+                "%s · %s%s · %d×%d (+%d) cm",
                 modeLabel,
                 calibLabel,
+                tunedSuffix,
                 appConfig.getSurroundGroundWidthCm(),
                 appConfig.getSurroundGroundLengthCm(),
                 appConfig.getSurroundGroundFrontExtensionCm()));

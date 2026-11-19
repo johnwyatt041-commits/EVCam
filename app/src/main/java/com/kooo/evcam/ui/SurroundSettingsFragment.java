@@ -23,6 +23,7 @@ import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.SettingsFragment;
 import com.kooo.evcam.surround.SurroundCalibrationManager;
+import com.kooo.evcam.surround.SurroundCalibrationProfile;
 import com.kooo.evcam.surround.SurroundCarModelRepository;
 import com.kooo.evcam.surround.SurroundViewMode;
 import com.kooo.evcam.vehicle.VehicleAutomationCoordinator;
@@ -56,6 +57,10 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private Button btnBottomRearWheels;
     private Button btnBottomSides;
 
+    private Button btnModeDLinkageTurnSignal;
+    private Button btnModeDLinkageSteering;
+    private Button btnModeDLinkageManual;
+
     private SwitchMaterial switchSuppressBlindSpot;
     private SwitchMaterial switchStretchRoad;
     private SwitchMaterial switchOverlayButtons;
@@ -76,6 +81,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private TextView tvGroundFrontExtValue;
 
     private SwitchMaterial switchGuidanceEnabled;
+    private Button btnGuidanceAutoRules;
     private ImageView ivCarModelPreview;
     private TextView tvCarModelStatus;
     private Button btnCarModelBuiltin;
@@ -158,6 +164,10 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnBottomRearWheels = view.findViewById(R.id.btn_bottom_view_rear_wheels);
         btnBottomSides = view.findViewById(R.id.btn_bottom_view_sides);
 
+        btnModeDLinkageTurnSignal = view.findViewById(R.id.btn_mode_d_linkage_turn_signal);
+        btnModeDLinkageSteering = view.findViewById(R.id.btn_mode_d_linkage_steering);
+        btnModeDLinkageManual = view.findViewById(R.id.btn_mode_d_linkage_manual);
+
         switchSuppressBlindSpot = view.findViewById(R.id.switch_surround_suppress_blindspot);
         switchStretchRoad = view.findViewById(R.id.switch_surround_stretch_road);
         switchOverlayButtons = view.findViewById(R.id.switch_surround_overlay_buttons);
@@ -178,6 +188,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         tvGroundFrontExtValue = view.findViewById(R.id.tv_ground_front_ext_value);
 
         switchGuidanceEnabled = view.findViewById(R.id.switch_surround_guidance_enabled);
+        btnGuidanceAutoRules = view.findViewById(R.id.btn_guidance_auto_rules);
         ivCarModelPreview = view.findViewById(R.id.iv_car_model_preview);
         tvCarModelStatus = view.findViewById(R.id.tv_car_model_status);
         btnCarModelBuiltin = view.findViewById(R.id.btn_car_model_builtin);
@@ -204,6 +215,19 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnBottomFrontWheels.setOnClickListener(v -> selectBottomView(SurroundViewMode.FRONT_WHEELS));
         btnBottomRearWheels.setOnClickListener(v -> selectBottomView(SurroundViewMode.REAR_WHEELS));
         btnBottomSides.setOnClickListener(v -> selectBottomView(SurroundViewMode.SIDES));
+
+        if (btnModeDLinkageTurnSignal != null) {
+            btnModeDLinkageTurnSignal.setOnClickListener(
+                    v -> selectModeDSideLinkage(AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+        }
+        if (btnModeDLinkageSteering != null) {
+            btnModeDLinkageSteering.setOnClickListener(
+                    v -> selectModeDSideLinkage(AppConfig.MODE_D_SIDE_LINKAGE_STEERING));
+        }
+        if (btnModeDLinkageManual != null) {
+            btnModeDLinkageManual.setOnClickListener(
+                    v -> selectModeDSideLinkage(AppConfig.MODE_D_SIDE_LINKAGE_MANUAL));
+        }
 
         switchSuppressBlindSpot.setOnCheckedChangeListener((b, isChecked) -> {
             if (bindingUi) return;
@@ -326,6 +350,14 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             appConfig.setPreviewGuidanceEnabled(isChecked);
             notifyHostSurroundChanged();
         });
+        if (btnGuidanceAutoRules != null) {
+            btnGuidanceAutoRules.setOnClickListener(v -> {
+                if (!SettingsFragment.navigateToCategory(this, SettingsCatalog.ID_RECORDER)
+                        && getContext() != null) {
+                    Toast.makeText(getContext(), "请前往「录影设置 → 车辆状态自动触发规则」设置", Toast.LENGTH_SHORT).show();
+                }
+            });
+        }
 
         btnCarModelBuiltin.setOnClickListener(v -> {
             appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_E5_BUILTIN);
@@ -372,6 +404,14 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         }
     }
 
+    private void selectModeDSideLinkage(@NonNull String linkageMode) {
+        appConfig.setModeDSideLinkageMode(linkageMode);
+        notifyHostSurroundChanged();
+        if (getContext() != null) {
+            refreshAllUi(getContext());
+        }
+    }
+
     private void notifyHostSurroundChanged() {
         if (getActivity() instanceof PreviewModeController.Host) {
             ((PreviewModeController.Host) getActivity()).onPreviewShortcutPreferencesChanged();
@@ -412,6 +452,14 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             applyOptionButtonState(btnBottomRearWheels, ctx, bottom == SurroundViewMode.REAR_WHEELS);
             applyOptionButtonState(btnBottomSides, ctx, bottom == SurroundViewMode.SIDES);
 
+            String linkageMode = appConfig.getModeDSideLinkageMode();
+            applyOptionButtonState(btnModeDLinkageTurnSignal, ctx,
+                    AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(linkageMode));
+            applyOptionButtonState(btnModeDLinkageSteering, ctx,
+                    AppConfig.MODE_D_SIDE_LINKAGE_STEERING.equals(linkageMode));
+            applyOptionButtonState(btnModeDLinkageManual, ctx,
+                    AppConfig.MODE_D_SIDE_LINKAGE_MANUAL.equals(linkageMode));
+
             switchSuppressBlindSpot.setChecked(appConfig.isBlindSpotSuppressOn360());
             switchStretchRoad.setChecked(appConfig.isSurroundStretchRoadViews());
             switchOverlayButtons.setChecked(
@@ -424,6 +472,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
 
             refreshGroundDimensionTexts();
             switchGuidanceEnabled.setChecked(appConfig.isPreviewGuidanceEnabled());
+            applyOptionButtonState(btnGuidanceAutoRules, ctx, false);
             refreshCalibrationAndModelUi(ctx, false);
         } finally {
             bindingUi = false;
@@ -443,11 +492,16 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     }
 
     private void refreshCalibrationAndModelUi(@NonNull Context ctx, boolean forceReloadCarBitmap) {
+        SurroundCalibrationProfile activeProfile = SurroundCalibrationManager.resolveActiveProfile(appConfig);
         boolean customCalib = AppConfig.SURROUND_CALIBRATION_E5_CUSTOM.equals(appConfig.getSurroundCalibrationSource())
-                && !appConfig.getSurroundCustomCalibrationPath().isEmpty();
-        tvCalibrationStatus.setText(customCalib
+                && !appConfig.getSurroundCustomCalibrationPath().isEmpty()
+                && activeProfile.isCustomCalibration;
+        String baseStatus = customCalib
                 ? "当前方案：本地导入 E5 校准（已校验）"
-                : "当前方案：银河 E5 内置校准");
+                : "当前方案：银河 E5 内置校准";
+        tvCalibrationStatus.setText(activeProfile.hasExtrinsicAdjustments
+                ? baseStatus + "（已启用外参微调）"
+                : baseStatus);
         UiOptionPillHelper.apply(btnCalibLivePreview, ctx, true, true);
         UiOptionPillHelper.apply(btnCalibBuiltin, ctx, !customCalib);
         UiOptionPillHelper.apply(btnCalibImportLocal, ctx, customCalib);

@@ -133,6 +133,7 @@ public final class SurroundCalibrationProfile {
     public final String profileName;
     public final boolean isCustomCalibration;
     public final boolean useBuiltInMeshes;
+    public final boolean hasExtrinsicAdjustments;
     public final int groundWidthCm;
     public final int groundLengthCm;
     public final int groundFrontExtensionCm;
@@ -145,7 +146,7 @@ public final class SurroundCalibrationProfile {
                                       int groundLengthCm,
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
-        this(profileName, isCustomCalibration, !isCustomCalibration,
+        this(profileName, isCustomCalibration, !isCustomCalibration, false,
                 groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
     }
 
@@ -156,9 +157,22 @@ public final class SurroundCalibrationProfile {
                                       int groundLengthCm,
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
+        this(profileName, isCustomCalibration, useBuiltInMeshes, false,
+                groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
+    }
+
+    public SurroundCalibrationProfile(@NonNull String profileName,
+                                      boolean isCustomCalibration,
+                                      boolean useBuiltInMeshes,
+                                      boolean hasExtrinsicAdjustments,
+                                      int groundWidthCm,
+                                      int groundLengthCm,
+                                      int groundFrontExtensionCm,
+                                      @NonNull Map<String, CameraCalibration> cameras) {
         this.profileName = profileName;
         this.isCustomCalibration = isCustomCalibration;
         this.useBuiltInMeshes = useBuiltInMeshes;
+        this.hasExtrinsicAdjustments = hasExtrinsicAdjustments;
         this.groundWidthCm = Math.max(160, Math.min(260, groundWidthCm));
         this.groundLengthCm = Math.max(420, Math.min(600, groundLengthCm));
         this.groundFrontExtensionCm = Math.max(0, Math.min(100, groundFrontExtensionCm));

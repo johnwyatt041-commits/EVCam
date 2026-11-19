@@ -19,7 +19,10 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 public class SurroundSteeringAngleSourceTest {
@@ -128,6 +131,64 @@ public class SurroundSteeringAngleSourceTest {
         // APVP 新鲜期内优先使用 APVP，屏蔽 VHAL 同窗口反向抖动
         assertNull(decoder.acceptVhalBatch(
                 encodeVhalBatch(SurroundSteeringAngleSource.PROP_PERF_STEERING_ANGLE, 0, 0, 500L, -500f), 2500L));
+    }
+
+    @Test
+    public void apvpUsesDebugPort40007ParsesNestedTransferIdsAndHandlesIdOnlyAndReadSignal() {
+        assertEquals(40005, SurroundSteeringAngleSource.APVP_PORT);
+        assertEquals(40007, SurroundSteeringAngleSource.APVP_DEBUG_PORT);
+
+        // E5 TransferDebugServer/getAllTransfer 实际嵌套格式: repeated field 1 (wireType=2) -> inner field 1 (id)
+        byte[] nestedTransfers = concat(
+                wrapField(1, 2, 0, wrapField(1, 0, 0, null)),
+                wrapField(1, 2, 0, wrapField(1, 0, 2, null)),
+                wrapField(1, 2, 0, wrapField(1, 0, 5, null)),
+                wrapField(1, 2, 0, wrapField(1, 0, 2, null))
+        );
+        assertEquals(Arrays.asList(2, 5), ApvpWireCodec.parseAllTransferIds(nestedTransfers));
+
+        SignalRef steerRef = new SignalRef(101, SurroundSteeringAngleSource.SIG_PINION_STEER_AG);
+        SignalRef qfRef = new SignalRef(102, SurroundSteeringAngleSource.SIG_PINION_STEER_QF);
+        SignalRef timeoutRef = new SignalRef(103, SurroundSteeringAngleSource.SIG_PINION_TIMEOUT);
+        byte[] keyReq = ApvpWireCodec.buildSignalKeyRequest(steerRef);
+        assertTrue(new String(keyReq, StandardCharsets.UTF_8).contains(SurroundSteeringAngleSource.SIG_PINION_STEER_AG));
+
+        Decoder decoder = new Decoder();
+        decoder.registerApvpSignals(Arrays.asList(steerRef, qfRef, timeoutRef));
+
+        // 1) 通过 readSignal 初始化 Qf=3, Timeout=0，并在静默超过 3.5 秒（20s 后）收到仅含 id 的流帧仍可正常输出
+        byte[] qfSingle = concat(wrapField(1, 2, 0, wrapField(1, 0, 102, null)), wrapField(3, 0, zigzag(3), null));
+        byte[] toSingle = concat(wrapField(1, 2, 0, wrapField(1, 0, 103, null)), wrapField(3, 0, zigzag(0), null));
+        assertNull(decoder.acceptApvpSinglePayload(qfSingle, 2000L));
+        assertNull(decoder.acceptApvpSinglePayload(toSingle, 2000L));
+        decoder.configureApvpExpectations(true, true);
+
+        byte[] steerSingle = concat(
+                wrapField(1, 2, 0, wrapField(1, 0, 101, null)),
+                wrapFloatField(5, (float) Math.toRadians(-360.0)));
+        Float initAngle = decoder.acceptApvpSinglePayload(steerSingle, 2010L);
+        assertNotNull(initAngle);
+        assertTrue(initAngle > 18f && initAngle < 30f);
+
+        // 20 秒后方向盘改为左打 360°（ID-only 帧，空 name），on-change 静默的 Qf/Timeout 仍有效
+        byte[] idOnlyLeftFrame = wrapField(1, 2, 0, wrapField(3, 2, 0, concat(
+                wrapField(1, 2, 0, wrapField(1, 0, 101, null)),
+                wrapFloatField(5, (float) Math.toRadians(360.0))
+        )));
+        Float movedAngle = decoder.acceptApvpStreamPayload(idOnlyLeftFrame, 22_010L);
+        assertNotNull(movedAngle);
+        assertTrue(movedAngle < -18f && movedAngle > -30f);
+
+        // 显式收到 Qf=2 立即门控拒绝；resetApvp() 清空状态
+        byte[] badQfSingle = concat(wrapField(1, 2, 0, wrapField(1, 0, 102, null)), wrapField(3, 0, zigzag(2), null));
+        assertNull(decoder.acceptApvpSinglePayload(badQfSingle, 22_500L));
+        assertNull(decoder.acceptApvpSinglePayload(steerSingle, 22_600L));
+        decoder.resetApvp();
+        assertTrue(Float.isNaN(orZero(decoder.getLatestValidAngleDeg(23_000L))));
+    }
+
+    private static float orZero(Float f) {
+        return f != null ? f : Float.NaN;
     }
 
     @Test

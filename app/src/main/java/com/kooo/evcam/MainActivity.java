@@ -1005,6 +1005,9 @@ public class MainActivity extends AppCompatActivity implements
                 },
                 fullscreen -> previewModeController.onFullscreenStateChanged());
         uiShell.bindFloatingWindowAction(this::enterFloatingWindowPresentation);
+        if (previewEditor != null) {
+            previewEditor.setPreviewModeController(previewModeController);
+        }
         previewModeController.start();
         updateSurroundLifecycleInActivity();
     }
@@ -1938,6 +1941,19 @@ public class MainActivity extends AppCompatActivity implements
                         AppLog.i(TAG, "前进档（D 档）弹出倒计时结束，自动退至后台（保持录制）");
                         com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
                     }
+                }
+
+                @Override
+                public void onSurroundGuidanceChangedForAutomation(boolean enabled, @NonNull String reason) {
+                    runOnUiThread(() -> {
+                        if (isFinishing() || isDestroyed()) {
+                            return;
+                        }
+                        AppLog.i(TAG, "T06 规则同步 360 引导线开关: enabled=" + enabled + ", reason=" + reason);
+                        if (previewModeController != null) {
+                            previewModeController.syncSurroundPreferences();
+                        }
+                    });
                 }
             };
 

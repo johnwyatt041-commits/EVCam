@@ -46,6 +46,50 @@ public class PreviewModeControllerTest {
     }
 
     @Test
+    public void modeDSideLinkageModesSubscribeMutuallyExclusivelyAndTurnSignalResolvesSideWithoutFlicker() {
+        assertEquals(AppConfig.MODE_D_SIDE_LINKAGE_STEERING, AppConfig.normalizeModeDSideLinkageMode(null));
+        assertEquals(AppConfig.MODE_D_SIDE_LINKAGE_STEERING, AppConfig.normalizeModeDSideLinkageMode("other"));
+        assertEquals(AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL,
+                AppConfig.normalizeModeDSideLinkageMode(AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+        assertEquals(AppConfig.MODE_D_SIDE_LINKAGE_MANUAL,
+                AppConfig.normalizeModeDSideLinkageMode(AppConfig.MODE_D_SIDE_LINKAGE_MANUAL));
+
+        // 随方向盘：仅开方向盘订阅
+        assertTrue(PreviewModeController.shouldSubscribeSteeringForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_STEERING));
+        assertFalse(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_STEERING));
+
+        // 随转向灯：仅开转向灯订阅，不占方向盘连接
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+        assertTrue(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+        assertFalse(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_D, false, true, AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+        assertFalse(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_C, true, true, AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+
+        // 手动切换：两者均不订阅
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_MANUAL));
+        assertFalse(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_D, true, true, AppConfig.MODE_D_SIDE_LINKAGE_MANUAL));
+
+        // 转向灯决议：左灯->LEFT，右灯->RIGHT，熄灭/双闪/未知保持原侧
+        assertEquals(PreviewLayoutModel.LEFT,
+                PreviewModeController.resolveModeDSideCameraFromTurnSignal(1, 0, PreviewLayoutModel.RIGHT));
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCameraFromTurnSignal(0, 1, PreviewLayoutModel.LEFT));
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCameraFromTurnSignal(0, 0, PreviewLayoutModel.RIGHT));
+        assertEquals(PreviewLayoutModel.LEFT,
+                PreviewModeController.resolveModeDSideCameraFromTurnSignal(1, 1, PreviewLayoutModel.LEFT));
+        assertEquals(PreviewLayoutModel.RIGHT,
+                PreviewModeController.resolveModeDSideCameraFromTurnSignal(-1, -1, PreviewLayoutModel.RIGHT));
+    }
+
+    @Test
     public void modeAOffPreviewShowsDisabledGuideInsteadOfFallingBackToModeB() {
         assertTrue(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_A, false));
         assertFalse(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_A, true));
@@ -115,5 +159,25 @@ public class PreviewModeControllerTest {
         // Background Settings/Playback pages defer camera visibility mask churn until returning to recording.
         assertTrue(PreviewModeController.shouldApplyVisibilityMaskImmediately(true));
         assertFalse(PreviewModeController.shouldApplyVisibilityMaskImmediately(false));
+    }
+
+    @Test
+    public void roadGuidanceWidthAndOverlayAlphaNormalizersAndColorScalingWorkCorrectly() {
+        assertEquals(AppConfig.MIN_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                AppConfig.normalizeSurroundRoadGuidanceWidthPercent(10));
+        assertEquals(AppConfig.MAX_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                AppConfig.normalizeSurroundRoadGuidanceWidthPercent(250));
+        assertEquals(115, AppConfig.normalizeSurroundRoadGuidanceWidthPercent(115));
+
+        assertEquals(AppConfig.MIN_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                AppConfig.normalizePreviewOverlayBgAlphaPercent(-20));
+        assertEquals(AppConfig.MAX_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                AppConfig.normalizePreviewOverlayBgAlphaPercent(140));
+        assertEquals(45, AppConfig.normalizePreviewOverlayBgAlphaPercent(45));
+
+        assertEquals(0x00101620, AppConfig.applyColorAlphaPercent(0xFF101620, 0));
+        assertEquals(0xFF101620, AppConfig.applyColorAlphaPercent(0xFF101620, 100));
+        assertEquals(0xCC101620, AppConfig.applyColorAlphaPercent(0xFF101620, 80));
+        assertEquals(0x99101722, AppConfig.applyColorAlphaPercent(0xBF101722, 80));
     }
 }

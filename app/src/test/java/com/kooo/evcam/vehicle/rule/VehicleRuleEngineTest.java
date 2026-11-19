@@ -177,4 +177,103 @@ public class VehicleRuleEngineTest {
         VehicleSignalCategory.resetCustomPropertyIds();
         assertEquals(VehicleSignalCategory.GEAR, VehicleSignalCategory.classifyPropertyId(VehicleSignalCategory.PROP_GEAR_SELECTION));
     }
+
+    @Test
+    public void guidanceRulesArbitrateIndependentlyWithoutSuppressingRecording() {
+        VehicleTriggerRule gearStart = new VehicleTriggerRule(
+                "r_rec_start",
+                "挂前进档录制",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_DRIVE),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.START
+        );
+        VehicleTriggerRule lowSpeedGuidanceOn = new VehicleTriggerRule(
+                "r_guide_on",
+                "低速开启引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.SPEED, RuleComparison.LESS_THAN, 20),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.ENABLE_GUIDANCE
+        );
+        VehicleTriggerRule highSpeedGuidanceOff = new VehicleTriggerRule(
+                "r_guide_off",
+                "高速关闭引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.SPEED, RuleComparison.GREATER_OR_EQUAL, 25),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.DISABLE_GUIDANCE
+        );
+
+        assertFalse(RuleAction.ENABLE_GUIDANCE.isStopOrExit());
+        assertFalse(RuleAction.DISABLE_GUIDANCE.isStopOrExit());
+        assertTrue(RuleAction.ENABLE_GUIDANCE.isGuidanceAction());
+        assertTrue(RuleAction.DISABLE_GUIDANCE.isGuidanceAction());
+
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(gearStart, lowSpeedGuidanceOn, highSpeedGuidanceOff));
+
+        // 挂 D 档 10km/h：同时触发 START（录制域）与 ENABLE_GUIDANCE（引导线域），互不压制
+        List<VehicleRuleEngine.TriggerEvent> first = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 10, 0, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(2, first.size());
+        assertEquals(RuleAction.START, first.get(0).action);
+        assertEquals(RuleAction.ENABLE_GUIDANCE, first.get(1).action);
+
+        // 提速到 30km/h：触发 DISABLE_GUIDANCE，录制保持不重触
+        List<VehicleRuleEngine.TriggerEvent> fast = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 30, 0, 0, 0, 0, 0, 0), 2000L);
+        assertEquals(1, fast.size());
+        assertEquals(RuleAction.DISABLE_GUIDANCE, fast.get(0).action);
+
+        // 回落到 12km/h：再次触发 ENABLE_GUIDANCE
+        List<VehicleRuleEngine.TriggerEvent> slowAgain = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 12, 0, 0, 0, 0, 0, 0), 3000L);
+        assertEquals(1, slowAgain.size());
+        assertEquals(RuleAction.ENABLE_GUIDANCE, slowAgain.get(0).action);
+    }
+
+    @Test
+    public void guidanceGroupHigherPriorityDisableSuppressesAndReArmsEnable() {
+        VehicleTriggerRule enableByGear = new VehicleTriggerRule(
+                "r_guide_gear",
+                "D 档尝试开启引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_DRIVE),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.ENABLE_GUIDANCE
+        );
+        VehicleTriggerRule disableOver20 = new VehicleTriggerRule(
+                "r_guide_fast",
+                "车速 >= 20 关闭引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.SPEED, RuleComparison.GREATER_OR_EQUAL, 20),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.DISABLE_GUIDANCE
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(enableByGear, disableOver20));
+
+        // 同时满足 D 档与 >=20km/h，DISABLE_GUIDANCE（priority 1）压制 ENABLE_GUIDANCE（priority 0）
+        List<VehicleRuleEngine.TriggerEvent> fastStart = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 25, 0, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(1, fastStart.size());
+        assertEquals(RuleAction.DISABLE_GUIDANCE, fastStart.get(0).action);
+
+        // 车速降到 10km/h 但仍在 D 档：由于被压制期清零了 fired，立即恢复触发 ENABLE_GUIDANCE
+        List<VehicleRuleEngine.TriggerEvent> slowed = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 10, 0, 0, 0, 0, 0, 0), 2000L);
+        assertEquals(1, slowed.size());
+        assertEquals(RuleAction.ENABLE_GUIDANCE, slowed.get(0).action);
+    }
 }

@@ -92,6 +92,8 @@ public final class SurroundAssetImportHelper {
         if (result.success && result.importedFilePath != null) {
             appConfig.setSurroundCustomCalibrationPath(result.importedFilePath);
             appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
+            // 导入新本地标定文件时仅重置本地导入方案的微调槽，绝不影响内置星舰7方案槽位
+            appConfig.resetSurroundExtrinsicAdjustmentForSlot(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
             if (onApplied != null) {
                 onApplied.run();
             }

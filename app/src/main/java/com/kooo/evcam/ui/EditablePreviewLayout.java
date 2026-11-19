@@ -6,6 +6,7 @@ import android.graphics.Canvas;
 import android.graphics.Outline;
 import android.graphics.Paint;
 import android.graphics.Typeface;
+import android.graphics.drawable.GradientDrawable;
 import android.util.AttributeSet;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -16,6 +17,7 @@ import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
 import android.view.ViewParent;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
@@ -108,6 +110,7 @@ public final class EditablePreviewLayout extends ViewGroup {
 
     private boolean editing;
     private boolean cropEditMode;
+    private boolean opacityPreviewMode;
     private boolean resizing;
     private int selected = -1;
     private float startX, startY, originalX, originalY, originalWidth, originalHeight;
@@ -127,10 +130,15 @@ public final class EditablePreviewLayout extends ViewGroup {
     private float[] beforeCropPanY;
 
     private boolean inFrameControlsVisible = true;
+    private int overlayBgAlphaPercent = AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT;
     private boolean mainPreviewEnabled = true;
     private final boolean[] cameraAvailable = {true, true, true, true};
     private final TextView[] emptyCameraHints = new TextView[PreviewLayoutModel.PANE_COUNT];
     private TextView btnMainFeedSwitch;
+    private String modeDSideLinkageMode = AppConfig.MODE_D_SIDE_LINKAGE_STEERING;
+    private LinearLayout modeDSideControlsContainer;
+    private TextView btnModeDSideLinkage;
+    private TextView btnSideFeedSwitch;
 
     private final int[] lastPaneWidths = new int[PreviewLayoutModel.PANE_COUNT];
     private final int[] lastPaneHeights = new int[PreviewLayoutModel.PANE_COUNT];
@@ -143,6 +151,10 @@ public final class EditablePreviewLayout extends ViewGroup {
     private OnEditorSelectionListener editorSelectionListener;
     @Nullable
     private Runnable manualPrimaryToggleListener;
+    @Nullable
+    private Runnable manualSideToggleListener;
+    @Nullable
+    private Runnable modeDSideLinkageCycleListener;
 
     private final ViewOutlineProvider paneOutlineProvider = new ViewOutlineProvider() {
         @Override
@@ -161,6 +173,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         cornerRadiusPx = CORNER_RADIUS_DP * density;
         preferences = context.getSharedPreferences("e5_preview_layout_v1", Context.MODE_PRIVATE);
         appConfig = new AppConfig(context);
+        overlayBgAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
 
         for (Map.Entry<PreviewMode, ModeStorageSpec> e : STORAGE_SPECS.entrySet()) {
             modeModels.put(e.getKey(), new PreviewLayoutModel(e.getValue().defaultPreset));
@@ -244,10 +257,43 @@ public final class EditablePreviewLayout extends ViewGroup {
         this.manualPrimaryToggleListener = listener;
     }
 
+    public void setOnManualSideToggleListener(@Nullable Runnable listener) {
+        this.manualSideToggleListener = listener;
+    }
+
+    public void setOnModeDSideLinkageCycleListener(@Nullable Runnable listener) {
+        this.modeDSideLinkageCycleListener = listener;
+    }
+
+    public void setModeDSideLinkageMode(@Nullable String mode) {
+        String normalized = AppConfig.normalizeModeDSideLinkageMode(mode);
+        if (normalized.equals(this.modeDSideLinkageMode)) {
+            syncModeDSideControls();
+            return;
+        }
+        this.modeDSideLinkageMode = normalized;
+        syncModeDSideControls();
+    }
+
     public void setInFrameControlsVisible(boolean visible) {
         if (this.inFrameControlsVisible == visible) return;
         this.inFrameControlsVisible = visible;
         syncMainFeedSwitchPill();
+        syncModeDSideControls();
+    }
+
+    public void setOverlayBgAlphaPercent(int alphaPercent) {
+        int normalized = AppConfig.normalizePreviewOverlayBgAlphaPercent(alphaPercent);
+        this.overlayBgAlphaPercent = normalized;
+        applyOverlayBackgroundAlpha();
+    }
+
+    public void setOpacityPreviewMode(boolean opacityPreviewMode) {
+        if (this.opacityPreviewMode == opacityPreviewMode) return;
+        this.opacityPreviewMode = opacityPreviewMode;
+        syncMainFeedSwitchPill();
+        syncModeDSideControls();
+        invalidate();
     }
 
     public void setCameraAvailable(@NonNull String cameraKey, boolean available) {
@@ -274,6 +320,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         initInFrameOverlays();
         restoreOrderForMode(currentMode);
         recomputeEffectiveLayout(false);
+        applyOverlayBackgroundAlpha();
     }
 
     private void configurePaneOutline(View child) {
@@ -283,28 +330,106 @@ public final class EditablePreviewLayout extends ViewGroup {
     }
 
     private void initInFrameOverlays() {
-        btnMainFeedSwitch = new TextView(getContext());
-        btnMainFeedSwitch.setBackgroundResource(R.drawable.preview_shortcut_pill);
-        btnMainFeedSwitch.setContentDescription("toggle_front_back_primary");
-        btnMainFeedSwitch.setTextColor(0xFFFFFFFF);
-        btnMainFeedSwitch.setTextSize(TypedValue.COMPLEX_UNIT_PX,
-                getResources().getDimension(R.dimen.ui_pill_text_size));
-        btnMainFeedSwitch.setTypeface(null, Typeface.BOLD);
-        btnMainFeedSwitch.setGravity(Gravity.CENTER);
-        btnMainFeedSwitch.setMinHeight(
-                getResources().getDimensionPixelSize(R.dimen.ui_corner_shortcut_item_height));
-        int hp = getResources().getDimensionPixelSize(R.dimen.ui_pill_padding_h);
-        int vp = Math.round(6 * density);
-        btnMainFeedSwitch.setPadding(hp, vp, hp, vp);
-        btnMainFeedSwitch.setClickable(true);
-        btnMainFeedSwitch.setFocusable(true);
-        btnMainFeedSwitch.setOnClickListener(v -> {
+        btnMainFeedSwitch = createOverlayPill("toggle_front_back_primary", () -> {
             if (manualPrimaryToggleListener != null) {
                 manualPrimaryToggleListener.run();
             }
         });
+
+        modeDSideControlsContainer = new LinearLayout(getContext());
+        modeDSideControlsContainer.setOrientation(LinearLayout.HORIZONTAL);
+        modeDSideControlsContainer.setGravity(Gravity.CENTER_VERTICAL);
+
+        btnModeDSideLinkage = createOverlayPill("cycle_mode_d_side_linkage", () -> {
+            if (modeDSideLinkageCycleListener != null) {
+                modeDSideLinkageCycleListener.run();
+            }
+        });
+        LinearLayout.LayoutParams linkageLp = new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT);
+        linkageLp.setMarginEnd(Math.round(8 * density));
+        modeDSideControlsContainer.addView(btnModeDSideLinkage, linkageLp);
+
+        btnSideFeedSwitch = createOverlayPill("toggle_left_right_side", () -> {
+            if (manualSideToggleListener != null) {
+                manualSideToggleListener.run();
+            }
+        });
+        modeDSideControlsContainer.addView(btnSideFeedSwitch);
+
         for (int i = 0; i < PreviewLayoutModel.PANE_COUNT; i++) {
             syncCameraEmptyHint(i);
+        }
+    }
+
+    private TextView createOverlayPill(@NonNull String contentDescription, @NonNull Runnable action) {
+        TextView tv = new TextView(getContext());
+        tv.setBackground(createOverlayPillDrawable(0xBF101722, 0x46FFFFFF, 18f));
+        tv.setContentDescription(contentDescription);
+        tv.setTextColor(0xFFFFFFFF);
+        tv.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
+        tv.setTextSize(TypedValue.COMPLEX_UNIT_PX,
+                getResources().getDimension(R.dimen.ui_pill_text_size));
+        tv.setTypeface(null, Typeface.BOLD);
+        tv.setGravity(Gravity.CENTER);
+        tv.setSingleLine(true);
+        tv.setMinHeight(getResources().getDimensionPixelSize(R.dimen.ui_corner_shortcut_item_height));
+        int hp = getResources().getDimensionPixelSize(R.dimen.ui_pill_padding_h);
+        int vp = Math.round(6 * density);
+        tv.setPadding(hp, vp, hp, vp);
+        tv.setClickable(true);
+        tv.setFocusable(true);
+        tv.setOnClickListener(v -> action.run());
+        return tv;
+    }
+
+    private GradientDrawable createOverlayPillDrawable(int baseFillArgb, int baseStrokeArgb, float radiusDp) {
+        GradientDrawable d = new GradientDrawable();
+        d.setShape(GradientDrawable.RECTANGLE);
+        d.setCornerRadius(radiusDp * density);
+        d.setColor(AppConfig.applyColorAlphaPercent(baseFillArgb, overlayBgAlphaPercent));
+        if (baseStrokeArgb != 0) {
+            d.setStroke(Math.max(1, Math.round(density)),
+                    AppConfig.applyColorAlphaPercent(baseStrokeArgb, overlayBgAlphaPercent));
+        }
+        return d;
+    }
+
+    private void applyOverlayBackgroundAlpha() {
+        GradientDrawable standardBg = createOverlayPillDrawable(0xBF101722, 0x46FFFFFF, 18f);
+        if (btnMainFeedSwitch != null) {
+            btnMainFeedSwitch.setBackground(standardBg);
+        }
+        if (btnSideFeedSwitch != null) {
+            btnSideFeedSwitch.setBackground(createOverlayPillDrawable(0xBF101722, 0x46FFFFFF, 18f));
+        }
+        syncModeDSideLinkagePillBg();
+
+        int[] labelIds = {
+                com.kooo.evcam.R.id.label_front,
+                com.kooo.evcam.R.id.label_back,
+                com.kooo.evcam.R.id.label_left,
+                com.kooo.evcam.R.id.label_right
+        };
+        for (int labelId : labelIds) {
+            View label = findViewById(labelId);
+            if (label instanceof TextView) {
+                label.setBackground(createOverlayPillDrawable(0xA0000000, 0, 8f));
+                ((TextView) label).setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
+            }
+        }
+    }
+
+    private void syncModeDSideLinkagePillBg() {
+        if (btnModeDSideLinkage == null) return;
+        boolean autoActive = !AppConfig.MODE_D_SIDE_LINKAGE_MANUAL.equals(modeDSideLinkageMode);
+        if (autoActive) {
+            btnModeDSideLinkage.setBackground(createOverlayPillDrawable(0xF21D5BB8, 0x8C8AC4FF, 18f));
+            btnModeDSideLinkage.setTextColor(overlayBgAlphaPercent < 20 ? 0xFF60A5FA : 0xFFFFFFFF);
+        } else {
+            btnModeDSideLinkage.setBackground(createOverlayPillDrawable(0xBF101722, 0x46FFFFFF, 18f));
+            btnModeDSideLinkage.setTextColor(0xFFFFFFFF);
         }
     }
 
@@ -333,7 +458,7 @@ public final class EditablePreviewLayout extends ViewGroup {
     private void syncMainFeedSwitchPill() {
         if (btnMainFeedSwitch == null) return;
         boolean needPill = (currentMode == PreviewMode.MODE_C || currentMode == PreviewMode.MODE_D)
-                && !editing && inFrameControlsVisible;
+                && (!editing || opacityPreviewMode) && inFrameControlsVisible;
         int primaryIdx = currentMode == PreviewMode.MODE_D ? modeDLeftPrimaryIndex : modeCPrimaryIndex;
         FrameLayout targetFrame = needPill ? findFrameByPaneIndex(primaryIdx) : null;
 
@@ -358,6 +483,51 @@ public final class EditablePreviewLayout extends ViewGroup {
         }
         btnMainFeedSwitch.setText(primaryIdx == PreviewLayoutModel.BACK ? "后视 ⇄ 前视" : "前视 ⇄ 后视");
         btnMainFeedSwitch.bringToFront();
+    }
+
+    private void syncModeDSideControls() {
+        if (modeDSideControlsContainer == null) return;
+        boolean needControls = (currentMode == PreviewMode.MODE_D)
+                && (!editing || opacityPreviewMode) && inFrameControlsVisible;
+        FrameLayout targetFrame = needControls ? findFrameByPaneIndex(modeDRightSideIndex) : null;
+
+        ViewParent parent = modeDSideControlsContainer.getParent();
+        if (targetFrame == null || targetFrame.getVisibility() != View.VISIBLE) {
+            if (parent instanceof ViewGroup) {
+                ((ViewGroup) parent).removeView(modeDSideControlsContainer);
+            }
+            return;
+        }
+        if (parent != targetFrame) {
+            if (parent instanceof ViewGroup) {
+                ((ViewGroup) parent).removeView(modeDSideControlsContainer);
+            }
+            FrameLayout.LayoutParams lp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM | Gravity.END);
+            int margin = Math.round(14 * density);
+            lp.setMargins(margin, margin, margin, margin);
+            targetFrame.addView(modeDSideControlsContainer, lp);
+        }
+
+        if (btnModeDSideLinkage != null) {
+            String linkageLabel;
+            if (AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(modeDSideLinkageMode)) {
+                linkageLabel = "随转向灯";
+            } else if (AppConfig.MODE_D_SIDE_LINKAGE_MANUAL.equals(modeDSideLinkageMode)) {
+                linkageLabel = "手动切换";
+            } else {
+                linkageLabel = "随方向盘";
+            }
+            btnModeDSideLinkage.setText(linkageLabel);
+            syncModeDSideLinkagePillBg();
+        }
+        if (btnSideFeedSwitch != null) {
+            btnSideFeedSwitch.setText(
+                    modeDRightSideIndex == PreviewLayoutModel.RIGHT ? "右侧 ⇄ 左侧" : "左侧 ⇄ 右侧");
+        }
+        modeDSideControlsContainer.bringToFront();
     }
 
     @Nullable
@@ -586,6 +756,7 @@ public final class EditablePreviewLayout extends ViewGroup {
             }
         }
         syncMainFeedSwitchPill();
+        syncModeDSideControls();
         requestLayout();
         invalidate();
         if (notify && stateChangeListener != null) {
@@ -714,8 +885,10 @@ public final class EditablePreviewLayout extends ViewGroup {
 
         editing = true;
         cropEditMode = false;
+        opacityPreviewMode = false;
         selected = findFirstVisiblePane();
         syncMainFeedSwitchPill();
+        syncModeDSideControls();
         invalidate();
     }
 
@@ -798,6 +971,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         }
         editing = false;
         cropEditMode = false;
+        opacityPreviewMode = false;
         dragOriginSnapshot = null;
         selected = -1;
         beforeEditing = null;
@@ -845,6 +1019,7 @@ public final class EditablePreviewLayout extends ViewGroup {
     @Override
     public boolean onTouchEvent(MotionEvent event) {
         if (!editing) return super.onTouchEvent(event);
+        if (opacityPreviewMode) return true;
         if (cropEditMode) {
             return handleCropTouch(event);
         }
@@ -977,7 +1152,7 @@ public final class EditablePreviewLayout extends ViewGroup {
     @Override
     protected void dispatchDraw(Canvas canvas) {
         super.dispatchDraw(canvas);
-        if (!editing) return;
+        if (!editing || opacityPreviewMode) return;
         float size = 32 * density;
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);

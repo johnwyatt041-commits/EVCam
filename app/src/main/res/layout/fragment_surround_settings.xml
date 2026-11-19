@@ -241,6 +241,59 @@
                         android:layout_marginVertical="12dp"
                         android:background="@color/ui_border" />
 
+                    <!-- 模式 D 右侧视角联动 -->
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="模式 D 右侧视角联动"
+                        android:textColor="@color/text_primary"
+                        android:textSize="14sp"
+                        android:fontFamily="sans-serif-medium"
+                        android:layout_marginBottom="8dp" />
+
+                    <HorizontalScrollView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:scrollbars="none">
+
+                        <LinearLayout
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal">
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_mode_d_linkage_turn_signal"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="随转向灯" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_mode_d_linkage_steering"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
+                                android:text="随方向盘" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_mode_d_linkage_manual"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:text="手动切换" />
+                        </LinearLayout>
+                    </HorizontalScrollView>
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="6dp"
+                        android:text="控制双视转向（模式 D）右侧左/右视角自动联动方式；画面内也支持一键手动左/右切换。"
+                        android:textColor="@color/text_hint"
+                        android:textSize="12sp" />
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:layout_marginVertical="12dp"
+                        android:background="@color/ui_border" />
+
                     <!-- 开关项：暂停补盲 / 拉伸铺满 / 视图内按键显隐 -->
                     <LinearLayout
                         android:layout_width="match_parent"
@@ -324,7 +377,7 @@
                             <TextView
                                 android:layout_width="wrap_content"
                                 android:layout_height="wrap_content"
-                                android:text="与外观设置同步，控制 360 A 视角/轮位按钮及模式 C/D 画内手动「前/后」按钮"
+                                android:text="与外观设置同步，控制 360 A 视角/轮位按钮及模式 C/D 画内视角切换按钮"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="12sp" />
                         </LinearLayout>
@@ -728,6 +781,12 @@
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content" />
                     </LinearLayout>
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btn_guidance_auto_rules"
+                        style="@style/Widget.EVCam.OptionPill"
+                        android:layout_marginBottom="12dp"
+                        android:text="按车速/档位自动开关引导线 →" />
 
                     <View
                         android:layout_width="match_parent"

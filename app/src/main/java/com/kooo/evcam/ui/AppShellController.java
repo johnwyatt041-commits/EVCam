@@ -725,7 +725,7 @@ public final class AppShellController {
                 && activity.findViewById(R.id.ui_preview_layout) != null;
         preview.setVisibility(currentRoot == R.id.nav_recording ? View.VISIBLE : View.GONE);
         shell.findViewById(R.id.ui_edit_layout).setVisibility(
-                (hasEditablePreview && activePreviewMode != PreviewMode.MODE_A) ? View.VISIBLE : View.GONE);
+                hasEditablePreview ? View.VISIBLE : View.GONE);
         View modeControls = shell.findViewById(R.id.ui_preview_mode_controls);
         if (modeControls != null) {
             modeControls.setVisibility(hasEditablePreview ? View.VISIBLE : View.GONE);

@@ -3494,13 +3494,18 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public static final String PREVIEW_MODE_B = "mode_b";
     public static final String PREVIEW_MODE_C = "mode_c";
     public static final String PREVIEW_MODE_A = "mode_a"; // T07：360 全景 + 分视角模式
-    public static final String PREVIEW_MODE_D = "mode_d"; // Pack B：双视角（左前/后手动 + 右方向盘联动左/右）
+    public static final String PREVIEW_MODE_D = "mode_d"; // Pack B：双视角（左前/后手动 + 右侧视角随转向灯/方向盘/手动）
+
+    public static final String MODE_D_SIDE_LINKAGE_STEERING = "steering";       // 随方向盘转角切换左/右视
+    public static final String MODE_D_SIDE_LINKAGE_TURN_SIGNAL = "turn_signal"; // 随左右转向灯切换左/右视
+    public static final String MODE_D_SIDE_LINKAGE_MANUAL = "manual";           // 仅画内按钮手动切换左/右视
 
     public static final String CORNER_NAV_AUTO = "auto";     // 仅沉浸全屏显示
     public static final String CORNER_NAV_ALWAYS = "always"; // 始终显示
     public static final String CORNER_NAV_HIDDEN = "hidden"; // 隐藏
 
     private static final String KEY_PREVIEW_MODE = "t03_preview_mode";
+    private static final String KEY_MODE_D_SIDE_LINKAGE_MODE = "mode_d_side_linkage_mode";
     private static final String KEY_CORNER_NAV_MODE = "t03_corner_nav_mode";
     private static final String KEY_VIEW_SHORTCUTS_ENABLED = "t03_view_shortcuts_enabled";
     private static final String KEY_PREVIEW_SLOT_FILL_PREFIX = "preview_slot_fill_";
@@ -3530,6 +3535,28 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         String normalized = normalizePreviewMode(mode);
         prefs.edit().putString(KEY_PREVIEW_MODE, normalized).apply();
         AppLog.d(TAG, "主预览模式已设置: " + normalized);
+    }
+
+    /** 规范化模式 D 右侧画面（左/右视）自动联动方式，默认随方向盘转向。 */
+    public static String normalizeModeDSideLinkageMode(String mode) {
+        if (MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(mode)) {
+            return MODE_D_SIDE_LINKAGE_TURN_SIGNAL;
+        }
+        if (MODE_D_SIDE_LINKAGE_MANUAL.equals(mode)) {
+            return MODE_D_SIDE_LINKAGE_MANUAL;
+        }
+        return MODE_D_SIDE_LINKAGE_STEERING;
+    }
+
+    public String getModeDSideLinkageMode() {
+        return normalizeModeDSideLinkageMode(
+                prefs.getString(KEY_MODE_D_SIDE_LINKAGE_MODE, MODE_D_SIDE_LINKAGE_STEERING));
+    }
+
+    public void setModeDSideLinkageMode(String mode) {
+        String normalized = normalizeModeDSideLinkageMode(mode);
+        prefs.edit().putString(KEY_MODE_D_SIDE_LINKAGE_MODE, normalized).apply();
+        AppLog.d(TAG, "模式 D 右侧联动方式已设置: " + normalized);
     }
 
     private static String slotTransformKey(String prefix, String modeKey, String cameraKey) {
@@ -4302,12 +4329,20 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public static final int MIN_SURROUND_GROUND_FRONT_EXT_CM = 0;
     public static final int MAX_SURROUND_GROUND_FRONT_EXT_CM = 100;
     public static final int DEFAULT_SURROUND_GROUND_FRONT_EXT_CM = 0;
+    public static final int MIN_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT = 50;
+    public static final int MAX_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT = 150;
+    public static final int DEFAULT_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT = 100;
+    public static final int MIN_PREVIEW_OVERLAY_BG_ALPHA_PERCENT = 0;
+    public static final int MAX_PREVIEW_OVERLAY_BG_ALPHA_PERCENT = 100;
+    public static final int DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT = 80;
 
     private static final String KEY_SURROUND_TOP_VIEW = "surround_top_view";
     private static final String KEY_SURROUND_BOTTOM_VIEW = "surround_bottom_view";
     private static final String KEY_SURROUND_WHEELS_COLLAPSED = "surround_wheels_collapsed";
     private static final String KEY_SURROUND_STRETCH_ROAD_VIEWS = "surround_stretch_road_views";
     private static final String KEY_SURROUND_OVERLAY_BUTTONS_VISIBLE = "surround_overlay_buttons_visible";
+    private static final String KEY_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT = "surround_road_guidance_width_percent";
+    private static final String KEY_PREVIEW_OVERLAY_BG_ALPHA_PERCENT = "preview_overlay_bg_alpha_percent";
 
     private static final String KEY_REVERSE_PREVIEW_ENABLED = "reverse_preview_enabled";
     private static final String KEY_REVERSE_PREVIEW_DELAY_MS = "reverse_preview_delay_ms";
@@ -4318,6 +4353,8 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     private static final String KEY_SURROUND_CALIBRATION_SOURCE = "surround_calibration_source";
     private static final String KEY_SURROUND_CUSTOM_CALIBRATION_PATH = "surround_custom_calibration_path";
+    private static final String KEY_SURROUND_EXTRINSICS_BUILTIN = "surround_extrinsics_builtin_json";
+    private static final String KEY_SURROUND_EXTRINSICS_CUSTOM = "surround_extrinsics_custom_json";
     private static final String KEY_SURROUND_GROUND_WIDTH_CM = "surround_ground_width_cm";
     private static final String KEY_SURROUND_GROUND_LENGTH_CM = "surround_ground_length_cm";
     private static final String KEY_SURROUND_GROUND_FRONT_EXT_CM = "surround_ground_front_ext_cm";
@@ -4467,6 +4504,45 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         prefs.edit().putString(KEY_SURROUND_CUSTOM_CALIBRATION_PATH, path != null ? path : "").apply();
     }
 
+    public static String normalizeSurroundCalibrationSlot(String source) {
+        return normalizeSurroundCalibrationSource(source);
+    }
+
+    private static String extrinsicsKeyForSlot(String source) {
+        return SURROUND_CALIBRATION_E5_CUSTOM.equals(normalizeSurroundCalibrationSlot(source))
+                ? KEY_SURROUND_EXTRINSICS_CUSTOM
+                : KEY_SURROUND_EXTRINSICS_BUILTIN;
+    }
+
+    public com.kooo.evcam.surround.SurroundExtrinsicAdjustment getSurroundExtrinsicAdjustmentForSlot(String source) {
+        String raw = prefs.getString(extrinsicsKeyForSlot(source), "");
+        return com.kooo.evcam.surround.SurroundExtrinsicAdjustment.fromJson(raw);
+    }
+
+    public void setSurroundExtrinsicAdjustmentForSlot(
+            String source,
+            com.kooo.evcam.surround.SurroundExtrinsicAdjustment adjustment) {
+        String serialized = (adjustment == null || adjustment.isIdentity()) ? "" : adjustment.toJson();
+        prefs.edit().putString(extrinsicsKeyForSlot(source), serialized).apply();
+    }
+
+    public void resetSurroundExtrinsicAdjustmentForSlot(String source) {
+        prefs.edit().putString(extrinsicsKeyForSlot(source), "").apply();
+    }
+
+    public com.kooo.evcam.surround.SurroundExtrinsicAdjustment getActiveSurroundExtrinsicAdjustment() {
+        return getSurroundExtrinsicAdjustmentForSlot(getSurroundCalibrationSource());
+    }
+
+    public void setActiveSurroundExtrinsicAdjustment(
+            com.kooo.evcam.surround.SurroundExtrinsicAdjustment adjustment) {
+        setSurroundExtrinsicAdjustmentForSlot(getSurroundCalibrationSource(), adjustment);
+    }
+
+    public String getActiveSurroundExtrinsicSignature() {
+        return getActiveSurroundExtrinsicAdjustment().toCompactSignature();
+    }
+
     public static int normalizeSurroundGroundWidthCm(int widthCm) {
         return Math.max(MIN_SURROUND_GROUND_WIDTH_CM, Math.min(MAX_SURROUND_GROUND_WIDTH_CM, widthCm));
     }
@@ -4535,6 +4611,48 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         if (!Float.isFinite(angleDeg)) return;
         float clamped = Math.max(-45f, Math.min(45f, angleDeg));
         prefs.edit().putFloat(KEY_PREVIEW_GUIDANCE_LAST_ANGLE, clamped).apply();
+    }
+
+    public static int normalizeSurroundRoadGuidanceWidthPercent(int percent) {
+        return Math.max(MIN_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                Math.min(MAX_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT, percent));
+    }
+
+    public int getSurroundRoadGuidanceWidthPercent() {
+        return normalizeSurroundRoadGuidanceWidthPercent(
+                prefs.getInt(KEY_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT, DEFAULT_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT));
+    }
+
+    public void setSurroundRoadGuidanceWidthPercent(int percent) {
+        prefs.edit().putInt(KEY_SURROUND_ROAD_GUIDANCE_WIDTH_PERCENT,
+                normalizeSurroundRoadGuidanceWidthPercent(percent)).apply();
+    }
+
+    public float getSurroundRoadGuidanceWidthScale() {
+        return getSurroundRoadGuidanceWidthPercent() / 100.0f;
+    }
+
+    public static int normalizePreviewOverlayBgAlphaPercent(int percent) {
+        return Math.max(MIN_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                Math.min(MAX_PREVIEW_OVERLAY_BG_ALPHA_PERCENT, percent));
+    }
+
+    /** 根据全局按键底色透明度百分比（0~100）等比缩放 ARGB 颜色的 Alpha 通道。 */
+    public static int applyColorAlphaPercent(int baseArgbColor, int alphaPercent) {
+        int baseAlpha = (baseArgbColor >>> 24) & 0xFF;
+        float scale = normalizePreviewOverlayBgAlphaPercent(alphaPercent) / 100.0f;
+        int scaledAlpha = Math.max(0, Math.min(255, Math.round(baseAlpha * scale)));
+        return (scaledAlpha << 24) | (baseArgbColor & 0x00FFFFFF);
+    }
+
+    public int getPreviewOverlayBgAlphaPercent() {
+        return normalizePreviewOverlayBgAlphaPercent(
+                prefs.getInt(KEY_PREVIEW_OVERLAY_BG_ALPHA_PERCENT, DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT));
+    }
+
+    public void setPreviewOverlayBgAlphaPercent(int percent) {
+        prefs.edit().putInt(KEY_PREVIEW_OVERLAY_BG_ALPHA_PERCENT,
+                normalizePreviewOverlayBgAlphaPercent(percent)).apply();
     }
 
     public static String normalizeSurroundCarModelSource(String source) {

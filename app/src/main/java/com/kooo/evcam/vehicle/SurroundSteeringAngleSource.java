@@ -16,6 +16,8 @@ import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,11 +37,12 @@ import io.grpc.stub.MetadataUtils;
 import io.grpc.stub.StreamObserver;
 
 /**
- * Mode A 前台按需方向盘转角数据源（方案 1）：
+ * Mode A / Mode D 前台按需方向盘转角数据源（方案 1）：
  * - 严格独立于 T01/T06 后台 4 类核心信号白名单（不修改 VehicleSignalCategory / VehicleSignalHub / 3.1 规则引擎）；
- * - 仅在主界面处于前台「模式 A（360 全景）」且开启「动态转向引导线」时通过 Lease.acquire() 临时订阅；
- * - 退出模式 A、切离录制页、关闭引导线或退后台时立即 close() 释放，零后台唤醒与轮询开销；
- * - 同步兼容标准 AOSP VHAL (`PERF_STEERING_ANGLE = 0x11600209`, 40004) 与 银河 E5 APVP (`PinionSteerAgGroupPinionSteerAg1`, 40005)。
+ * - 仅在主界面处于前台「模式 A（360 全景）」或「模式 D（随方向盘联动）」且功能启用时通过 Lease.acquire() 临时订阅；
+ * - 退出模式 A/D、切离录制页、关闭引导线或退后台时立即 close() 释放，零后台唤醒与轮询开销；
+ * - 同步兼容标准 AOSP VHAL (`PERF_STEERING_ANGLE = 0x11600209`, 40004) 与银河 E5 APVP
+ *   (`TransferDebugServer` 40007 查表 + `TransferServer` 40005 `readSignal`/`listenerSignalStream` 订阅 `PinionSteerAgGroupPinionSteerAg1`)。
  */
 public final class SurroundSteeringAngleSource {
 
@@ -49,6 +52,7 @@ public final class SurroundSteeringAngleSource {
 
     public static final int PROP_PERF_STEERING_ANGLE = 0x11600209;
     public static final int APVP_PORT = 40005;
+    public static final int APVP_DEBUG_PORT = 40007;
     public static final String SIG_PINION_STEER_AG = "PinionSteerAgGroupPinionSteerAg1";
     public static final String SIG_PINION_STEER_QF = "PinionSteerAgGroupPinionSteerAg1Qf";
     public static final String SIG_PINION_TIMEOUT = "PinionSteerAgGroupTimeout";
@@ -75,8 +79,10 @@ public final class SurroundSteeringAngleSource {
     private volatile boolean running;
     private volatile int sessionGeneration;
     @Nullable private Thread apvpThread;
+    @Nullable private volatile ManagedChannel apvpDebugChannel;
     @Nullable private volatile ManagedChannel apvpChannel;
     @Nullable private volatile ClientCall<byte[], byte[]> apvpStreamCall;
+    private volatile boolean loggedFirstApvpAngle = false;
 
     private SurroundSteeringAngleSource() {
     }
@@ -96,6 +102,7 @@ public final class SurroundSteeringAngleSource {
         if (++users == 1) {
             running = true;
             sessionGeneration++;
+            loggedFirstApvpAngle = false;
             decoder.reset();
             VhalSignalObserver.addObserverLifecycleListener(observerLifecycleCallback);
             refreshVhalAttachment();
@@ -206,26 +213,42 @@ public final class SurroundSteeringAngleSource {
     private void stopApvpAsyncLocked() {
         final ClientCall<byte[], byte[]> call = this.apvpStreamCall;
         final ManagedChannel channel = this.apvpChannel;
+        final ManagedChannel debugChannel = this.apvpDebugChannel;
         final Thread thread = this.apvpThread;
         this.apvpStreamCall = null;
         this.apvpChannel = null;
+        this.apvpDebugChannel = null;
         this.apvpThread = null;
         if (thread != null) {
             thread.interrupt();
         }
-        if (call != null || channel != null) {
+        if (call != null || channel != null || debugChannel != null) {
             Thread stopper = new Thread(() -> {
                 if (call != null) {
                     try {
-                        call.cancel("surround mode A closed", null);
+                        call.cancel("surround steering lease closed", null);
                     } catch (Exception ignored) {
                     }
                 }
+                shutdownChannelQuietly(debugChannel);
                 shutdownChannelQuietly(channel);
             }, "SurroundApvpShutdown");
             stopper.setDaemon(true);
             stopper.start();
         }
+    }
+
+    @NonNull
+    private static ManagedChannel buildApvpChannel(@NonNull String host, int port) {
+        Metadata headers = new Metadata();
+        headers.put(Metadata.Key.of("client_pid", Metadata.ASCII_STRING_MARSHALLER),
+                "android_thread_id_" + android.os.Process.myTid());
+        return OkHttpChannelBuilder.forAddress(host, port)
+                .usePlaintext()
+                .keepAliveTime(20, TimeUnit.SECONDS)
+                .keepAliveWithoutCalls(false)
+                .intercept(MetadataUtils.newAttachHeadersInterceptor(headers))
+                .build();
     }
 
     private void runApvpLoop(int gen) {
@@ -235,24 +258,25 @@ public final class SurroundSteeringAngleSource {
         }
         int failures = 0;
         while (running && sessionGeneration == gen && failures <= APVP_MAX_RETRIES) {
+            ManagedChannel debugChannel = null;
             ManagedChannel channel = null;
             try {
-                Metadata headers = new Metadata();
-                headers.put(Metadata.Key.of("client_pid", Metadata.ASCII_STRING_MARSHALLER),
-                        "android_thread_id_" + android.os.Process.myTid());
-                channel = OkHttpChannelBuilder.forAddress(host, APVP_PORT)
-                        .usePlaintext()
-                        .intercept(MetadataUtils.newAttachHeadersInterceptor(headers))
-                        .build();
-                this.apvpChannel = channel;
+                debugChannel = buildApvpChannel(host, APVP_DEBUG_PORT);
+                this.apvpDebugChannel = debugChannel;
+                Map<String, SignalRef> catalog = fetchApvpSteeringSignals(debugChannel);
+                if (this.apvpDebugChannel == debugChannel) {
+                    this.apvpDebugChannel = null;
+                }
+                shutdownChannelQuietly(debugChannel);
+                debugChannel = null;
 
-                Map<String, SignalRef> catalog = fetchApvpSteeringSignals(channel);
                 if (!running || sessionGeneration != gen) {
                     return;
                 }
                 SignalRef steerRef = catalog.get(SIG_PINION_STEER_AG);
                 if (steerRef == null) {
-                    AppLog.d(TAG, "APVP steering catalog unavailable on port " + APVP_PORT + ", fallback VHAL only");
+                    AppLog.i(TAG, "APVP steering catalog unavailable on port " + APVP_DEBUG_PORT
+                            + " (found=" + catalog.size() + "), fallback VHAL only");
                     return;
                 }
 
@@ -266,19 +290,38 @@ public final class SurroundSteeringAngleSource {
                 if (timeoutRef != null) {
                     subscribeList.add(timeoutRef);
                 }
-                decoder.configureApvpExpectations(qfRef != null, timeoutRef != null);
+                AppLog.i(TAG, "APVP steering catalog resolved on port " + APVP_DEBUG_PORT
+                        + ": steerId=" + steerRef.id
+                        + ", qfId=" + (qfRef != null ? qfRef.id : -1)
+                        + ", timeoutId=" + (timeoutRef != null ? timeoutRef.id : -1));
+
+                decoder.resetApvp();
+                decoder.registerApvpSignals(subscribeList);
+
+                channel = buildApvpChannel(host, APVP_PORT);
+                this.apvpChannel = channel;
+
+                boolean qfReadOk = qfRef != null && readInitialSignal(channel, qfRef, gen);
+                boolean timeoutReadOk = timeoutRef != null && readInitialSignal(channel, timeoutRef, gen);
+                decoder.configureApvpExpectations(qfRef != null && qfReadOk, timeoutRef != null && timeoutReadOk);
+                readInitialSignal(channel, steerRef, gen);
 
                 boolean cleanClose = streamApvpSignals(channel, gen, subscribeList);
                 failures = cleanClose ? 0 : (failures + 1);
             } catch (Exception e) {
                 failures++;
                 if (running && sessionGeneration == gen) {
-                    AppLog.d(TAG, "APVP steering stream attempt " + failures + " ended: " + e.getMessage());
+                    AppLog.w(TAG, "APVP steering attempt " + failures + " ended: " + e.getMessage());
                 }
             } finally {
+                decoder.resetApvp();
+                if (this.apvpDebugChannel == debugChannel) {
+                    this.apvpDebugChannel = null;
+                }
                 if (this.apvpChannel == channel) {
                     this.apvpChannel = null;
                 }
+                shutdownChannelQuietly(debugChannel);
                 shutdownChannelQuietly(channel);
             }
 
@@ -367,11 +410,43 @@ public final class SurroundSteeringAngleSource {
                 Thread.currentThread().interrupt();
                 break;
             }
-            if (found.containsKey(SIG_PINION_STEER_AG)) {
+            if (found.size() >= 3) {
                 break;
             }
         }
         return found;
+    }
+
+    private boolean readInitialSignal(@NonNull ManagedChannel channel,
+                                      @NonNull SignalRef ref,
+                                      int gen) {
+        if (!running || sessionGeneration != gen) {
+            return false;
+        }
+        try {
+            MethodDescriptor<byte[], byte[]> readMethod = MethodDescriptor.<byte[], byte[]>newBuilder()
+                    .setType(MethodDescriptor.MethodType.UNARY)
+                    .setFullMethodName("transfer_proto.TransferServer/readSignal")
+                    .setRequestMarshaller(ByteMarshaller.INSTANCE)
+                    .setResponseMarshaller(ByteMarshaller.INSTANCE)
+                    .build();
+            byte[] req = ApvpWireCodec.buildSignalKeyRequest(ref);
+            byte[] resp = ClientCalls.blockingUnaryCall(
+                    channel, readMethod, CallOptions.DEFAULT.withDeadlineAfter(3, TimeUnit.SECONDS), req);
+            if (!running || sessionGeneration != gen) {
+                return false;
+            }
+            ApvpSignalValue parsed = ApvpWireCodec.parseSingleSignalUpdate(resp, decoder.snapshotApvpIdToName());
+            Float angle = decoder.acceptApvpSinglePayload(resp, SystemClock.elapsedRealtime());
+            if (angle != null) {
+                logFirstApvpAngleOnce(angle, "readSignal");
+                dispatchAngle(angle);
+            }
+            return parsed != null;
+        } catch (Exception e) {
+            AppLog.d(TAG, "APVP readSignal skipped for " + ref.name + ": " + e.getMessage());
+            return false;
+        }
     }
 
     private boolean streamApvpSignals(@NonNull ManagedChannel channel,
@@ -397,6 +472,7 @@ public final class SurroundSteeringAngleSource {
                 }
                 Float angle = decoder.acceptApvpStreamPayload(value, SystemClock.elapsedRealtime());
                 if (angle != null) {
+                    logFirstApvpAngleOnce(angle, "stream");
                     dispatchAngle(angle);
                 }
             }
@@ -406,7 +482,7 @@ public final class SurroundSteeringAngleSource {
                 hadError[0] = true;
                 Status s = Status.fromThrowable(t);
                 if (running && sessionGeneration == gen && s.getCode() != Status.Code.CANCELLED) {
-                    AppLog.d(TAG, "APVP steering stream error: " + s.getCode());
+                    AppLog.w(TAG, "APVP steering stream error: " + s.getCode());
                 }
                 latch.countDown();
             }
@@ -418,7 +494,7 @@ public final class SurroundSteeringAngleSource {
         });
 
         reqObserver.onNext(ApvpWireCodec.buildSubscribeStreamRequest(subscribeList));
-        AppLog.d(TAG, "Mode A APVP steering stream active (" + subscribeList.size() + " signals)");
+        AppLog.i(TAG, "APVP steering stream subscribed on port " + APVP_PORT + " (" + subscribeList.size() + " signals)");
 
         try {
             while (running && sessionGeneration == gen) {
@@ -438,6 +514,13 @@ public final class SurroundSteeringAngleSource {
             }
         }
         return !hadError[0];
+    }
+
+    private void logFirstApvpAngleOnce(float angleDeg, @NonNull String via) {
+        if (!loggedFirstApvpAngle) {
+            loggedFirstApvpAngle = true;
+            AppLog.i(TAG, "APVP steering angle first sample (" + via + "): wheelAngleDeg=" + angleDeg);
+        }
     }
 
     private void dispatchAngle(float angleDeg) {
@@ -512,30 +595,22 @@ public final class SurroundSteeringAngleSource {
 
     /** 纯 Java 双协议方向盘角度解码器（零 Android 依赖）。 */
     public static final class Decoder {
+        private final Map<Integer, String> apvpIdToName = new HashMap<>();
         private long lastVhalTimestamp;
         private long lastApvpTimestampMs;
         private boolean expectQf;
         private boolean expectTimeout;
         private int lastQf = -1;
-        private long lastQfTimestampMs;
         private int lastTimeout = -1;
-        private long lastTimeoutTimestampMs;
         private float lastVhalAngle = Float.NaN;
         private float lastApvpAngle = Float.NaN;
         private float lastEmittedAngle = Float.NaN;
 
         public synchronized void reset() {
             lastVhalTimestamp = 0L;
-            lastApvpTimestampMs = 0L;
-            expectQf = false;
-            expectTimeout = false;
-            lastQf = -1;
-            lastQfTimestampMs = 0L;
-            lastTimeout = -1;
-            lastTimeoutTimestampMs = 0L;
             lastVhalAngle = Float.NaN;
-            lastApvpAngle = Float.NaN;
             lastEmittedAngle = Float.NaN;
+            resetApvp();
         }
 
         public synchronized void resetVhal() {
@@ -543,9 +618,36 @@ public final class SurroundSteeringAngleSource {
             lastVhalAngle = Float.NaN;
         }
 
-        public synchronized void configureApvpExpectations(boolean hasQf, boolean hasTimeout) {
-            this.expectQf = hasQf;
-            this.expectTimeout = hasTimeout;
+        public synchronized void resetApvp() {
+            lastApvpTimestampMs = 0L;
+            expectQf = false;
+            expectTimeout = false;
+            lastQf = -1;
+            lastTimeout = -1;
+            lastApvpAngle = Float.NaN;
+            apvpIdToName.clear();
+        }
+
+        public synchronized void registerApvpSignals(@Nullable List<SignalRef> refs) {
+            apvpIdToName.clear();
+            if (refs == null) {
+                return;
+            }
+            for (SignalRef ref : refs) {
+                if (ref != null && ref.id != 0 && !ref.name.isEmpty()) {
+                    apvpIdToName.put(ref.id, ref.name);
+                }
+            }
+        }
+
+        @NonNull
+        synchronized Map<Integer, String> snapshotApvpIdToName() {
+            return new HashMap<>(apvpIdToName);
+        }
+
+        public synchronized void configureApvpExpectations(boolean requireInitialQf, boolean requireInitialTimeout) {
+            this.expectQf = requireInitialQf;
+            this.expectTimeout = requireInitialTimeout;
         }
 
         @Nullable
@@ -556,7 +658,7 @@ public final class SurroundSteeringAngleSource {
             if (!Float.isNaN(lastVhalAngle)) {
                 return lastVhalAngle;
             }
-            return null;
+            return !Float.isNaN(lastApvpAngle) ? lastApvpAngle : null;
         }
 
         @Nullable
@@ -593,29 +695,45 @@ public final class SurroundSteeringAngleSource {
         }
 
         @Nullable
+        public synchronized Float acceptApvpSinglePayload(@Nullable byte[] bytes, long nowMs) {
+            if (bytes == null || bytes.length == 0) {
+                return null;
+            }
+            ApvpSignalValue single = ApvpWireCodec.parseSingleSignalUpdate(bytes, apvpIdToName);
+            if (single == null) {
+                return null;
+            }
+            return applyApvpUpdates(Collections.singletonList(single), nowMs);
+        }
+
+        @Nullable
         public synchronized Float acceptApvpStreamPayload(@Nullable byte[] bytes, long nowMs) {
             if (bytes == null || bytes.length == 0) {
                 return null;
             }
-            List<ApvpSignalValue> updates = ApvpWireCodec.parseStreamSignalUpdates(bytes);
+            List<ApvpSignalValue> updates = ApvpWireCodec.parseStreamSignalUpdates(bytes, apvpIdToName);
             if (updates.isEmpty()) {
                 return null;
             }
+            return applyApvpUpdates(updates, nowMs);
+        }
+
+        @Nullable
+        private Float applyApvpUpdates(@NonNull List<ApvpSignalValue> updates, long nowMs) {
             Double rawRad = null;
             for (ApvpSignalValue u : updates) {
-                if (SIG_PINION_STEER_QF.equals(u.name)) {
+                String resolvedName = !u.name.isEmpty() ? u.name : (u.id != 0 ? apvpIdToName.get(u.id) : null);
+                if (SIG_PINION_STEER_QF.equals(resolvedName)) {
                     Integer qf = u.asInt();
                     if (qf != null) {
                         lastQf = qf;
-                        lastQfTimestampMs = nowMs;
                     }
-                } else if (SIG_PINION_TIMEOUT.equals(u.name)) {
+                } else if (SIG_PINION_TIMEOUT.equals(resolvedName)) {
                     Integer timeout = u.asInt();
                     if (timeout != null) {
                         lastTimeout = timeout;
-                        lastTimeoutTimestampMs = nowMs;
                     }
-                } else if (SIG_PINION_STEER_AG.equals(u.name)) {
+                } else if (SIG_PINION_STEER_AG.equals(resolvedName)) {
                     Double v = u.asDouble();
                     if (v != null) {
                         rawRad = v;
@@ -625,10 +743,11 @@ public final class SurroundSteeringAngleSource {
             if (rawRad == null) {
                 return null;
             }
-            if (expectQf && (lastQf != 3 || (nowMs - lastQfTimestampMs) > APVP_FRESH_MS)) {
+            // 质量信号在当前 APVP 连接周期内持续有效，不因 on-change 静默超时丢弃正常转角
+            if ((lastQf != -1 && lastQf != 3) || (expectQf && lastQf == -1)) {
                 return null;
             }
-            if (expectTimeout && (lastTimeout != 0 || (nowMs - lastTimeoutTimestampMs) > APVP_FRESH_MS)) {
+            if ((lastTimeout != -1 && lastTimeout != 0) || (expectTimeout && lastTimeout == -1)) {
                 return null;
             }
             Float wheelDeg = pinionRadToWheelAngleDeg(rawRad);
@@ -760,8 +879,24 @@ public final class SurroundSteeringAngleSource {
         public static List<Integer> parseAllTransferIds(@Nullable byte[] bytes) {
             List<Integer> ids = new ArrayList<>();
             for (WireField f : parseFields(bytes)) {
-                if (f.fieldNumber == 1 && f.wireType == 0) {
-                    ids.add((int) f.varintValue);
+                if (f.fieldNumber != 1) {
+                    continue;
+                }
+                if (f.wireType == 2 && f.bytesValue != null) {
+                    // E5 TransferDebugServer/getAllTransfer: repeated TransferInfo { int32 id = 1; ... }
+                    for (WireField inner : parseFields(f.bytesValue)) {
+                        if (inner.fieldNumber == 1 && inner.wireType == 0) {
+                            int id = (int) inner.varintValue;
+                            if (id > 0 && !ids.contains(id)) {
+                                ids.add(id);
+                            }
+                        }
+                    }
+                } else if (f.wireType == 0) {
+                    int id = (int) f.varintValue;
+                    if (id > 0 && !ids.contains(id)) {
+                        ids.add(id);
+                    }
                 }
             }
             return ids;
@@ -772,6 +907,17 @@ public final class SurroundSteeringAngleSource {
             ByteArrayOutputStream out = new ByteArrayOutputStream(8);
             writeVarint(out, 8);
             writeVarint(out, transferId & 0xFFFFFFFFL);
+            return out.toByteArray();
+        }
+
+        @NonNull
+        public static byte[] buildSignalKeyRequest(@NonNull SignalRef ref) {
+            ByteArrayOutputStream out = new ByteArrayOutputStream(16);
+            writeVarint(out, 8);
+            writeVarint(out, ref.id & 0xFFFFFFFFL);
+            if (!ref.name.isEmpty()) {
+                writeLengthDelimited(out, 2, ref.name.getBytes(StandardCharsets.UTF_8));
+            }
             return out.toByteArray();
         }
 
@@ -805,18 +951,19 @@ public final class SurroundSteeringAngleSource {
                 if (ref == null || ref.name.isEmpty()) {
                     continue;
                 }
-                ByteArrayOutputStream item = new ByteArrayOutputStream();
-                writeVarint(item, 8);
-                writeVarint(item, ref.id & 0xFFFFFFFFL);
-                byte[] nameBytes = ref.name.getBytes(StandardCharsets.UTF_8);
-                writeLengthDelimited(item, 2, nameBytes);
-                writeLengthDelimited(root, 2, item.toByteArray());
+                writeLengthDelimited(root, 2, buildSignalKeyRequest(ref));
             }
             return root.toByteArray();
         }
 
         @NonNull
         public static List<ApvpSignalValue> parseStreamSignalUpdates(@Nullable byte[] bytes) {
+            return parseStreamSignalUpdates(bytes, null);
+        }
+
+        @NonNull
+        public static List<ApvpSignalValue> parseStreamSignalUpdates(@Nullable byte[] bytes,
+                                                                     @Nullable Map<Integer, String> idToName) {
             List<ApvpSignalValue> out = new ArrayList<>();
             for (WireField outer : parseFields(bytes)) {
                 if (outer.fieldNumber != 1 || outer.wireType != 2 || outer.bytesValue == null) {
@@ -826,7 +973,7 @@ public final class SurroundSteeringAngleSource {
                     if (mid.fieldNumber != 3 || mid.wireType != 2 || mid.bytesValue == null) {
                         continue;
                     }
-                    ApvpSignalValue val = parseSingleSignalUpdate(mid.bytesValue);
+                    ApvpSignalValue val = parseSingleSignalUpdate(mid.bytesValue, idToName);
                     if (val != null) {
                         out.add(val);
                     }
@@ -836,7 +983,11 @@ public final class SurroundSteeringAngleSource {
         }
 
         @Nullable
-        private static ApvpSignalValue parseSingleSignalUpdate(@NonNull byte[] bytes) {
+        public static ApvpSignalValue parseSingleSignalUpdate(@Nullable byte[] bytes,
+                                                              @Nullable Map<Integer, String> idToName) {
+            if (bytes == null || bytes.length == 0) {
+                return null;
+            }
             int id = 0;
             String name = "";
             Integer intVal = null;
@@ -854,6 +1005,8 @@ public final class SurroundSteeringAngleSource {
                                     name = new String(keyField.bytesValue, StandardCharsets.UTF_8).trim();
                                 }
                             }
+                        } else if (f.wireType == 0) {
+                            id = (int) f.varintValue;
                         }
                         break;
                     case 3:
@@ -881,6 +1034,11 @@ public final class SurroundSteeringAngleSource {
                     case 5:
                         if (f.wireType == 5) {
                             floatVal = Float.intBitsToFloat((int) f.varintValue);
+                        } else if (f.wireType == 1) {
+                            double dv = Double.longBitsToDouble(f.varintValue);
+                            if (Double.isFinite(dv)) {
+                                floatVal = (float) dv;
+                            }
                         } else if (f.wireType == 2 && f.bytesValue != null && f.bytesValue.length >= 4) {
                             floatVal = ByteBuffer.wrap(f.bytesValue, 0, 4)
                                     .order(ByteOrder.LITTLE_ENDIAN).getFloat();
@@ -895,7 +1053,13 @@ public final class SurroundSteeringAngleSource {
                         break;
                 }
             }
-            if (name.isEmpty()) {
+            if (name.isEmpty() && id != 0 && idToName != null) {
+                String resolved = idToName.get(id);
+                if (resolved != null) {
+                    name = resolved;
+                }
+            }
+            if (name.isEmpty() && id == 0) {
                 return null;
             }
             return new ApvpSignalValue(id, name, intVal, longVal, floatVal, strVal);

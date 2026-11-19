@@ -228,6 +228,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private volatile boolean wheelsCollapsed = false;
     private volatile boolean stretchRoadViews = false;
     private volatile boolean guidanceEnabled = true;
+    private volatile float roadGuidanceWidthScale = 1.0f;
+    private volatile boolean showCenterCard = true;
     private volatile float wheelAngleDeg = 0f;
     private volatile boolean inReverseGear = false;
     private volatile int gapPx = 12;
@@ -244,7 +246,11 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private volatile boolean birdOnlyPreview = false;
 
     @Nullable
-    private String loadedCalibrationSignature;
+    private SurroundCalibrationProfile activeBaseProfile;
+    @Nullable
+    private String loadedCalibrationBaseSignature;
+    @Nullable
+    private String loadedExtrinsicSignature;
     @Nullable
     private String loadedCarModelSignature;
     @Nullable
@@ -288,6 +294,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private FloatBuffer roadGuidanceBuffer;
     private int[] roadGuidanceCounts;
     private float cachedRoadGuidanceAngle = Float.NaN;
+    private float cachedRoadGuidanceWidthScale = Float.NaN;
     private boolean cachedRoadGuidanceReverse;
 
     public SurroundGlRenderer(@NonNull Context context,
@@ -339,49 +346,80 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             String customCalibPath = appConfig.getSurroundCustomCalibrationPath();
             String nextCalibSig = calibSource + "|" + customCalibPath + "|" + buildFileStamp(customCalibPath);
 
+            SurroundCalibrationProfile existingBase = this.activeBaseProfile;
             SurroundCalibrationProfile existingProfile = this.activeProfile;
-            boolean dimensionsChanged = existingProfile == null
-                    || existingProfile.groundWidthCm != width
-                    || existingProfile.groundLengthCm != length
-                    || existingProfile.groundFrontExtensionCm != ext;
-            boolean calibChanged = forceReloadAssets
+            boolean dimensionsChanged = existingBase == null
                     || existingProfile == null
-                    || !nextCalibSig.equals(loadedCalibrationSignature);
+                    || existingBase.groundWidthCm != width
+                    || existingBase.groundLengthCm != length
+                    || existingBase.groundFrontExtensionCm != ext;
+            boolean baseCalibChanged = forceReloadAssets
+                    || existingBase == null
+                    || existingProfile == null
+                    || !nextCalibSig.equals(loadedCalibrationBaseSignature);
 
-            if (calibChanged) {
-                this.activeProfile = SurroundCalibrationManager.resolveActiveProfile(appConfig);
-                this.loadedCalibrationSignature = nextCalibSig;
+            if (baseCalibChanged) {
+                SurroundCalibrationProfile base = SurroundCalibrationManager.resolveActiveBaseProfile(appConfig);
+                String effectiveSlot = base.isCustomCalibration
+                        ? AppConfig.SURROUND_CALIBRATION_E5_CUSTOM
+                        : AppConfig.SURROUND_CALIBRATION_E5_BUILTIN;
+                SurroundExtrinsicAdjustment adj = appConfig.getSurroundExtrinsicAdjustmentForSlot(effectiveSlot);
+                this.activeBaseProfile = base;
+                this.activeProfile = adj.applyToProfile(base);
+                this.loadedCalibrationBaseSignature = nextCalibSig;
+                this.loadedExtrinsicSignature = adj.toCompactSignature();
                 this.birdMeshDirty.set(true);
                 this.roadMeshDirty.set(true);
                 this.wheelMeshDirty.set(true);
                 this.guidanceDirty.set(true);
-            } else if (dimensionsChanged) {
-                this.activeProfile = new SurroundCalibrationProfile(
-                        existingProfile.profileName,
-                        existingProfile.isCustomCalibration,
-                        existingProfile.useBuiltInMeshes,
-                        width,
-                        length,
-                        ext,
-                        existingProfile.cameras);
-                if (!birdMeshIsWorldCm) {
-                    this.birdMeshDirty.set(true);
+            } else {
+                String effectiveSlot = existingBase.isCustomCalibration
+                        ? AppConfig.SURROUND_CALIBRATION_E5_CUSTOM
+                        : AppConfig.SURROUND_CALIBRATION_E5_BUILTIN;
+                SurroundExtrinsicAdjustment adj = appConfig.getSurroundExtrinsicAdjustmentForSlot(effectiveSlot);
+                String nextExtrinsicSig = adj.toCompactSignature();
+                boolean extrinsicChanged = !nextExtrinsicSig.equals(loadedExtrinsicSignature);
+                if (dimensionsChanged || extrinsicChanged) {
+                    if (dimensionsChanged) {
+                        this.activeBaseProfile = new SurroundCalibrationProfile(
+                                existingBase.profileName,
+                                existingBase.isCustomCalibration,
+                                existingBase.useBuiltInMeshes,
+                                false,
+                                width,
+                                length,
+                                ext,
+                                existingBase.cameras);
+                    }
+                    this.activeProfile = adj.applyToProfile(this.activeBaseProfile);
+                    this.loadedExtrinsicSignature = nextExtrinsicSig;
+                    if (extrinsicChanged || !birdMeshIsWorldCm) {
+                        this.birdMeshDirty.set(true);
+                    }
+                    if (dimensionsChanged) {
+                        this.guidanceDirty.set(true);
+                    }
                 }
-                this.guidanceDirty.set(true);
             }
 
             boolean nextCollapsed = appConfig.isSurroundWheelsCollapsed();
             boolean nextStretch = appConfig.isSurroundStretchRoadViews();
             boolean nextGuidance = appConfig.isPreviewGuidanceEnabled();
+            float nextRoadWidthScale = appConfig.getSurroundRoadGuidanceWidthScale();
+            boolean nextShowCenterCard = appConfig.isPreviewViewShortcutsEnabled()
+                    && appConfig.isSurroundOverlayButtonsVisible();
             if (this.stretchRoadViews != nextStretch) {
                 this.roadMeshDirty.set(true);
             }
-            if (this.guidanceEnabled != nextGuidance) {
+            if (this.guidanceEnabled != nextGuidance
+                    || Math.abs(this.roadGuidanceWidthScale - nextRoadWidthScale) > 0.005f) {
                 this.guidanceDirty.set(true);
             }
             this.wheelsCollapsed = nextCollapsed;
             this.stretchRoadViews = nextStretch;
             this.guidanceEnabled = nextGuidance;
+            this.roadGuidanceWidthScale = nextRoadWidthScale;
+            this.showCenterCard = nextShowCenterCard;
 
             String carSource = appConfig.getSurroundCarModelSource();
             String customCarPath = appConfig.getSurroundCustomCarModelPath();
@@ -418,17 +456,37 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                   float wheelAngleDeg,
                                   boolean inReverseGear,
                                   int gapPx) {
+        updateRenderState(topMode, bottomMode, wheelsCollapsed, stretchRoadViews, guidanceEnabled,
+                this.roadGuidanceWidthScale, this.showCenterCard, wheelAngleDeg, inReverseGear, gapPx);
+    }
+
+    public void updateRenderState(@NonNull SurroundViewMode topMode,
+                                  @NonNull SurroundViewMode bottomMode,
+                                  boolean wheelsCollapsed,
+                                  boolean stretchRoadViews,
+                                  boolean guidanceEnabled,
+                                  float roadGuidanceWidthScale,
+                                  boolean showCenterCard,
+                                  float wheelAngleDeg,
+                                  boolean inReverseGear,
+                                  int gapPx) {
+        float clampedWidthScale = Math.max(SurroundGuidanceCalculator.MIN_ROAD_GUIDANCE_WIDTH_SCALE,
+                Math.min(SurroundGuidanceCalculator.MAX_ROAD_GUIDANCE_WIDTH_SCALE, roadGuidanceWidthScale));
         synchronized (stateLock) {
             boolean roadChanged = (this.effectiveTopMode != topMode)
                     || (this.stretchRoadViews != stretchRoadViews);
             boolean guideChanged = (this.guidanceEnabled != guidanceEnabled)
-                    || (Math.abs(this.wheelAngleDeg - wheelAngleDeg) > 0.4f)
+                    || (this.effectiveTopMode != topMode)
+                    || (Math.abs(this.roadGuidanceWidthScale - clampedWidthScale) > 0.005f)
+                    || (Math.abs(this.wheelAngleDeg - wheelAngleDeg) > 0.25f)
                     || (this.inReverseGear != inReverseGear);
             this.effectiveTopMode = topMode;
             this.effectiveBottomMode = bottomMode;
             this.wheelsCollapsed = wheelsCollapsed;
             this.stretchRoadViews = stretchRoadViews;
             this.guidanceEnabled = guidanceEnabled;
+            this.roadGuidanceWidthScale = clampedWidthScale;
+            this.showCenterCard = showCenterCard;
             this.wheelAngleDeg = wheelAngleDeg;
             this.inReverseGear = inReverseGear;
             this.gapPx = Math.max(4, gapPx);
@@ -442,10 +500,24 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         requestRenderSafe();
     }
 
-    /** 仅更新方向盘转角对应的动态引导线状态（零布局重算、低于 0.4° 不重绘）。 */
+    /** 仅实时更新右上前/后视引导线宽度缩放比（0.50 ~ 1.50）。 */
+    public void updateRoadGuidanceWidthScale(float widthScale) {
+        float clamped = Math.max(SurroundGuidanceCalculator.MIN_ROAD_GUIDANCE_WIDTH_SCALE,
+                Math.min(SurroundGuidanceCalculator.MAX_ROAD_GUIDANCE_WIDTH_SCALE, widthScale));
+        synchronized (stateLock) {
+            if (Math.abs(this.roadGuidanceWidthScale - clamped) <= 0.005f) {
+                return;
+            }
+            this.roadGuidanceWidthScale = clamped;
+            this.guidanceDirty.set(true);
+        }
+        requestRenderSafe();
+    }
+
+    /** 仅更新方向盘转角对应的动态引导线状态（零布局重算、低于 0.25° 不重绘）。 */
     public void updateGuidanceAngle(float wheelAngleDeg) {
         synchronized (stateLock) {
-            if (Math.abs(this.wheelAngleDeg - wheelAngleDeg) <= 0.4f) {
+            if (Math.abs(this.wheelAngleDeg - wheelAngleDeg) <= 0.25f) {
                 return;
             }
             this.wheelAngleDeg = wheelAngleDeg;
@@ -531,6 +603,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         final boolean collapsed;
         final boolean stretched;
         final boolean showGuidance;
+        final float roadWidthScale;
+        final boolean centerCardVisible;
         final float angleDeg;
         final boolean reverse;
         final int gap;
@@ -542,6 +616,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             collapsed = this.wheelsCollapsed;
             stretched = this.stretchRoadViews;
             showGuidance = this.guidanceEnabled;
+            roadWidthScale = this.roadGuidanceWidthScale;
+            centerCardVisible = this.showCenterCard;
             angleDeg = this.wheelAngleDeg;
             reverse = this.inReverseGear;
             gap = this.gapPx;
@@ -569,6 +645,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 viewportHeight,
                 bottomMode,
                 collapsed,
+                centerCardVisible,
                 profile.groundWidthCm,
                 profile.groundLengthCm,
                 profile.groundFrontExtensionCm,
@@ -576,10 +653,13 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         );
 
         // 1. 左侧 360 全景鸟瞰 + 离线 E5 车模 + 鸟瞰转向引导线
-        drawBirdViewport(layout.birdBox, profile, showGuidance, angleDeg, reverse);
+        boolean birdReverse = (topMode == SurroundViewMode.REAR)
+                || (reverse && topMode != SurroundViewMode.FRONT);
+        drawBirdViewport(layout.birdBox, profile, showGuidance, angleDeg, birdReverse);
 
         // 2. 右上视角（随档位 / 前视 / 后视 / 前轮 / 后轮）
-        drawTopDetailViewport(layout.topDetailBox, profile, topMode, stretched, showGuidance, angleDeg, reverse);
+        drawTopDetailViewport(layout.topDetailBox, profile, topMode, stretched, showGuidance,
+                angleDeg, roadWidthScale, reverse);
 
         // 3. 右下双侧轮位 / 左右侧视（未折叠时）
         if (!layout.wheelsCollapsed) {
@@ -694,6 +774,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                        boolean stretchFill,
                                        boolean showGuidance,
                                        float angleDeg,
+                                       float roadWidthScale,
                                        boolean isReverse) {
         if (box.isEmpty()) return;
         GLES20.glViewport(box.left, box.glY(viewportHeight), box.width, box.height);
@@ -719,7 +800,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         drawPatchMesh(roadVertexBuffer, roadIndexBuffer, roadIndexCount, camSlot, camPos);
 
         if (showGuidance) {
-            ensureRoadGuidanceBatch(angleDeg, isRearRoad);
+            ensureRoadGuidanceBatch(angleDeg, isRearRoad, roadWidthScale);
             drawGuidanceBatch(roadGuidanceBuffer, roadGuidanceCounts);
         }
     }
@@ -894,13 +975,13 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void ensureBirdMesh(@NonNull SurroundCalibrationProfile profile) {
         boolean dirty = birdMeshDirty.compareAndSet(true, false);
-        String assetKey = resolveCalibrationAssetKey(profile);
+        String assetKey = resolveCalibrationAssetKey(profile, true);
         if (!dirty && birdVertexBuffer != null
                 && assetKey.equals(cachedBirdAssetKey)
                 && (birdMeshIsWorldCm || cachedBirdProfile == profile)) {
             return;
         }
-        byte[] rawBird = loadCalibrationMeshBytes(
+        byte[] rawBird = profile.hasExtrinsicAdjustments ? null : loadCalibrationMeshBytes(
                 profile,
                 "bird.mesh",
                 SurroundCalibrationManager.CUSTOM_BIRD_MESH_FILE_NAME);
@@ -913,7 +994,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             birdIndexCount = parsedBird.indices.length;
             birdMeshIsWorldCm = true;
         } else {
-            GridMeshData mesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 36, 56);
+            GridMeshData mesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 44, 68);
             birdVertexBuffer = toFloatBuffer(mesh.vertices, birdVertexBuffer);
             birdIndexBuffer = toShortBuffer(mesh.indices, birdIndexBuffer);
             birdIndexCount = mesh.indices.length;
@@ -946,10 +1027,9 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void ensureWheelMeshes(@NonNull SurroundCalibrationProfile profile) {
         boolean dirty = wheelMeshDirty.compareAndSet(true, false);
-        String assetKey = resolveCalibrationAssetKey(profile);
+        String assetKey = resolveCalibrationAssetKey(profile, false);
         if (!dirty && wheelVertexBuffers[0] != null
-                && assetKey.equals(cachedWheelAssetKey)
-                && cachedWheelProfile == profile) {
+                && assetKey.equals(cachedWheelAssetKey)) {
             return;
         }
         byte[] rawFront = loadCalibrationMeshBytes(
@@ -979,15 +1059,20 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     }
 
     @NonNull
-    private String resolveCalibrationAssetKey(@NonNull SurroundCalibrationProfile profile) {
+    private String resolveCalibrationAssetKey(@NonNull SurroundCalibrationProfile profile, boolean includeTunedFlag) {
+        String baseKey;
         if (!profile.isCustomCalibration && profile.useBuiltInMeshes) {
-            return "builtin";
-        }
-        if (profile.isCustomCalibration) {
+            baseKey = "builtin";
+        } else if (profile.isCustomCalibration) {
             String customPath = appConfig.getSurroundCustomCalibrationPath();
-            return "custom|" + customPath + "|" + buildFileStamp(customPath);
+            baseKey = "custom|" + customPath + "|" + buildFileStamp(customPath);
+        } else {
+            baseKey = "procedural|" + profile.profileName;
         }
-        return "procedural|" + profile.profileName;
+        if (!includeTunedFlag) {
+            return baseKey;
+        }
+        return baseKey + (profile.hasExtrinsicAdjustments ? "|tuned" : "|raw");
     }
 
     @Nullable
@@ -1046,7 +1131,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 && birdGuidanceBuffer != null
                 && cachedBirdGuidanceProfile == profile
                 && cachedBirdGuidanceReverse == isReverse
-                && Math.abs(cachedBirdGuidanceAngle - angleDeg) <= 0.4f;
+                && Math.abs(cachedBirdGuidanceAngle - angleDeg) <= 0.25f;
         if (unchanged) {
             return;
         }
@@ -1058,17 +1143,20 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         cachedBirdGuidanceReverse = isReverse;
     }
 
-    private void ensureRoadGuidanceBatch(float angleDeg, boolean isReverse) {
+    private void ensureRoadGuidanceBatch(float angleDeg, boolean isReverse, float widthScale) {
         boolean unchanged = roadGuidanceBuffer != null
                 && cachedRoadGuidanceReverse == isReverse
-                && Math.abs(cachedRoadGuidanceAngle - angleDeg) <= 0.4f;
+                && Math.abs(cachedRoadGuidanceWidthScale - widthScale) <= 0.005f
+                && Math.abs(cachedRoadGuidanceAngle - angleDeg) <= 0.25f;
         if (unchanged) {
             return;
         }
-        LineStripBatch roadBatch = SurroundGuidanceCalculator.buildRoadGuidanceStrips(angleDeg, isReverse, 18);
+        LineStripBatch roadBatch = SurroundGuidanceCalculator.buildRoadGuidanceStrips(
+                angleDeg, isReverse, widthScale, 18);
         roadGuidanceBuffer = toFloatBuffer(roadBatch.triangleStripVertices, roadGuidanceBuffer);
         roadGuidanceCounts = roadBatch.stripVertexCounts;
         cachedRoadGuidanceAngle = angleDeg;
+        cachedRoadGuidanceWidthScale = widthScale;
         cachedRoadGuidanceReverse = isReverse;
     }
 

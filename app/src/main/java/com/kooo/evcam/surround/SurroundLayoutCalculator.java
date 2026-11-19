@@ -92,6 +92,20 @@ public final class SurroundLayoutCalculator {
                                                int groundLengthCm,
                                                int groundFrontExtensionCm,
                                                int gapPx) {
+        return calculate(containerWidth, containerHeight, effectiveBottomMode, wheelsCollapsed,
+                true, groundWidthCm, groundLengthCm, groundFrontExtensionCm, gapPx);
+    }
+
+    @NonNull
+    public static SurroundLayoutSpec calculate(int containerWidth,
+                                               int containerHeight,
+                                               @NonNull SurroundViewMode effectiveBottomMode,
+                                               boolean wheelsCollapsed,
+                                               boolean showCenterCard,
+                                               int groundWidthCm,
+                                               int groundLengthCm,
+                                               int groundFrontExtensionCm,
+                                               int gapPx) {
         if (containerWidth <= 0 || containerHeight <= 0) {
             ViewportBox empty = new ViewportBox(0, 0, 0, 0);
             return new SurroundLayoutSpec(containerWidth, containerHeight,
@@ -131,7 +145,7 @@ public final class SurroundLayoutCalculator {
         ViewportBox topBox = new ViewportBox(rightLeft, outerPad, rightWidth, topHeight);
         ViewportBox bottomBand = new ViewportBox(rightLeft, bottomTop, rightWidth, bottomHeight);
 
-        if (effectiveBottomMode == SurroundViewMode.SIDES) {
+        if (effectiveBottomMode == SurroundViewMode.SIDES || !showCenterCard) {
             int sideWidth = Math.max(30, (rightWidth - gap) / 2);
             ViewportBox leftSide = new ViewportBox(rightLeft, bottomTop, sideWidth, bottomHeight);
             ViewportBox rightSide = new ViewportBox(rightLeft + sideWidth + gap, bottomTop,
@@ -141,8 +155,8 @@ public final class SurroundLayoutCalculator {
                     birdBox, topBox, bottomBand, leftSide, centerEmpty, rightSide, false, effectiveBottomMode);
         }
 
-        // 前轮 / 后轮三列切分：左轮 | 中央切换控卡 | 右轮（中央控卡保持紧凑宽度，给两侧轮位留足视口）
-        int centerCardW = Math.max(104, Math.min(Math.round(rightWidth * 0.16f), 168));
+        // 前轮 / 后轮三列切分：左轮 | 中央切换控卡 | 右轮（兼顾四字按钮单行从容排版与两侧轮位视口宽度）
+        int centerCardW = Math.max(112, Math.min(Math.round(rightWidth * 0.16f), 208));
         int wheelWidth = Math.max(40, (rightWidth - centerCardW - gap * 2) / 2);
         ViewportBox leftWheel = new ViewportBox(rightLeft, bottomTop, wheelWidth, bottomHeight);
         int centerLeft = leftWheel.right() + gap;

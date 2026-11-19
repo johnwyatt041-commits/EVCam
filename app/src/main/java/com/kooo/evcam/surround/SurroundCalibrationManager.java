@@ -9,10 +9,13 @@ import android.provider.OpenableColumns;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
+import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSyntaxException;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
@@ -24,6 +27,7 @@ import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.OutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -66,6 +70,20 @@ public final class SurroundCalibrationManager {
             this.success = success;
             this.message = message;
             this.importedFilePath = importedFilePath;
+        }
+    }
+
+    public static final class ExportResult {
+        public final boolean success;
+        @NonNull
+        public final String message;
+        @Nullable
+        public final String exportedPath;
+
+        public ExportResult(boolean success, @NonNull String message, @Nullable String exportedPath) {
+            this.success = success;
+            this.message = message;
+            this.exportedPath = exportedPath;
         }
     }
 
@@ -130,9 +148,9 @@ public final class SurroundCalibrationManager {
         );
     }
 
-    /** 根据当前 AppConfig 加载有效校准档案（自定义 E5 JSON 损坏或不存在时自动回退银河 E5 内置校准）。 */
+    /** 根据当前 AppConfig 解析基础标定档案（未叠加实时外参微调；自定义损坏或不存在时自动回退内置）。 */
     @NonNull
-    public static SurroundCalibrationProfile resolveActiveProfile(@NonNull AppConfig config) {
+    public static SurroundCalibrationProfile resolveActiveBaseProfile(@NonNull AppConfig config) {
         int width = config.getSurroundGroundWidthCm();
         int length = config.getSurroundGroundLengthCm();
         int ext = config.getSurroundGroundFrontExtensionCm();
@@ -150,6 +168,16 @@ public final class SurroundCalibrationManager {
             }
         }
         return createBuiltInE5Profile(width, length, ext);
+    }
+
+    /** 根据当前 AppConfig 加载有效校准档案，并按实际生效方案槽位叠加四路外参实时微调。 */
+    @NonNull
+    public static SurroundCalibrationProfile resolveActiveProfile(@NonNull AppConfig config) {
+        SurroundCalibrationProfile base = resolveActiveBaseProfile(config);
+        String effectiveSlot = base.isCustomCalibration
+                ? AppConfig.SURROUND_CALIBRATION_E5_CUSTOM
+                : AppConfig.SURROUND_CALIBRATION_E5_BUILTIN;
+        return config.getSurroundExtrinsicAdjustmentForSlot(effectiveSlot).applyToProfile(base);
     }
 
     /**
@@ -229,10 +257,12 @@ public final class SurroundCalibrationManager {
                     r0, r1, r2, fx, fy, cx, cy, 0.0, true, dist));
         }
 
-        // 若标定坐标未以车体中心为 Y 原点（例如原始坐标前后相机中点约 -142.4cm），自动平移对齐车体中心
+        // 若标定坐标未以车体中心为 Y 原点（例如原始坐标前后相机中点约 -142.4cm），自动平移对齐车体中心；
+        // 若 JSON 已显式声明 vehicle_centered=true（例如用户微调后导出的档案），则严格保留原始外参坐标不再二次平移。
+        boolean explicitVehicleCentered = optBoolean(root, "vehicle_centered", false);
         CameraCalibration frontCal = parsed.get("front");
         CameraCalibration backCal = parsed.get("back");
-        if (frontCal != null && backCal != null) {
+        if (!explicitVehicleCentered && frontCal != null && backCal != null) {
             double midYCm = (frontCal.posYCm + backCal.posYCm) * 0.5;
             if (Math.abs(midYCm) > 25.0) {
                 Map<String, CameraCalibration> recentered = new LinkedHashMap<>(4);
@@ -252,6 +282,108 @@ public final class SurroundCalibrationManager {
         String name = optString(root, "profile_name", "本地导入 E5 校准");
         return new SurroundCalibrationProfile(name, true, false,
                 groundWidthCm, groundLengthCm, groundFrontExtensionCm, parsed);
+    }
+
+    /** 将生效中的 360 标定档案（含已应用的外参微调）序列化为标准 1.3 `calibration.json` 文本。 */
+    @NonNull
+    public static String exportCalibrationJson(@NonNull SurroundCalibrationProfile profile) {
+        JsonObject root = new JsonObject();
+        String exportName = profile.hasExtrinsicAdjustments
+                ? profile.profileName + "（已微调）"
+                : profile.profileName;
+        root.addProperty("profile_name", exportName);
+        root.addProperty("provenance", profile.hasExtrinsicAdjustments
+                ? "EVCam 4.3 tuned surround calibration"
+                : "EVCam exported surround calibration");
+        JsonArray fileVer = new JsonArray();
+        fileVer.add(1);
+        fileVer.add(3);
+        root.add("file_version", fileVer);
+        JsonArray imageSize = new JsonArray();
+        imageSize.add(SurroundCalibrationProfile.IMAGE_WIDTH);
+        imageSize.add(SurroundCalibrationProfile.IMAGE_HEIGHT);
+        root.add("image_size", imageSize);
+        root.addProperty("lens_model", "opencv_fisheye_theta_polynomial");
+        root.addProperty("vehicle_centered", true);
+
+        JsonObject camerasObj = new JsonObject();
+        String[][] exportKeys = {
+                {"front", "front"},
+                {"back", "rear"},
+                {"left", "left"},
+                {"right", "right"}
+        };
+        for (String[] pair : exportKeys) {
+            CameraCalibration cam = profile.getCamera(pair[0]);
+            if (cam == null) continue;
+            JsonObject camObj = new JsonObject();
+            camObj.addProperty("fx", cam.fx);
+            camObj.addProperty("fy", cam.fy);
+            camObj.addProperty("cx", cam.cx);
+            camObj.addProperty("cy", cam.cy);
+
+            JsonArray distArr = new JsonArray();
+            for (int i = 0; i < 4; i++) {
+                double d = (i < cam.distortion.length && Double.isFinite(cam.distortion[i])) ? cam.distortion[i] : 0.0;
+                distArr.add(d);
+            }
+            camObj.add("distortion", distArr);
+
+            JsonArray posArr = new JsonArray();
+            posArr.add(cam.posXCm / 100.0);
+            posArr.add(cam.posYCm / 100.0);
+            posArr.add(cam.posZCm / 100.0);
+            camObj.add("position", posArr);
+
+            JsonArray rotArr = new JsonArray();
+            rotArr.add(toJsonRow(cam.r0));
+            rotArr.add(toJsonRow(cam.r1));
+            rotArr.add(toJsonRow(cam.r2));
+            camObj.add("world_to_camera_rotation", rotArr);
+
+            camerasObj.add(pair[1], camObj);
+        }
+        root.add("cameras", camerasObj);
+        Gson gson = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+        return gson.toJson(root) + "\n";
+    }
+
+    @NonNull
+    public static ExportResult exportCalibrationToFile(@NonNull File destFile,
+                                                       @NonNull SurroundCalibrationProfile profile) {
+        try {
+            File parent = destFile.getParentFile();
+            if (parent != null && !parent.exists() && !parent.mkdirs()) {
+                return new ExportResult(false, "无法创建导出目录：" + parent.getAbsolutePath(), null);
+            }
+            byte[] bytes = exportCalibrationJson(profile).getBytes(StandardCharsets.UTF_8);
+            try (FileOutputStream fos = new FileOutputStream(destFile)) {
+                fos.write(bytes);
+                fos.flush();
+            }
+            return new ExportResult(true, "已导出校准文件：" + destFile.getAbsolutePath(),
+                    destFile.getAbsolutePath());
+        } catch (IOException e) {
+            return new ExportResult(false, "导出校准文件失败：" + e.getMessage(), null);
+        }
+    }
+
+    @NonNull
+    public static ExportResult exportCalibrationToUri(@NonNull Context context,
+                                                      @NonNull Uri destUri,
+                                                      @NonNull SurroundCalibrationProfile profile) {
+        ContentResolver resolver = context.getContentResolver();
+        String displayName = queryDisplayName(resolver, destUri);
+        try (OutputStream out = resolver.openOutputStream(destUri, "wt")) {
+            if (out == null) {
+                return new ExportResult(false, "无法写入所选导出位置", null);
+            }
+            out.write(exportCalibrationJson(profile).getBytes(StandardCharsets.UTF_8));
+            out.flush();
+            return new ExportResult(true, "已导出校准文件：" + displayName, destUri.toString());
+        } catch (IOException | SecurityException e) {
+            return new ExportResult(false, "导出校准文件失败：" + e.getMessage(), null);
+        }
     }
 
     /** 扫描目录下可用于导入的 E5 `calibration.json` 或标定 `.zip` 候选文件（含一层子目录）。 */
@@ -503,6 +635,24 @@ public final class SurroundCalibrationManager {
         if (el == null || !el.isJsonPrimitive()) return fallback;
         String value = el.getAsString();
         return value.trim().isEmpty() ? fallback : value.trim();
+    }
+
+    private static boolean optBoolean(@NonNull JsonObject obj, @NonNull String key, boolean fallback) {
+        JsonElement el = obj.get(key);
+        if (el == null || !el.isJsonPrimitive()) return fallback;
+        JsonPrimitive prim = el.getAsJsonPrimitive();
+        if (prim.isBoolean()) return prim.getAsBoolean();
+        return fallback;
+    }
+
+    @NonNull
+    private static JsonArray toJsonRow(@NonNull double[] row) {
+        JsonArray arr = new JsonArray();
+        for (int i = 0; i < 3; i++) {
+            double v = (i < row.length && Double.isFinite(row[i])) ? row[i] : 0.0;
+            arr.add(v);
+        }
+        return arr;
     }
 
     private static double readFiniteDouble(@NonNull JsonArray arr, int index) {

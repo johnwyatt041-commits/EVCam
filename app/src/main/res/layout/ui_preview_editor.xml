@@ -13,6 +13,17 @@
         android:orientation="horizontal"
         android:gravity="center_vertical">
 
+        <TextView
+            android:id="@+id/ui_editor_mode_a_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
+            android:text="360 视图调校"
+            android:textColor="@color/text_primary"
+            android:textSize="@dimen/ui_editor_button_text_size"
+            android:textStyle="bold"
+            android:visibility="gone" />
+
         <Button
             android:id="@+id/ui_editor_tab_layout"
             style="@style/Widget.EVCam.EditorButton"
@@ -22,8 +33,14 @@
         <Button
             android:id="@+id/ui_editor_tab_crop"
             style="@style/Widget.EVCam.EditorButton"
-            android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
+            android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
             android:text="画框填充" />
+
+        <Button
+            android:id="@+id/ui_editor_tab_opacity"
+            style="@style/Widget.EVCam.EditorButton"
+            android:layout_marginEnd="@dimen/ui_top_bar_group_gap"
+            android:text="按键透明度" />
 
         <TextView
             android:id="@+id/ui_layout_editor_hint"
@@ -174,6 +191,113 @@
                 android:id="@+id/ui_crop_reset"
                 style="@style/Widget.EVCam.EditorButton"
                 android:text="重置裁切" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ui_editor_guidance_width_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="6dp"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="前/后视引导线宽度："
+                android:textSize="@dimen/ui_editor_button_text_size"
+                android:textColor="@color/text_primary"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_width_minus"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="-5%"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <SeekBar
+                android:id="@+id/ui_width_seekbar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="100"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_width_plus"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="+5%"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <TextView
+                android:id="@+id/ui_width_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="48dp"
+                android:gravity="center"
+                android:text="100%"
+                android:textSize="@dimen/ui_editor_button_text_size"
+                android:textColor="@color/text_primary"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_width_reset"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="重置宽度" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/ui_editor_opacity_row"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center_vertical"
+            android:visibility="gone">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="按键底色透明度（全布局统一）："
+                android:textSize="@dimen/ui_editor_button_text_size"
+                android:textColor="@color/text_primary"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_opacity_minus"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="-10%"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <SeekBar
+                android:id="@+id/ui_opacity_seekbar"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_weight="1"
+                android:max="100"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_opacity_plus"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="+10%"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <TextView
+                android:id="@+id/ui_opacity_value"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:minWidth="48dp"
+                android:gravity="center"
+                android:text="80%"
+                android:textSize="@dimen/ui_editor_button_text_size"
+                android:textColor="@color/text_primary"
+                android:layout_marginEnd="@dimen/ui_top_bar_button_gap" />
+
+            <Button
+                android:id="@+id/ui_opacity_reset"
+                style="@style/Widget.EVCam.EditorButton"
+                android:text="默认 80%" />
         </LinearLayout>
     </LinearLayout>
 </LinearLayout>

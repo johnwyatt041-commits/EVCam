@@ -16,6 +16,7 @@ import android.widget.Button;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
@@ -29,7 +30,10 @@ import com.kooo.evcam.BlindSpotService;
 import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.surround.SurroundModeAView;
+import com.kooo.evcam.vehicle.RecordingVehicleSource;
 import com.kooo.evcam.vehicle.SurroundSteeringAngleSource;
+import com.kooo.evcam.vehicle.VehicleSignalHub;
+import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -92,14 +96,21 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     private PreviewMode currentMode;
     private boolean surroundHostEligible = true;
     private boolean deferredRebindOnHostEligible = false;
+    private boolean editorActive = false;
+    private boolean opacityPreviewMode = false;
     private int modeCPrimaryIndex = PreviewLayoutModel.FRONT;
     private int modeDLeftPrimaryIndex = PreviewLayoutModel.FRONT;
     private int modeDRightSideIndex = PreviewLayoutModel.LEFT;
     @Nullable
     private SurroundSteeringAngleSource.Lease modeDSteeringLease;
+    @Nullable
+    private RecordingVehicleSource.Lease modeDVhalTurnLease;
+    private boolean modeDTurnSignalRegistered = false;
 
     private final SurroundSteeringAngleSource.AngleListener modeDSteeringListener = angleDeg ->
             mainHandler.post(() -> applyModeDSteeringAngle(angleDeg));
+    private final VehicleSignalHub.Listener modeDTurnSignalListener = snapshot ->
+            mainHandler.post(() -> applyModeDTurnSignalSnapshot(snapshot));
 
     private final Map<String, TextureView> stagingViews = new LinkedHashMap<>();
     @Nullable
@@ -131,6 +142,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (previewLayout != null) {
             previewLayout.setOnStateChangeListener(mask -> applyVisibilityMaskToCameras(false));
             previewLayout.setOnManualPrimaryToggleListener(this::toggleManualPrimary);
+            previewLayout.setOnManualSideToggleListener(this::toggleModeDSideManual);
+            previewLayout.setOnModeDSideLinkageCycleListener(this::cycleModeDSideLinkageMode);
+            previewLayout.setModeDSideLinkageMode(appConfig.getModeDSideLinkageMode());
         }
         if (modeAContainer != null) {
             modeAContainer.setVisibility(View.GONE);
@@ -142,11 +156,14 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     private void wireShortcuts() {
         if (btnShortcutBack != null) {
+            btnShortcutBack.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
             btnShortcutBack.setOnClickListener(v -> callbacks.onBackShortcutClicked());
         }
         if (btnShortcutSettings != null) {
+            btnShortcutSettings.setShadowLayer(2f * density, 0f, 1f * density, 0xA0000000);
             btnShortcutSettings.setOnClickListener(v -> callbacks.onSettingsShortcutClicked());
         }
+        applyCornerNavBackground(appConfig.getPreviewOverlayBgAlphaPercent());
     }
 
     public void attachCameraManager(@Nullable MultiCameraManager manager) {
@@ -181,19 +198,19 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
     }
 
-    /** 控制宿主是否满足前台且位于记录仪页；离开记录仪页或退后台立即销毁模式 A GL 上下文并释放模式 D 转向租约。 */
+    /** 控制宿主是否满足前台且位于记录仪页；离开记录仪页或退后台立即销毁模式 A GL 上下文并释放模式 D 转向/转向灯租约。 */
     public void setSurroundHostEligible(boolean eligible) {
         if (this.surroundHostEligible == eligible) {
             if (eligible) {
                 syncSurroundPreferences();
             } else {
-                syncModeDSteeringSubscription();
+                syncModeDSideSubscriptions();
             }
             return;
         }
         this.surroundHostEligible = eligible;
         applyStateToLayoutAndShell();
-        syncModeDSteeringSubscription();
+        syncModeDSideSubscriptions();
         applyVisibilityMaskToCameras(eligible);
         if (eligible && deferredRebindOnHostEligible) {
             deferredRebindOnHostEligible = false;
@@ -213,14 +230,14 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     public void start() {
         surroundHostEligible = true;
         applyStateToLayoutAndShell();
-        syncModeDSteeringSubscription();
+        syncModeDSideSubscriptions();
         applyVisibilityMaskToCameras(true);
         refreshShortcutsOverlay();
     }
 
     public void stop() {
         surroundHostEligible = false;
-        syncModeDSteeringSubscription();
+        syncModeDSideSubscriptions();
         applyStateToLayoutAndShell();
         if (pendingStagingCleanup != null) {
             mainHandler.removeCallbacks(pendingStagingCleanup);
@@ -253,7 +270,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         boolean wasModeA = currentMode == PreviewMode.MODE_A;
         if (currentMode == normalized) {
             applyStateToLayoutAndShell();
-            syncModeDSteeringSubscription();
+            syncModeDSideSubscriptions();
             refreshShortcutsOverlay();
             return;
         }
@@ -265,7 +282,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             modeDLeftPrimaryIndex = PreviewLayoutModel.FRONT;
         }
         applyStateToLayoutAndShell();
-        syncModeDSteeringSubscription();
+        syncModeDSideSubscriptions();
         applyVisibilityMaskToCameras(false);
         if (wasModeA && normalized != PreviewMode.MODE_A) {
             if (surroundHostEligible) {
@@ -279,10 +296,42 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
 
     public void syncSurroundPreferences() {
         applyStateToLayoutAndShell();
-        syncModeDSteeringSubscription();
+        syncModeDSideSubscriptions();
         applyVisibilityMaskToCameras(false);
+        if (previewLayout != null) {
+            previewLayout.setOverlayBgAlphaPercent(appConfig.getPreviewOverlayBgAlphaPercent());
+        }
         if (surroundModeAView != null) {
             surroundModeAView.refreshFromPreferences();
+        }
+        refreshShortcutsOverlay();
+    }
+
+    /** 实时调整 360 模式 A 右上前/后视引导线宽度缩放比（无需销毁重开 GL）。 */
+    public void updateSurroundRoadGuidanceWidthLive(float widthScale) {
+        if (surroundModeAView != null) {
+            surroundModeAView.updateRoadGuidanceWidthScale(widthScale);
+        }
+    }
+
+    /** 实时刷新四个分栏/360 画面内切换按键及标签底色透明度。 */
+    public void updateOverlayBgAlphaPercentLive(int alphaPercent) {
+        int normalized = AppConfig.normalizePreviewOverlayBgAlphaPercent(alphaPercent);
+        if (previewLayout != null) {
+            previewLayout.setOverlayBgAlphaPercent(normalized);
+        }
+        if (surroundModeAView != null) {
+            surroundModeAView.updateOverlayBgAlphaPercent(normalized);
+        }
+        applyCornerNavBackground(normalized);
+    }
+
+    /** 控制「按键透明度」标签页下的实时画面内按键预览显示。 */
+    public void setOpacityPreviewMode(boolean enabled) {
+        if (this.opacityPreviewMode == enabled) return;
+        this.opacityPreviewMode = enabled;
+        if (previewLayout != null) {
+            previewLayout.setOpacityPreviewMode(enabled);
         }
         refreshShortcutsOverlay();
     }
@@ -302,6 +351,40 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         applyVisibilityMaskToCameras(false);
     }
 
+    /** 手动切换 Mode D 右侧副屏左/右视角（无论当前为手动或自动联动，均允许即时点按查看另一侧）。 */
+    public void toggleModeDSideManual() {
+        if (currentMode != PreviewMode.MODE_D) {
+            return;
+        }
+        modeDRightSideIndex = (modeDRightSideIndex == PreviewLayoutModel.RIGHT)
+                ? PreviewLayoutModel.LEFT : PreviewLayoutModel.RIGHT;
+        applyStateToLayoutAndShell();
+        applyVisibilityMaskToCameras(false);
+        callbacks.onRebindVisibleTextureViews();
+    }
+
+    /** 在 Mode D 右侧画面内循环切换联动方式：随方向盘 -> 随转向灯 -> 手动切换 -> 随方向盘。 */
+    public void cycleModeDSideLinkageMode() {
+        String current = appConfig.getModeDSideLinkageMode();
+        String next;
+        if (AppConfig.MODE_D_SIDE_LINKAGE_STEERING.equals(current)) {
+            next = AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL;
+        } else if (AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(current)) {
+            next = AppConfig.MODE_D_SIDE_LINKAGE_MANUAL;
+        } else {
+            next = AppConfig.MODE_D_SIDE_LINKAGE_STEERING;
+        }
+        appConfig.setModeDSideLinkageMode(next);
+        if (previewLayout != null) {
+            previewLayout.setModeDSideLinkageMode(next);
+        }
+        syncModeDSideSubscriptions();
+        String label = AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(next)
+                ? "随转向灯"
+                : (AppConfig.MODE_D_SIDE_LINKAGE_MANUAL.equals(next) ? "手动切换" : "随方向盘");
+        Toast.makeText(context, "模式 D 右侧视角已切为：" + label, Toast.LENGTH_SHORT).show();
+    }
+
     public void toggleModeCPrimaryManual() {
         toggleManualPrimary();
     }
@@ -311,11 +394,19 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (savedMode != currentMode) {
             setPreviewMode(savedMode);
         } else {
+            syncModeDSideSubscriptions();
             refreshShortcutsOverlay();
         }
     }
 
     public void onEditingStateChanged(boolean editing) {
+        this.editorActive = editing;
+        if (!editing) {
+            this.opacityPreviewMode = false;
+            if (previewLayout != null) {
+                previewLayout.setOpacityPreviewMode(false);
+            }
+        }
         refreshShortcutsOverlay();
     }
 
@@ -381,9 +472,15 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         return "front";
     }
 
-    private void syncModeDSteeringSubscription() {
+    private void syncModeDSideSubscriptions() {
+        String linkageMode = appConfig.getModeDSideLinkageMode();
+        boolean mainEnabled = appConfig.isMainPreviewEnabled();
+        if (previewLayout != null) {
+            previewLayout.setModeDSideLinkageMode(linkageMode);
+        }
+
         boolean wantSteering = shouldSubscribeSteeringForModeD(
-                currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled());
+                currentMode, surroundHostEligible, mainEnabled, linkageMode);
         if (wantSteering) {
             if (modeDSteeringLease == null) {
                 modeDSteeringLease = SurroundSteeringAngleSource.acquire(modeDSteeringListener);
@@ -394,10 +491,43 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             modeDSteeringLease = null;
             AppLog.d(TAG, "Mode D steering wheel lease released");
         }
+
+        boolean wantTurnSignal = shouldSubscribeTurnSignalForModeD(
+                currentMode, surroundHostEligible, mainEnabled, linkageMode);
+        if (wantTurnSignal) {
+            if (!modeDTurnSignalRegistered) {
+                VehicleSignalHub.getInstance().addListener(modeDTurnSignalListener);
+                modeDTurnSignalRegistered = true;
+                AppLog.d(TAG, "Mode D turn-signal hub listener registered");
+            }
+            if (!appConfig.isCarSignalManagerTriggerMode()) {
+                if (modeDVhalTurnLease == null) {
+                    modeDVhalTurnLease = RecordingVehicleSource.acquire();
+                    AppLog.d(TAG, "Mode D VHAL turn-signal lease acquired");
+                }
+            } else if (modeDVhalTurnLease != null) {
+                modeDVhalTurnLease.close();
+                modeDVhalTurnLease = null;
+            }
+            applyModeDTurnSignalSnapshot(VehicleSignalHub.getInstance().getSnapshot());
+        } else {
+            if (modeDTurnSignalRegistered) {
+                VehicleSignalHub.getInstance().removeListener(modeDTurnSignalListener);
+                modeDTurnSignalRegistered = false;
+                AppLog.d(TAG, "Mode D turn-signal hub listener removed");
+            }
+            if (modeDVhalTurnLease != null) {
+                modeDVhalTurnLease.close();
+                modeDVhalTurnLease = null;
+                AppLog.d(TAG, "Mode D VHAL turn-signal lease released");
+            }
+        }
     }
 
     private void applyModeDSteeringAngle(float equivalentWheelAngleDeg) {
-        if (currentMode != PreviewMode.MODE_D || !surroundHostEligible || !appConfig.isMainPreviewEnabled()) {
+        if (!shouldSubscribeSteeringForModeD(
+                currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled(),
+                appConfig.getModeDSideLinkageMode())) {
             return;
         }
         if (previewLayout != null && previewLayout.isEditing()) {
@@ -405,13 +535,34 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
         int nextSide = resolveModeDSideCamera(equivalentWheelAngleDeg, modeDRightSideIndex, MODE_D_STEER_DEADBAND_DEG);
         if (nextSide != modeDRightSideIndex) {
-            modeDRightSideIndex = nextSide;
-            applyStateToLayoutAndShell();
-            applyVisibilityMaskToCameras(false);
-            callbacks.onRebindVisibleTextureViews();
-            AppLog.d(TAG, "Mode D steering side switched: angle=" + equivalentWheelAngleDeg
-                    + ", side=" + (nextSide == PreviewLayoutModel.RIGHT ? "right" : "left"));
+            switchModeDSideTo(nextSide, "steering angle=" + equivalentWheelAngleDeg);
         }
+    }
+
+    private void applyModeDTurnSignalSnapshot(@Nullable VehicleSignalSnapshot snapshot) {
+        if (snapshot == null || !shouldSubscribeTurnSignalForModeD(
+                currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled(),
+                appConfig.getModeDSideLinkageMode())) {
+            return;
+        }
+        if (previewLayout != null && previewLayout.isEditing()) {
+            return;
+        }
+        int nextSide = resolveModeDSideCameraFromTurnSignal(
+                snapshot.leftTurn, snapshot.rightTurn, modeDRightSideIndex);
+        if (nextSide != modeDRightSideIndex) {
+            switchModeDSideTo(nextSide,
+                    "turnSignal L=" + snapshot.leftTurn + ", R=" + snapshot.rightTurn);
+        }
+    }
+
+    private void switchModeDSideTo(int nextSide, @NonNull String reason) {
+        modeDRightSideIndex = nextSide;
+        applyStateToLayoutAndShell();
+        applyVisibilityMaskToCameras(false);
+        callbacks.onRebindVisibleTextureViews();
+        AppLog.d(TAG, "Mode D side switched (" + reason + "): side="
+                + (nextSide == PreviewLayoutModel.RIGHT ? "right" : "left"));
     }
 
     private void applyStateToLayoutAndShell() {
@@ -595,18 +746,22 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     }
 
     public void refreshShortcutsOverlay() {
-        boolean editing = previewLayout != null && previewLayout.isEditing();
+        boolean layoutEditing = previewLayout != null && previewLayout.isEditing();
+        boolean hideOverlayForEditing = (layoutEditing || editorActive)
+                && !opacityPreviewMode
+                && currentMode != PreviewMode.MODE_A;
         boolean fullscreen = shellController != null && shellController.isFullscreenPreview();
         boolean showInFrameButtons = shouldShowViewShortcuts(
-                isUnifiedOverlayButtonsEnabled(appConfig), editing);
+                isUnifiedOverlayButtonsEnabled(appConfig), hideOverlayForEditing);
 
         if (previewLayout != null) {
+            previewLayout.setOpacityPreviewMode(opacityPreviewMode && layoutEditing);
             previewLayout.setInFrameControlsVisible(showInFrameButtons);
         }
 
         if (shortcutsOverlay == null) return;
         boolean showCornerNav = shouldShowCornerNav(
-                appConfig.getPreviewCornerNavMode(), fullscreen, editing);
+                appConfig.getPreviewCornerNavMode(), fullscreen, hideOverlayForEditing);
         if (cornerNavGroup != null) {
             cornerNavGroup.setVisibility(showCornerNav ? View.VISIBLE : View.GONE);
         }
@@ -621,6 +776,18 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     private void stylePillButtons(@NonNull Context themedContext) {
         applyPillItemStyle(btnShortcutBack, themedContext, false);
         applyPillItemStyle(btnShortcutSettings, themedContext, false);
+        applyCornerNavBackground(appConfig.getPreviewOverlayBgAlphaPercent());
+    }
+
+    private void applyCornerNavBackground(int alphaPercent) {
+        if (cornerNavGroup == null) return;
+        GradientDrawable bg = new GradientDrawable();
+        bg.setShape(GradientDrawable.RECTANGLE);
+        bg.setCornerRadius(18f * density);
+        bg.setColor(AppConfig.applyColorAlphaPercent(0xBF101722, alphaPercent));
+        bg.setStroke(Math.max(1, Math.round(density)),
+                AppConfig.applyColorAlphaPercent(0x46FFFFFF, alphaPercent));
+        cornerNavGroup.setBackground(bg);
     }
 
     private void applyPillItemStyle(@Nullable TextView view, @NonNull Context themedContext, boolean selected) {
@@ -752,7 +919,45 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     public static boolean shouldSubscribeSteeringForModeD(@Nullable PreviewMode mode,
                                                         boolean hostEligible,
                                                         boolean mainPreviewEnabled) {
-        return mode == PreviewMode.MODE_D && hostEligible && mainPreviewEnabled;
+        return shouldSubscribeSteeringForModeD(
+                mode, hostEligible, mainPreviewEnabled, AppConfig.MODE_D_SIDE_LINKAGE_STEERING);
+    }
+
+    public static boolean shouldSubscribeSteeringForModeD(@Nullable PreviewMode mode,
+                                                        boolean hostEligible,
+                                                        boolean mainPreviewEnabled,
+                                                        @Nullable String linkageMode) {
+        return mode == PreviewMode.MODE_D
+                && hostEligible
+                && mainPreviewEnabled
+                && AppConfig.MODE_D_SIDE_LINKAGE_STEERING.equals(AppConfig.normalizeModeDSideLinkageMode(linkageMode));
+    }
+
+    public static boolean shouldSubscribeTurnSignalForModeD(@Nullable PreviewMode mode,
+                                                          boolean hostEligible,
+                                                          boolean mainPreviewEnabled,
+                                                          @Nullable String linkageMode) {
+        return mode == PreviewMode.MODE_D
+                && hostEligible
+                && mainPreviewEnabled
+                && AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL.equals(AppConfig.normalizeModeDSideLinkageMode(linkageMode));
+    }
+
+    /**
+     * Resolves right-pane side camera for Mode D from turn signal states:
+     * left signal on only -> LEFT; right signal on only -> RIGHT;
+     * hazard/off/unknown preserves currentSide without flicker.
+     */
+    public static int resolveModeDSideCameraFromTurnSignal(int leftTurnState,
+                                                           int rightTurnState,
+                                                           int currentSide) {
+        if (leftTurnState == 1 && rightTurnState != 1) {
+            return PreviewLayoutModel.LEFT;
+        }
+        if (rightTurnState == 1 && leftTurnState != 1) {
+            return PreviewLayoutModel.RIGHT;
+        }
+        return currentSide == PreviewLayoutModel.RIGHT ? PreviewLayoutModel.RIGHT : PreviewLayoutModel.LEFT;
     }
 
     public static boolean shouldHideOrdinaryTextureViewsForModeA(@Nullable PreviewMode mode,
