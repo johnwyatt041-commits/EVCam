@@ -1,7 +1,7 @@
 # default-xingjian7-calibration
 
-最后核对：2026-11-19 16:06:00 +08:00（Asia/Hong_Kong）
-负责人：Antigravity | 分支：`codex/e5-recording-startup-fix`（`E:\GPT\EVCam`） | 状态：已合流 `build18`（`3258fe0`），完成 `1.6.6-test-11191602`（`versionCode = 86`）`512` 测、双风味构建/Lint 与 APK 签名资产校验，准备封包提交推送
+最后核对：2026-11-19 16:10:00 +08:00（Asia/Hong_Kong）
+负责人：Antigravity | 分支：`codex/e5-recording-startup-fix`（`E:\GPT\EVCam`） | 状态：已提交 `9d2dc5c` 并发布 GitHub Pre-release `v1.6.6-test-11191602-build19`（`versionCode = 86`，通过 `512` 测、双风味构建/Lint 与 APK/GitHub 资产 SHA256 核验，待真机/实车实测）
 
 ## 目标与范围
 
@@ -30,5 +30,6 @@
 
 ## 最近记录
 
+- 2026-11-19 16:10:00 +08:00 | 封包 `build19` 并发布 GitHub Pre-release | 提交源码 `9d2dc5c` 并打附注标签 `v1.6.6-test-11191602-build19` 推送至 `johnwyatt041-commits/EVCam`，完成 `outputs/` 封包（`A` `7,849,908` B、`B` `7,866,292` B、`mappings.zip` `13,065,514` B）与 `build17` 归档，GitHub 6 份资产上传后大小与 SHA256 摘要回读一致（待真机/实车实测）。
 - 2026-11-19 16:06:00 +08:00 | 合流 `build18`、修复盲区边界 UV 与 `calibration.json` LF 字节并通过 `512` 测/Lint/验包 | 车底盲区混色达 `1.0` 且边界邻点不再跨图拉伸，`1.6.6-test-11191602`（`versionCode = 86`）通过 `verify.ps1` `512` 测、`0` Lint error 及双风味 Release APK 签名/资产核验，准备打包 `build19` 推送 GitHub。
 - 2026-11-19 15:15:42 +08:00 | 设置星舰7默认 360 标定包与网格支持 | 完成初始星舰7默认标定资产入库、多项式投影、`.mesh` 加载与 `1.6.6-test-11191506` 离线 `496` 测及模拟器 GL 冒烟（待实车验证）。
