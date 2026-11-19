@@ -21,7 +21,7 @@ android {
         minSdk = 28
         targetSdk = 36
         versionCode = 83
-        versionName = "1.6.6-test-11190207"
+        versionName = "1.6.6-test-11190906"
         buildConfigField("boolean", "RECORDING_COMPARISON", "true")
 
 

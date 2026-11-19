@@ -91,6 +91,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     private View modeADisabledGuideView;
     private PreviewMode currentMode;
     private boolean surroundHostEligible = true;
+    private boolean deferredRebindOnHostEligible = false;
     private int modeCPrimaryIndex = PreviewLayoutModel.FRONT;
     private int modeDLeftPrimaryIndex = PreviewLayoutModel.FRONT;
     private int modeDRightSideIndex = PreviewLayoutModel.LEFT;
@@ -128,7 +129,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         this.modeDRightSideIndex = PreviewLayoutModel.LEFT;
 
         if (previewLayout != null) {
-            previewLayout.setOnStateChangeListener(mask -> applyVisibilityMaskToCameras());
+            previewLayout.setOnStateChangeListener(mask -> applyVisibilityMaskToCameras(false));
             previewLayout.setOnManualPrimaryToggleListener(this::toggleManualPrimary);
         }
         if (modeAContainer != null) {
@@ -159,7 +160,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
                 surroundModeAView.bindCameraManagerIfActive(manager);
             }
             syncCameraAvailabilityToLayout();
-            applyVisibilityMaskToCameras();
+            applyVisibilityMaskToCameras(true);
         }
     }
 
@@ -169,7 +170,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (surroundModeAView != null && cameraManager != null) {
             surroundModeAView.bindCameraManagerIfActive(cameraManager);
         }
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(true);
     }
 
     private void syncCameraAvailabilityToLayout() {
@@ -193,7 +194,13 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         this.surroundHostEligible = eligible;
         applyStateToLayoutAndShell();
         syncModeDSteeringSubscription();
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(eligible);
+        if (eligible && deferredRebindOnHostEligible) {
+            deferredRebindOnHostEligible = false;
+            if (currentMode != PreviewMode.MODE_A && appConfig.isMainPreviewEnabled()) {
+                mainHandler.post(callbacks::onRebindVisibleTextureViews);
+            }
+        }
     }
 
     public boolean isReadyForCameraInit() {
@@ -207,7 +214,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         surroundHostEligible = true;
         applyStateToLayoutAndShell();
         syncModeDSteeringSubscription();
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(true);
         refreshShortcutsOverlay();
     }
 
@@ -259,16 +266,21 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
         applyStateToLayoutAndShell();
         syncModeDSteeringSubscription();
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(false);
         if (wasModeA && normalized != PreviewMode.MODE_A) {
-            mainHandler.post(callbacks::onRebindVisibleTextureViews);
+            if (surroundHostEligible) {
+                deferredRebindOnHostEligible = false;
+                mainHandler.post(callbacks::onRebindVisibleTextureViews);
+            } else {
+                deferredRebindOnHostEligible = true;
+            }
         }
     }
 
     public void syncSurroundPreferences() {
         applyStateToLayoutAndShell();
         syncModeDSteeringSubscription();
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(false);
         if (surroundModeAView != null) {
             surroundModeAView.refreshFromPreferences();
         }
@@ -287,7 +299,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             return;
         }
         applyStateToLayoutAndShell();
-        applyVisibilityMaskToCameras();
+        applyVisibilityMaskToCameras(false);
     }
 
     public void toggleModeCPrimaryManual() {
@@ -395,7 +407,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (nextSide != modeDRightSideIndex) {
             modeDRightSideIndex = nextSide;
             applyStateToLayoutAndShell();
-            applyVisibilityMaskToCameras();
+            applyVisibilityMaskToCameras(false);
             callbacks.onRebindVisibleTextureViews();
             AppLog.d(TAG, "Mode D steering side switched: angle=" + equivalentWheelAngleDeg
                     + ", side=" + (nextSide == PreviewLayoutModel.RIGHT ? "right" : "left"));
@@ -568,8 +580,11 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         }
     }
 
-    private void applyVisibilityMaskToCameras() {
+    private void applyVisibilityMaskToCameras(boolean forceApply) {
         if (cameraManager == null || previewLayout == null) return;
+        if (!forceApply && !shouldApplyVisibilityMaskImmediately(surroundHostEligible)) {
+            return;
+        }
         boolean wantSurroundGl = shouldActivateSurroundGl(
                 currentMode, surroundHostEligible, appConfig.isMainPreviewEnabled());
         boolean surfacesReady = surroundModeAView != null && surroundModeAView.isSurfacesReady();
@@ -748,6 +763,10 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     public static boolean shouldDeferCameraVisibilityMaskForModeA(boolean wantSurroundGl,
                                                                   boolean surroundSurfacesReady) {
         return wantSurroundGl && !surroundSurfacesReady;
+    }
+
+    public static boolean shouldApplyVisibilityMaskImmediately(boolean hostEligible) {
+        return hostEligible;
     }
 
     /**

@@ -111,5 +111,9 @@ public class PreviewModeControllerTest {
         assertTrue(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(true, false));
         assertFalse(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(true, true));
         assertFalse(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(false, false));
+
+        // Background Settings/Playback pages defer camera visibility mask churn until returning to recording.
+        assertTrue(PreviewModeController.shouldApplyVisibilityMaskImmediately(true));
+        assertFalse(PreviewModeController.shouldApplyVisibilityMaskImmediately(false));
     }
 }

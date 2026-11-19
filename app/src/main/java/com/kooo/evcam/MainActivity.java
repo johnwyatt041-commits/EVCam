@@ -2957,6 +2957,11 @@ public class MainActivity extends AppCompatActivity implements
 
     private void applySlotMatrixTransform(AutoFitTextureView textureView, android.util.Size previewSize,
                                           int rotation, String cameraKey) {
+        applySlotMatrixTransform(textureView, previewSize, rotation, cameraKey, 0);
+    }
+
+    private void applySlotMatrixTransform(AutoFitTextureView textureView, android.util.Size previewSize,
+                                          int rotation, String cameraKey, int retryCount) {
         textureView.setTag(R.id.tag_main_preview_matrix_managed, Boolean.TRUE);
         if (textureView.getRatioWidth() != 0 || textureView.getRatioHeight() != 0) {
             textureView.setAspectRatio(0, 0);
@@ -2977,7 +2982,12 @@ public class MainActivity extends AppCompatActivity implements
             int viewWidth = textureView.getWidth();
             int viewHeight = textureView.getHeight();
             if (viewWidth == 0 || viewHeight == 0) {
-                textureView.postDelayed(() -> applySlotMatrixTransform(textureView, previewSize, rotation, cameraKey), 80);
+                boolean paneVisible = !isMainPane || previewModeController == null
+                        || previewModeController.isCameraVisible(cameraKey);
+                if (paneVisible && retryCount < 15) {
+                    textureView.postDelayed(() -> applySlotMatrixTransform(
+                            textureView, previewSize, rotation, cameraKey, retryCount + 1), 80);
+                }
                 return;
             }
             android.graphics.Matrix matrix = com.kooo.evcam.ui.PreviewTransformHelper.buildSlotMatrix(

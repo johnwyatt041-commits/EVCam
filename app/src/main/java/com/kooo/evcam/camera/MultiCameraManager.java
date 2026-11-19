@@ -928,7 +928,7 @@ public class MultiCameraManager {
     }
 
     /**
-     * 关闭所有摄像头
+     * 关闭所有摄像头（异步不阻塞调用线程）
      */
     public void closeAllCameras() {
         repairSuppressed = true;
@@ -936,6 +936,25 @@ public class MultiCameraManager {
             camera.closeCamera();
         }
         AppLog.d(TAG, "All cameras closed (repair suppressed)");
+    }
+
+    /**
+     * 并行关闭所有摄像头并等待释放完成（仅用于 release 收尾）
+     */
+    private void closeAllCamerasAndAwait(long totalTimeoutMs) {
+        repairSuppressed = true;
+        for (SingleCamera camera : cameras.values()) {
+            camera.closeCamera();
+        }
+        long deadlineNs = System.nanoTime() + java.util.concurrent.TimeUnit.MILLISECONDS.toNanos(Math.max(1L, totalTimeoutMs));
+        for (SingleCamera camera : cameras.values()) {
+            long remainingMs = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadlineNs - System.nanoTime());
+            if (remainingMs > 0L) {
+                camera.awaitPendingLifecycle(remainingMs);
+            }
+            camera.shutdownLifecycleExecutor(0L);
+        }
+        AppLog.d(TAG, "All cameras closed and awaited (repair suppressed)");
     }
 
     /**
@@ -2381,9 +2400,9 @@ public class MultiCameraManager {
                 AppLog.e(TAG, "Error stopping recording during release", e);
             }
             
-            // 5. 关闭所有摄像头
+            // 5. 关闭所有摄像头（并行关机并在有限时间内等待底层释放）
             try {
-                closeAllCameras();
+                closeAllCamerasAndAwait(2500L);
             } catch (Exception e) {
                 AppLog.e(TAG, "Error closing cameras during release", e);
             }
