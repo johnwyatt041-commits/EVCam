@@ -540,19 +540,34 @@
                     android:background="@drawable/ui_card"
                     android:layout_marginBottom="14dp">
 
-                    <TextView
-                        android:layout_width="wrap_content"
+                    <LinearLayout
+                        android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:text="4.3 银河 E5 校准与地面视野"
-                        android:textColor="@color/text_primary"
-                        android:textSize="16sp"
-                        android:fontFamily="sans-serif-medium" />
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="4.3 银河 E5 校准与地面视野"
+                            android:textColor="@color/text_primary"
+                            android:textSize="16sp"
+                            android:fontFamily="sans-serif-medium" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_calibration_live_preview"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:text="实时预览调校" />
+                    </LinearLayout>
 
                     <TextView
                         android:id="@+id/tv_surround_calibration_status"
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:layout_marginTop="4dp"
+                        android:layout_marginTop="2dp"
                         android:layout_marginBottom="10dp"
                         android:text="当前方案：银河 E5 内置校准"
                         android:textColor="@color/text_secondary"

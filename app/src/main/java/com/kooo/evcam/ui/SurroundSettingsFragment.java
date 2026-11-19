@@ -1,16 +1,8 @@
 package com.kooo.evcam.ui;
 
-import android.content.ActivityNotFoundException;
 import android.content.Context;
-import android.content.Intent;
 import android.graphics.Bitmap;
-import android.graphics.drawable.GradientDrawable;
-import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
-import android.provider.Settings;
-import android.util.TypedValue;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -23,11 +15,8 @@ import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
-import androidx.core.view.ViewCompat;
 import androidx.fragment.app.Fragment;
 
-import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.google.android.material.switchmaterial.SwitchMaterial;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.BlindSpotService;
@@ -39,7 +28,6 @@ import com.kooo.evcam.surround.SurroundViewMode;
 import com.kooo.evcam.vehicle.VehicleAutomationCoordinator;
 
 import java.io.File;
-import java.util.List;
 
 /**
  * 4. 360 画面设置页（覆盖 T07 4.1–4.3 全部设置）：
@@ -80,6 +68,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private TextView tvParkCloseDelayValue;
 
     private TextView tvCalibrationStatus;
+    private Button btnCalibLivePreview;
     private Button btnCalibBuiltin;
     private Button btnCalibImportLocal;
     private TextView tvGroundWidthValue;
@@ -139,6 +128,14 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     }
 
     @Override
+    public void onResume() {
+        super.onResume();
+        if (getContext() != null && getView() != null) {
+            refreshAllUi(getContext());
+        }
+    }
+
+    @Override
     public void onThemeApplied(Context themedContext, boolean isNight) {
         if (themedContext == null || getView() == null) return;
         refreshAllUi(themedContext);
@@ -173,6 +170,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         tvParkCloseDelayValue = view.findViewById(R.id.tv_park_close_delay_value);
 
         tvCalibrationStatus = view.findViewById(R.id.tv_surround_calibration_status);
+        btnCalibLivePreview = view.findViewById(R.id.btn_calibration_live_preview);
         btnCalibBuiltin = view.findViewById(R.id.btn_calibration_e5_builtin);
         btnCalibImportLocal = view.findViewById(R.id.btn_calibration_import_local);
         tvGroundWidthValue = view.findViewById(R.id.tv_ground_width_value);
@@ -271,12 +269,17 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             refreshAutoCloseUi();
         });
 
+        if (btnCalibLivePreview != null) {
+            btnCalibLivePreview.setOnClickListener(v ->
+                    SettingsFragment.openSubPage(this, new SurroundCalibrationLiveFragment()));
+        }
         btnCalibBuiltin.setOnClickListener(v -> {
             appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_BUILTIN);
             notifyHostSurroundChanged();
             refreshCalibrationAndModelUi(requireContext(), false);
         });
-        btnCalibImportLocal.setOnClickListener(v -> showLocalCalibrationPicker());
+        btnCalibImportLocal.setOnClickListener(v -> SurroundAssetImportHelper.showLocalCalibrationPicker(
+                this, calibrationJsonPickerLauncher, result -> applyCalibrationImportResult(requireContext(), result)));
 
         wireStepPair(root, R.id.btn_ground_width_minus, R.id.btn_ground_width_plus, () -> {
             appConfig.setSurroundGroundWidthCm(appConfig.getSurroundGroundWidthCm() - 5);
@@ -329,7 +332,8 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             notifyHostSurroundChanged();
             refreshCalibrationAndModelUi(requireContext(), true);
         });
-        btnCarModelImportPng.setOnClickListener(v -> showLocalCarModelPngPicker());
+        btnCarModelImportPng.setOnClickListener(v -> SurroundAssetImportHelper.showLocalCarModelPicker(
+                this, carModelPngPickerLauncher, result -> applyCarModelImportResult(requireContext(), result)));
     }
 
     private void wireStepPair(@Nullable View root, int minusId, int plusId,
@@ -444,8 +448,9 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         tvCalibrationStatus.setText(customCalib
                 ? "当前方案：本地导入 E5 校准（已校验）"
                 : "当前方案：银河 E5 内置校准");
-        applyOptionButtonState(btnCalibBuiltin, ctx, !customCalib);
-        applyOptionButtonState(btnCalibImportLocal, ctx, customCalib);
+        UiOptionPillHelper.apply(btnCalibLivePreview, ctx, true, true);
+        UiOptionPillHelper.apply(btnCalibBuiltin, ctx, !customCalib);
+        UiOptionPillHelper.apply(btnCalibImportLocal, ctx, customCalib);
 
         String carSource = appConfig.getSurroundCarModelSource();
         String customCarPath = appConfig.getSurroundCustomCarModelPath();
@@ -454,8 +459,8 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         tvCarModelStatus.setText(customCar
                 ? "当前车模：本地导入 PNG 车模"
                 : "当前车模：银河 E5 内置车模");
-        applyOptionButtonState(btnCarModelBuiltin, ctx, !customCar);
-        applyOptionButtonState(btnCarModelImportPng, ctx, customCar);
+        UiOptionPillHelper.apply(btnCarModelBuiltin, ctx, !customCar);
+        UiOptionPillHelper.apply(btnCarModelImportPng, ctx, customCar);
 
         String signature = carSource + "|" + customCarPath;
         if (forceReloadCarBitmap
@@ -467,174 +472,23 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         }
     }
 
-    private void showLocalCalibrationPicker() {
-        Context ctx = getContext();
-        if (ctx == null) return;
-        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        List<File> candidates = SurroundCalibrationManager.findCalibrationCandidates(downloadDir);
-        if (candidates.isEmpty()) {
-            launchDocumentPicker(ctx, calibrationJsonPickerLauncher,
-                    new String[]{"application/json", "text/plain", "*/*"},
-                    "E5 calibration.json");
-            return;
-        }
-        String[] labels = new String[candidates.size()];
-        for (int i = 0; i < candidates.size(); i++) {
-            File f = candidates.get(i);
-            labels[i] = f.getParentFile() != null && !"Download".equalsIgnoreCase(f.getParentFile().getName())
-                    ? f.getParentFile().getName() + "/" + f.getName()
-                    : f.getName();
-        }
-        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
-                .setTitle("选择本地 E5 校准文件（Download）")
-                .setItems(labels, (d, which) -> {
-                    File selected = candidates.get(which);
-                    File internalDir = new File(ctx.getFilesDir(), "surround");
-                    SurroundCalibrationManager.ImportResult result =
-                            SurroundCalibrationManager.importCalibrationFile(selected, internalDir);
-                    applyCalibrationImportResult(ctx, result);
-                })
-                .setNeutralButton("系统文件选择器", (d, w) -> launchDocumentPicker(ctx, calibrationJsonPickerLauncher,
-                        new String[]{"application/json", "text/plain", "*/*"},
-                        "E5 calibration.json"))
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void showLocalCarModelPngPicker() {
-        Context ctx = getContext();
-        if (ctx == null) return;
-        File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
-        List<File> candidates = SurroundCarModelRepository.findCustomPngCandidates(downloadDir);
-        if (candidates.isEmpty()) {
-            // Android 11+ 未授予「所有文件访问」时 Download 目录无法直接列举，回退系统 SAF 文件选择器（免权限）
-            launchDocumentPicker(ctx, carModelPngPickerLauncher,
-                    new String[]{"image/png", "image/*"},
-                    "透明 PNG 车模");
-            return;
-        }
-        String[] labels = new String[candidates.size()];
-        for (int i = 0; i < candidates.size(); i++) {
-            labels[i] = candidates.get(i).getName();
-        }
-        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
-                .setTitle("选择本地透明 PNG 车模（Download）")
-                .setItems(labels, (d, which) -> {
-                    File selected = candidates.get(which);
-                    File internalDir = new File(ctx.getFilesDir(), "surround");
-                    SurroundCarModelRepository.ImportResult result =
-                            SurroundCarModelRepository.importCustomCarModelPng(selected, internalDir);
-                    applyCarModelImportResult(ctx, result);
-                })
-                .setNeutralButton("系统文件选择器", (d, w) -> launchDocumentPicker(ctx, carModelPngPickerLauncher,
-                        new String[]{"image/png", "image/*"},
-                        "透明 PNG 车模"))
-                .setNegativeButton("取消", null)
-                .show();
-    }
-
-    private void launchDocumentPicker(@NonNull Context ctx,
-                                      @NonNull ActivityResultLauncher<String[]> launcher,
-                                      @NonNull String[] mimeTypes,
-                                      @NonNull String targetLabel) {
-        try {
-            launcher.launch(mimeTypes);
-        } catch (ActivityNotFoundException | SecurityException e) {
-            showMissingPickerOrPermissionDialog(ctx, targetLabel);
-        }
-    }
-
-    private void showMissingPickerOrPermissionDialog(@NonNull Context ctx, @NonNull String targetLabel) {
-        boolean needAllFiles = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-                && !Environment.isExternalStorageManager();
-        String message = needAllFiles
-                ? "Download 目录下未扫描到可用" + targetLabel + "（Android 11+ 未授予「所有文件访问」权限时无法直接读取 Download 目录），且当前系统未提供文件选择器。\n\n请先授予文件访问权限并将文件放入 Download 目录。"
-                : "Download 目录下未找到可用" + targetLabel + "，且当前系统未提供文件选择器。\n\n请将文件放入 Download 目录后重试。";
-        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
-                .setTitle("无法打开文件选择")
-                .setMessage(message)
-                .setNegativeButton("取消", null);
-        if (needAllFiles) {
-            builder.setPositiveButton("去授予文件权限", (d, w) -> openAllFilesAccessSettings(ctx));
-        }
-        builder.show();
-    }
-
-    private void openAllFilesAccessSettings(@NonNull Context ctx) {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return;
-        try {
-            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
-                    Uri.parse("package:" + ctx.getPackageName()));
-            startActivity(intent);
-        } catch (Exception e) {
-            try {
-                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
-            } catch (Exception ignored) {
-                Toast.makeText(ctx, "请在系统设置中授予 EVCam 文件访问权限", Toast.LENGTH_LONG).show();
-            }
-        }
-    }
-
     private void applyCalibrationImportResult(@NonNull Context ctx,
                                               @NonNull SurroundCalibrationManager.ImportResult result) {
-        if (result.success && result.importedFilePath != null) {
-            appConfig.setSurroundCustomCalibrationPath(result.importedFilePath);
-            appConfig.setSurroundCalibrationSource(AppConfig.SURROUND_CALIBRATION_E5_CUSTOM);
+        SurroundAssetImportHelper.applyCalibrationImportResult(ctx, appConfig, result, () -> {
             notifyHostSurroundChanged();
             refreshCalibrationAndModelUi(ctx, false);
-            Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
-        } else {
-            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
-                    .setTitle("校准文件导入失败")
-                    .setMessage(result.message)
-                    .setPositiveButton("确定", null)
-                    .show();
-        }
+        });
     }
 
     private void applyCarModelImportResult(@NonNull Context ctx,
                                            @NonNull SurroundCarModelRepository.ImportResult result) {
-        if (result.success && result.importedFilePath != null) {
-            appConfig.setSurroundCustomCarModelPath(result.importedFilePath);
-            appConfig.setSurroundCarModelSource(AppConfig.SURROUND_CAR_MODEL_CUSTOM_PNG);
+        SurroundAssetImportHelper.applyCarModelImportResult(ctx, appConfig, result, () -> {
             notifyHostSurroundChanged();
             refreshCalibrationAndModelUi(ctx, true);
-            Toast.makeText(ctx, result.message, Toast.LENGTH_SHORT).show();
-        } else {
-            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
-                    .setTitle("车模导入失败")
-                    .setMessage(result.message)
-                    .setPositiveButton("确定", null)
-                    .show();
-        }
+        });
     }
 
     private void applyOptionButtonState(@Nullable Button button, @NonNull Context context, boolean selected) {
-        if (button == null) return;
-        int fillColor = ContextCompat.getColor(context, selected ? R.color.ui_accent_soft : R.color.input_background);
-        int strokeColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_stroke : R.color.ui_border);
-        int textColor = ContextCompat.getColor(context, selected ? R.color.ui_option_pill_selected_text : R.color.text_primary);
-        int strokeWidthPx = Math.max(1, Math.round(TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 1f, context.getResources().getDisplayMetrics())));
-        float radiusPx = TypedValue.applyDimension(
-                TypedValue.COMPLEX_UNIT_DIP, 8f, context.getResources().getDisplayMetrics());
-
-        GradientDrawable pill = new GradientDrawable();
-        pill.setShape(GradientDrawable.RECTANGLE);
-        pill.setColor(fillColor);
-        pill.setStroke(strokeWidthPx, strokeColor);
-        pill.setCornerRadius(radiusPx);
-
-        int pl = button.getPaddingLeft();
-        int pt = button.getPaddingTop();
-        int pr = button.getPaddingRight();
-        int pb = button.getPaddingBottom();
-        ViewCompat.setBackgroundTintList(button, null);
-        button.setBackground(pill);
-        button.setPadding(pl, pt, pr, pb);
-        button.setTextColor(textColor);
-        button.setTag(R.id.ui_theme_bg_role, null);
-        button.setTag(R.id.ui_theme_text_role, null);
-        button.setSelected(selected);
+        UiOptionPillHelper.apply(button, context, selected);
     }
 }

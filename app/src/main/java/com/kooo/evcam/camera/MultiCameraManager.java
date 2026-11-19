@@ -483,6 +483,24 @@ public class MultiCameraManager {
         }
     }
 
+    /** 仅解绑仍匹配指定 Surface 引用的四路 360 OES 通道，避免误清主界面新建的预览。 */
+    public void clearSurroundPreviewSurfacesIfMatching(Surface front,
+                                                       Surface back,
+                                                       Surface left,
+                                                       Surface right) {
+        clearSingleSurroundSurfaceIfMatching("front", front);
+        clearSingleSurroundSurfaceIfMatching("back", back);
+        clearSingleSurroundSurfaceIfMatching("left", left);
+        clearSingleSurroundSurfaceIfMatching("right", right);
+    }
+
+    private void clearSingleSurroundSurfaceIfMatching(String cameraKey, Surface expectedSurface) {
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera != null) {
+            camera.clearSurroundPreviewSurfaceIfMatching(expectedSurface);
+        }
+    }
+
     private void setSingleSurroundSurface(String cameraKey, Surface surface, SurfaceTexture st) {
         SingleCamera camera = cameras.get(cameraKey);
         if (camera != null) {

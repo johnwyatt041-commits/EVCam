@@ -72,4 +72,27 @@ public class SurroundLayoutCalculatorTest {
         assertTrue(collapsedSpec.bottomCenterCardBox.isEmpty());
         assertTrue(collapsedSpec.bottomRightBox.isEmpty());
     }
+
+    @Test
+    public void birdOnlyBoxCentersAndPreservesGroundAspectAcrossDimensionChanges() {
+        ViewportBox defaultBox = SurroundLayoutCalculator.calculateBirdOnlyBox(
+                1000, 900, 206, 530, 0, 12);
+        ViewportBox widerBox = SurroundLayoutCalculator.calculateBirdOnlyBox(
+                1000, 900, 260, 530, 0, 12);
+        ViewportBox extendedBox = SurroundLayoutCalculator.calculateBirdOnlyBox(
+                1000, 900, 206, 600, 100, 12);
+
+        assertFalse(defaultBox.isEmpty());
+        assertEquals(12, defaultBox.top);
+        assertEquals(900 - 24, defaultBox.height);
+        // 水平居中
+        assertEquals(1000 - defaultBox.right(), defaultBox.left, 1);
+
+        // 地面加宽后，在等高受限下鸟瞰框按物理宽高比相应变宽
+        assertTrue(widerBox.width > defaultBox.width);
+        // 地面加长并增加车头延伸后，长宽比变瘦长，等高下宽度相应变窄
+        assertTrue(extendedBox.width < defaultBox.width);
+
+        assertTrue(SurroundLayoutCalculator.calculateBirdOnlyBox(0, 900, 206, 530, 0, 12).isEmpty());
+    }
 }

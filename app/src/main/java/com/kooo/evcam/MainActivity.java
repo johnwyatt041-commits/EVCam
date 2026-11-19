@@ -50,7 +50,8 @@ public class MainActivity extends AppCompatActivity implements
         com.kooo.evcam.ui.UiThemeController.Host,
         com.kooo.evcam.ui.UiThemeController.ThemeAware,
         com.kooo.evcam.ui.UiScaleController.Host,
-        com.kooo.evcam.ui.PreviewModeController.Host {
+        com.kooo.evcam.ui.PreviewModeController.Host,
+        com.kooo.evcam.ui.SurroundLivePreviewHost {
     private com.kooo.evcam.ui.AppShellController uiShell;
     private com.kooo.evcam.ui.UiThemeController uiTheme;
     private com.kooo.evcam.ui.UiScaleController uiScale;
@@ -90,6 +91,22 @@ public class MainActivity extends AppCompatActivity implements
             previewModeController.syncSurroundPreferences();
             previewModeController.refreshShortcutsOverlay();
         }
+    }
+
+    @Override
+    @androidx.annotation.Nullable
+    public MultiCameraManager acquireCameraManagerForSurroundCalibration() {
+        if (cameraManager != null && !cameraManager.isReleased()) {
+            return cameraManager;
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            return null;
+        }
+        MultiCameraManager holderManager = com.kooo.evcam.camera.CameraManagerHolder.getInstance().getOrInit(this);
+        if (holderManager != null) {
+            holderManager.setMainPreviewEnabled(false);
+        }
+        return holderManager;
     }
 
     private static final String TAG = "MainActivity";

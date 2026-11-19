@@ -104,13 +104,7 @@ public final class SurroundLayoutCalculator {
         int innerH = Math.max(120, containerHeight - outerPad * 2);
 
         // 根据包含车周路面边距的实际视场物理长宽比推导左侧 360 鸟瞰区宽度，并约束在总宽度的 30% ~ 39% 之间
-        double effectiveWidthCm = Math.max(160, groundWidthCm)
-                + SurroundCalibrationProfile.BIRD_SIDE_MARGIN_CM * 2.0;
-        double effectiveLengthCm = Math.max(420, groundLengthCm)
-                + SurroundCalibrationProfile.BIRD_REAR_MARGIN_CM
-                + SurroundCalibrationProfile.BIRD_FRONT_MARGIN_CM
-                + Math.max(0, groundFrontExtensionCm);
-        float birdWorldAspect = (float) (effectiveWidthCm / effectiveLengthCm);
+        float birdWorldAspect = calculateBirdWorldAspect(groundWidthCm, groundLengthCm, groundFrontExtensionCm);
         int idealBirdWidth = Math.round(innerH * birdWorldAspect);
         int minBirdWidth = Math.round(innerW * 0.30f);
         int maxBirdWidth = Math.round(innerW * 0.39f);
@@ -159,5 +153,47 @@ public final class SurroundLayoutCalculator {
 
         return new SurroundLayoutSpec(containerWidth, containerHeight,
                 birdBox, topBox, bottomBand, leftWheel, centerCard, rightWheel, false, effectiveBottomMode);
+    }
+
+    /** 计算只看 360 鸟瞰大图时的居中自适应视口（严格保持地面物理宽高比）。 */
+    @NonNull
+    public static ViewportBox calculateBirdOnlyBox(int containerWidth,
+                                                   int containerHeight,
+                                                   int groundWidthCm,
+                                                   int groundLengthCm,
+                                                   int groundFrontExtensionCm,
+                                                   int paddingPx) {
+        if (containerWidth <= 0 || containerHeight <= 0) {
+            return new ViewportBox(0, 0, 0, 0);
+        }
+        int pad = Math.max(4, paddingPx);
+        int availW = Math.max(40, containerWidth - pad * 2);
+        int availH = Math.max(40, containerHeight - pad * 2);
+        float birdWorldAspect = calculateBirdWorldAspect(groundWidthCm, groundLengthCm, groundFrontExtensionCm);
+
+        int boxW;
+        int boxH;
+        if (availH * birdWorldAspect <= availW) {
+            boxH = availH;
+            boxW = Math.max(40, Math.round(availH * birdWorldAspect));
+        } else {
+            boxW = availW;
+            boxH = Math.max(40, Math.round(availW / Math.max(0.1f, birdWorldAspect)));
+        }
+        int left = Math.max(0, (containerWidth - boxW) / 2);
+        int top = Math.max(0, (containerHeight - boxH) / 2);
+        return new ViewportBox(left, top, boxW, boxH);
+    }
+
+    private static float calculateBirdWorldAspect(int groundWidthCm,
+                                                  int groundLengthCm,
+                                                  int groundFrontExtensionCm) {
+        double effectiveWidthCm = Math.max(160, groundWidthCm)
+                + SurroundCalibrationProfile.BIRD_SIDE_MARGIN_CM * 2.0;
+        double effectiveLengthCm = Math.max(420, groundLengthCm)
+                + SurroundCalibrationProfile.BIRD_REAR_MARGIN_CM
+                + SurroundCalibrationProfile.BIRD_FRONT_MARGIN_CM
+                + Math.max(0, groundFrontExtensionCm);
+        return (float) (effectiveWidthCm / effectiveLengthCm);
     }
 }

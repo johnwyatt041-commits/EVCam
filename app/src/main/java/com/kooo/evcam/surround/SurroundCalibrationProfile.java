@@ -27,6 +27,9 @@ public final class SurroundCalibrationProfile {
     public static final double BIRD_REAR_MARGIN_CM = 170.0;
     public static final double BIRD_FRONT_MARGIN_CM = 185.0;
 
+    // 默认标定文件（星舰7 / E5 avm_calib_res）原始世界坐标的纵向车体中心偏移（cm，-1.43m）
+    public static final double DEFAULT_BIRD_CENTER_OFFSET_Y_CM = -143.0;
+
     /** 单路相机标定参数：支持统一球面（xi + focal）及 OpenCV Kannala-Brandt 鱼眼畸变（fx/fy + k1..k4）。 */
     public static final class CameraCalibration {
         @NonNull
@@ -129,6 +132,7 @@ public final class SurroundCalibrationProfile {
     @NonNull
     public final String profileName;
     public final boolean isCustomCalibration;
+    public final boolean useBuiltInMeshes;
     public final int groundWidthCm;
     public final int groundLengthCm;
     public final int groundFrontExtensionCm;
@@ -141,8 +145,20 @@ public final class SurroundCalibrationProfile {
                                       int groundLengthCm,
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
+        this(profileName, isCustomCalibration, !isCustomCalibration,
+                groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
+    }
+
+    public SurroundCalibrationProfile(@NonNull String profileName,
+                                      boolean isCustomCalibration,
+                                      boolean useBuiltInMeshes,
+                                      int groundWidthCm,
+                                      int groundLengthCm,
+                                      int groundFrontExtensionCm,
+                                      @NonNull Map<String, CameraCalibration> cameras) {
         this.profileName = profileName;
         this.isCustomCalibration = isCustomCalibration;
+        this.useBuiltInMeshes = useBuiltInMeshes;
         this.groundWidthCm = Math.max(160, Math.min(260, groundWidthCm));
         this.groundLengthCm = Math.max(420, Math.min(600, groundLengthCm));
         this.groundFrontExtensionCm = Math.max(0, Math.min(100, groundFrontExtensionCm));

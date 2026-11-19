@@ -136,4 +136,27 @@ public class SingleCameraResourceTest {
         assertFalse(camera.hasActiveOutputs());
         assertTrue(camera.closeIfUnused());
     }
+
+    @Test public void clearSurroundPreviewSurfaceIfMatchingOnlyClearsOwnedSurface() {
+        Surface ownedSurface = mock(Surface.class);
+        when(ownedSurface.isValid()).thenReturn(true);
+        Surface newerSurface = mock(Surface.class);
+        when(newerSurface.isValid()).thenReturn(true);
+
+        camera.setMainPreviewEnabled(false);
+        camera.setSurroundPreviewSurface(ownedSurface, null);
+        assertTrue(camera.isSurroundPreviewSurfaceBound());
+
+        // 传入不匹配的旧引用不会清掉当前绑定的新 Surface
+        camera.setSurroundPreviewSurface(newerSurface, null);
+        camera.clearSurroundPreviewSurfaceIfMatching(ownedSurface);
+        assertTrue(camera.isSurroundPreviewSurfaceBound());
+        assertTrue(camera.hasActiveOutputs());
+
+        // 传入当前持有的 Surface 引用时准确解绑并允许释放闲置相机
+        camera.clearSurroundPreviewSurfaceIfMatching(newerSurface);
+        assertFalse(camera.isSurroundPreviewSurfaceBound());
+        assertFalse(camera.hasActiveOutputs());
+        assertTrue(camera.closeIfUnused());
+    }
 }

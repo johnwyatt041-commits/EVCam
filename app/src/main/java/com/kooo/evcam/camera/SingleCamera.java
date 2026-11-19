@@ -636,6 +636,14 @@ public class SingleCamera {
         return isValidSurface(surroundPreviewSurface);
     }
 
+    /** 仅当当前绑定的 360 Surface 与调用方持有的一致时才解绑，避免覆盖新挂载的预览实例。 */
+    public void clearSurroundPreviewSurfaceIfMatching(Surface expectedSurface) {
+        if (expectedSurface == null || this.surroundPreviewSurface != expectedSurface) {
+            return;
+        }
+        setSurroundPreviewSurface(null, null);
+    }
+
     /**
      * 动态把 streamSurface 加入当前预览 session。
      * 复用 OutputConfiguration.addSurface + finalizeOutputConfigurations 机制；

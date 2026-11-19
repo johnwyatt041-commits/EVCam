@@ -17,6 +17,7 @@ import com.google.gson.JsonSyntaxException;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
@@ -29,13 +30,30 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
- * 银河 E5 360 标定档案工厂与本地 E5 标定 JSON 校验/导入器（完全离线，无领克 08、无云端依赖）。
+ * 银河 E5 360 标定档案工厂与本地 E5 标定 JSON/ZIP 校验导入器（完全离线，无领克 08、无云端依赖）。
+ * 默认内置标定采用星舰7（avm_calib_res）四路 OpenCV 鱼眼多项式实测标定参数与网格。
  */
 public final class SurroundCalibrationManager {
 
     private static final long MAX_CALIBRATION_FILE_BYTES = 2L * 1024L * 1024L;
+    private static final long MAX_CALIBRATION_ZIP_BYTES = 8L * 1024L * 1024L;
+    private static final long MAX_MESH_FILE_BYTES = 4L * 1024L * 1024L;
+
+    public static final String CUSTOM_CALIBRATION_FILE_NAME = "custom_e5_calibration.json";
+    public static final String CUSTOM_BIRD_MESH_FILE_NAME = "custom_bird.mesh";
+    public static final String CUSTOM_FRONT_WHEELS_MESH_FILE_NAME = "custom_front_wheels.mesh";
+    public static final String CUSTOM_REAR_WHEELS_MESH_FILE_NAME = "custom_rear_wheels.mesh";
+
+    private static final double[] BUILTIN_DISTORTION = {
+            0.129996832562922,
+            -0.041928332298147,
+            0.014005468157064,
+            -0.002599688315656
+    };
 
     public static final class ImportResult {
         public final boolean success;
@@ -54,47 +72,57 @@ public final class SurroundCalibrationManager {
     private SurroundCalibrationManager() {
     }
 
-    /** 构造银河 E5 默认内置标定档案（参数与 E5 四路实测光学几何匹配）。 */
+    /** 构造默认内置标定档案（采用星舰7 avm_calib_res 四路 OpenCV 鱼眼多项式标定参数，以车体中心为原点）。 */
     @NonNull
     public static SurroundCalibrationProfile createBuiltInE5Profile(int groundWidthCm,
                                                                      int groundLengthCm,
                                                                      int groundFrontExtensionCm) {
+        double yShiftCm = -SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM; // +143.0 cm
         Map<String, CameraCalibration> map = new LinkedHashMap<>(4);
         map.put("front", new CameraCalibration(
                 "front",
-                0.06, 244.87, 63.89,
-                new double[]{0.999899235, 0.014189049, -0.000436332},
-                new double[]{0.005243726, -0.397738131, -0.917483996},
-                new double[]{-0.013191772, 0.917389258, -0.397772456},
-                592.60, 592.60, 630.53, 369.36, 1.007645, false, null
+                -0.004356377853284801 * 100.0,
+                0.8067030902515822 * 100.0 + yShiftCm,
+                0.6552500377332486 * 100.0,
+                new double[]{0.9999225522745963, 0.01244366610333551, -0.00021125000828116445},
+                new double[]{0.005040253643994054, -0.42041741779638486, -0.9073168083181442},
+                new double[]{-0.011379160595646087, 0.9072454739414955, -0.42044757665707844},
+                318.0, 318.0, 640.0, 400.0, 0.0, true, BUILTIN_DISTORTION
         ));
         map.put("back", new CameraCalibration(
                 "back",
-                0.06, -244.96, 74.85,
-                new double[]{-0.999806090, 0.006037742, 0.018743738},
-                new double[]{-0.011530504, 0.592107672, -0.805776366},
-                new double[]{-0.015963381, -0.805836243, -0.591923238},
-                592.60, 592.60, 640.00, 400.00, 1.041836, false, null
+                0.06420808076605605 * 100.0,
+                -3.6549453245001606 * 100.0 + yShiftCm,
+                0.9919933182890428 * 100.0,
+                new double[]{-0.9999512310686646, -0.007414019843584837, 0.006524399897390958},
+                new double[]{-0.009211257147569272, 0.461871397531451, -0.8868990725466488},
+                new double[]{0.0035620536244558255, -0.8869159173518668, -0.46191716500025526},
+                318.0, 318.0, 640.0, 400.0, 0.0, true, BUILTIN_DISTORTION
         ));
         map.put("left", new CameraCalibration(
                 "left",
-                -105.19, 82.50, 107.48,
-                new double[]{-0.006753175, 0.999799874, -0.018830990},
-                new double[]{0.576466059, -0.011495000, -0.817040237},
-                new double[]{-0.817093188, -0.016373042, -0.576273065},
-                592.60, 592.60, 630.53, 369.36, 1.014824, false, null
+                -1.0325600262845192 * 100.0,
+                -0.9257069587489 * 100.0 + yShiftCm,
+                1.0831671161062215 * 100.0,
+                new double[]{-0.004761879637051547, 0.9997887846367982, -0.01999276411095563},
+                new double[]{0.7454485925128783, -0.009777334192937692, -0.6664914100396557},
+                new double[]{-0.6665461127505666, -0.018077329740691594, -0.7452445838290643},
+                318.0, 318.0, 640.0, 400.0, 0.0, true, BUILTIN_DISTORTION
         ));
         map.put("right", new CameraCalibration(
                 "right",
-                105.42, 85.30, 108.59,
-                new double[]{0.022861805, -0.999737930, 0.001186824},
-                new double[]{-0.561813001, -0.013829363, -0.827148657},
-                new double[]{0.826948299, 0.018243338, -0.561981931},
-                592.60, 592.60, 630.53, 369.36, 1.009981, false, null
+                1.015017647542593 * 100.0,
+                -0.9552939005459508 * 100.0 + yShiftCm,
+                1.0816068864978858 * 100.0,
+                new double[]{-0.006856468853798758, -0.9999648660297112, -0.004822399925212606},
+                new double[]{-0.7019393136006203, 0.008247575011013697, -0.7121890040770974},
+                new double[]{0.7122037551549044, -0.0014980696310612496, -0.701971200926814},
+                318.0, 318.0, 640.0, 400.0, 0.0, true, BUILTIN_DISTORTION
         ));
         return new SurroundCalibrationProfile(
                 "银河 E5 内置校准",
                 false,
+                true,
                 groundWidthCm,
                 groundLengthCm,
                 groundFrontExtensionCm,
@@ -201,11 +229,32 @@ public final class SurroundCalibrationManager {
                     r0, r1, r2, fx, fy, cx, cy, 0.0, true, dist));
         }
 
+        // 若标定坐标未以车体中心为 Y 原点（例如原始坐标前后相机中点约 -142.4cm），自动平移对齐车体中心
+        CameraCalibration frontCal = parsed.get("front");
+        CameraCalibration backCal = parsed.get("back");
+        if (frontCal != null && backCal != null) {
+            double midYCm = (frontCal.posYCm + backCal.posYCm) * 0.5;
+            if (Math.abs(midYCm) > 25.0) {
+                Map<String, CameraCalibration> recentered = new LinkedHashMap<>(4);
+                for (Map.Entry<String, CameraCalibration> entry : parsed.entrySet()) {
+                    CameraCalibration c = entry.getValue();
+                    recentered.put(entry.getKey(), new CameraCalibration(
+                            c.position,
+                            c.posXCm, c.posYCm - midYCm, c.posZCm,
+                            c.r0, c.r1, c.r2,
+                            c.fx, c.fy, c.cx, c.cy,
+                            c.xi, c.usePolynomialDistortion, c.distortion));
+                }
+                parsed = recentered;
+            }
+        }
+
         String name = optString(root, "profile_name", "本地导入 E5 校准");
-        return new SurroundCalibrationProfile(name, true, groundWidthCm, groundLengthCm, groundFrontExtensionCm, parsed);
+        return new SurroundCalibrationProfile(name, true, false,
+                groundWidthCm, groundLengthCm, groundFrontExtensionCm, parsed);
     }
 
-    /** 扫描目录下可用于导入的 E5 `calibration.json` 候选文件（含一层子目录）。 */
+    /** 扫描目录下可用于导入的 E5 `calibration.json` 或标定 `.zip` 候选文件（含一层子目录）。 */
     @NonNull
     public static List<File> findCalibrationCandidates(@Nullable File searchRoot) {
         List<File> out = new ArrayList<>();
@@ -218,9 +267,18 @@ public final class SurroundCalibrationManager {
             if (child.isFile() && isCandidateCalibrationFile(child)) {
                 out.add(child);
             } else if (child.isDirectory()) {
-                File nested = new File(child, "calibration.json");
-                if (nested.isFile()) {
-                    out.add(nested);
+                File nestedJson = new File(child, "calibration.json");
+                if (nestedJson.isFile() && isCandidateCalibrationFile(nestedJson)) {
+                    out.add(nestedJson);
+                }
+                File[] grandChildren = child.listFiles();
+                if (grandChildren != null) {
+                    for (File gc : grandChildren) {
+                        if (gc.isFile() && gc.getName().toLowerCase(Locale.US).endsWith(".zip")
+                                && isCandidateCalibrationFile(gc)) {
+                            out.add(gc);
+                        }
+                    }
                 }
             }
         }
@@ -229,28 +287,38 @@ public final class SurroundCalibrationManager {
 
     private static boolean isCandidateCalibrationFile(@NonNull File f) {
         String name = f.getName().toLowerCase(Locale.US);
+        if (name.endsWith(".zip")) {
+            return (name.contains("calib") || name.contains("avm") || name.contains("星舰"))
+                    && f.length() > 100 && f.length() <= MAX_CALIBRATION_ZIP_BYTES;
+        }
         return ("calibration.json".equals(name) || (name.endsWith(".json") && name.contains("calib")))
                 && f.length() > 100 && f.length() <= MAX_CALIBRATION_FILE_BYTES;
     }
 
-    /** 验证并复制本地 E5 `calibration.json` 至应用私有目录。 */
+    /** 验证并复制本地 E5 `calibration.json` 或标定 `.zip` 至应用私有目录。 */
     @NonNull
     public static ImportResult importCalibrationFile(@NonNull File sourceFile, @NonNull File internalDestDir) {
         if (!sourceFile.isFile() || !sourceFile.canRead()) {
             return new ImportResult(false, "所选标定文件不存在或不可读", null);
         }
-        if (sourceFile.length() <= 0 || sourceFile.length() > MAX_CALIBRATION_FILE_BYTES) {
-            return new ImportResult(false, "标定文件大小超限（需 <= 2MB）", null);
+        long maxAllowed = sourceFile.getName().toLowerCase(Locale.US).endsWith(".zip")
+                ? MAX_CALIBRATION_ZIP_BYTES
+                : MAX_CALIBRATION_FILE_BYTES;
+        if (sourceFile.length() <= 0 || sourceFile.length() > maxAllowed) {
+            return new ImportResult(false, "标定文件大小超限", null);
         }
-        try {
-            String raw = readUtf8File(sourceFile);
-            return importCalibrationRaw(raw, sourceFile.getName(), internalDestDir);
+        try (FileInputStream fis = new FileInputStream(sourceFile)) {
+            byte[] bytes = readBoundedBytes(fis, maxAllowed);
+            if (bytes == null) {
+                return new ImportResult(false, "标定文件大小超限", null);
+            }
+            return importCalibrationBytes(bytes, sourceFile.getName(), internalDestDir);
         } catch (IOException e) {
             return new ImportResult(false, "读取/保存标定文件失败：" + e.getMessage(), null);
         }
     }
 
-    /** 通过系统文件选择器 (SAF Uri) 验证并导入本地 E5 `calibration.json`。 */
+    /** 通过系统文件选择器 (SAF Uri) 验证并导入本地 E5 `calibration.json` 或标定 `.zip`。 */
     @NonNull
     public static ImportResult importCalibrationUri(@NonNull Context context,
                                                     @NonNull Uri sourceUri,
@@ -261,29 +329,90 @@ public final class SurroundCalibrationManager {
             if (in == null) {
                 return new ImportResult(false, "无法打开所选标定文件", null);
             }
-            String raw = readBoundedUtf8(in, MAX_CALIBRATION_FILE_BYTES);
-            if (raw == null) {
-                return new ImportResult(false, "标定文件大小超限（需 <= 2MB）", null);
+            byte[] bytes = readBoundedBytes(in, MAX_CALIBRATION_ZIP_BYTES);
+            if (bytes == null) {
+                return new ImportResult(false, "标定文件大小超限（需 <= 8MB）", null);
             }
-            return importCalibrationRaw(raw, displayName, internalDestDir);
+            return importCalibrationBytes(bytes, displayName, internalDestDir);
         } catch (IOException e) {
             return new ImportResult(false, "读取/保存标定文件失败：" + e.getMessage(), null);
         }
     }
 
     @NonNull
+    private static ImportResult importCalibrationBytes(@NonNull byte[] bytes,
+                                                       @NonNull String displayName,
+                                                       @NonNull File internalDestDir) {
+        if (isZipHeader(bytes)) {
+            return importCalibrationZipBytes(bytes, displayName, internalDestDir);
+        }
+        if (bytes.length > MAX_CALIBRATION_FILE_BYTES) {
+            return new ImportResult(false, "标定 JSON 文件大小超限（需 <= 2MB）", null);
+        }
+        String raw = new String(bytes, StandardCharsets.UTF_8);
+        return importCalibrationRaw(raw, displayName, internalDestDir, null, null, null);
+    }
+
+    @NonNull
+    private static ImportResult importCalibrationZipBytes(@NonNull byte[] zipBytes,
+                                                          @NonNull String displayName,
+                                                          @NonNull File internalDestDir) {
+        String calibRaw = null;
+        byte[] birdMesh = null;
+        byte[] frontWheelsMesh = null;
+        byte[] rearWheelsMesh = null;
+        try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
+            ZipEntry entry;
+            while ((entry = zis.getNextEntry()) != null) {
+                if (entry.isDirectory()) {
+                    continue;
+                }
+                String entryName = entry.getName();
+                if (entryName.contains("..")) {
+                    continue;
+                }
+                String baseName = new File(entryName).getName().toLowerCase(Locale.US);
+                if ("calibration.json".equals(baseName)) {
+                    byte[] jsonBytes = readBoundedBytes(zis, MAX_CALIBRATION_FILE_BYTES);
+                    if (jsonBytes != null) {
+                        calibRaw = new String(jsonBytes, StandardCharsets.UTF_8);
+                    }
+                } else if ("bird.mesh".equals(baseName)) {
+                    birdMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
+                } else if ("front_wheels.mesh".equals(baseName)) {
+                    frontWheelsMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
+                } else if ("rear_wheels.mesh".equals(baseName)) {
+                    rearWheelsMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
+                }
+            }
+        } catch (IOException e) {
+            return new ImportResult(false, "解析标定压缩包失败：" + e.getMessage(), null);
+        }
+        if (calibRaw == null) {
+            return new ImportResult(false, "压缩包内未找到 calibration.json", null);
+        }
+        return importCalibrationRaw(calibRaw, displayName, internalDestDir, birdMesh, frontWheelsMesh, rearWheelsMesh);
+    }
+
+    @NonNull
     private static ImportResult importCalibrationRaw(@NonNull String raw,
                                                      @NonNull String displayName,
-                                                     @NonNull File internalDestDir) {
+                                                     @NonNull File internalDestDir,
+                                                     @Nullable byte[] birdMesh,
+                                                     @Nullable byte[] frontWheelsMesh,
+                                                     @Nullable byte[] rearWheelsMesh) {
         try {
             parseCalibrationJson(raw, 206, 530, 0);
             if (!internalDestDir.exists() && !internalDestDir.mkdirs()) {
                 return new ImportResult(false, "无法创建本地标定目录", null);
             }
-            File destFile = new File(internalDestDir, "custom_e5_calibration.json");
+            File destFile = new File(internalDestDir, CUSTOM_CALIBRATION_FILE_NAME);
             try (FileOutputStream fos = new FileOutputStream(destFile)) {
                 fos.write(raw.getBytes(StandardCharsets.UTF_8));
             }
+            writeOrDeleteMeshFile(new File(internalDestDir, CUSTOM_BIRD_MESH_FILE_NAME), birdMesh);
+            writeOrDeleteMeshFile(new File(internalDestDir, CUSTOM_FRONT_WHEELS_MESH_FILE_NAME), frontWheelsMesh);
+            writeOrDeleteMeshFile(new File(internalDestDir, CUSTOM_REAR_WHEELS_MESH_FILE_NAME), rearWheelsMesh);
             return new ImportResult(true, "已导入本地 E5 校准：" + displayName, destFile.getAbsolutePath());
         } catch (IllegalArgumentException e) {
             return new ImportResult(false, "E5 标定 JSON 校验失败：" + e.getMessage(), null);
@@ -292,8 +421,27 @@ public final class SurroundCalibrationManager {
         }
     }
 
+    private static void writeOrDeleteMeshFile(@NonNull File dest, @Nullable byte[] data) throws IOException {
+        if (data != null && data.length >= 32 && data.length % 32 == 0) {
+            try (FileOutputStream fos = new FileOutputStream(dest)) {
+                fos.write(data);
+            }
+        } else if (dest.exists()) {
+            // 防止旧压缩包遗留网格与新导入 JSON 混用
+            //noinspection ResultOfMethodCallIgnored
+            dest.delete();
+        }
+    }
+
+    private static boolean isZipHeader(@NonNull byte[] bytes) {
+        return bytes.length >= 4
+                && bytes[0] == 'P' && bytes[1] == 'K'
+                && (bytes[2] == 3 || bytes[2] == 5 || bytes[2] == 7)
+                && (bytes[3] == 4 || bytes[3] == 6 || bytes[3] == 8);
+    }
+
     @Nullable
-    private static String readBoundedUtf8(@NonNull InputStream in, long maxBytes) throws IOException {
+    private static byte[] readBoundedBytes(@NonNull InputStream in, long maxBytes) throws IOException {
         ByteArrayOutputStream buffer = new ByteArrayOutputStream();
         byte[] chunk = new byte[8192];
         long total = 0L;
@@ -305,10 +453,7 @@ public final class SurroundCalibrationManager {
             }
             buffer.write(chunk, 0, n);
         }
-        if (total == 0L) {
-            return null;
-        }
-        return new String(buffer.toByteArray(), StandardCharsets.UTF_8);
+        return total > 0L ? buffer.toByteArray() : null;
     }
 
     @NonNull

@@ -1,0 +1,365 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/page_background">
+
+    <!-- 顶部栏 -->
+    <LinearLayout
+        android:id="@+id/toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:paddingTop="14dp"
+        android:paddingBottom="10dp"
+        android:paddingStart="16dp"
+        android:paddingEnd="20dp"
+        android:gravity="center_vertical"
+        android:background="@color/page_background">
+
+        <Button
+            android:id="@+id/btn_back"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="← 返回"
+            android:textSize="15sp"
+            android:minWidth="48dp"
+            android:minHeight="48dp"
+            android:backgroundTint="@color/button_background"
+            android:textColor="@color/button_text"
+            android:elevation="0dp"
+            android:fontFamily="sans-serif-medium"
+            android:textAllCaps="false" />
+
+        <TextView
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="10dp"
+            android:layout_marginEnd="10dp"
+            android:maxLines="1"
+            android:ellipsize="end"
+            android:text="4.3 实时标定与视野调校"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            android:textColor="@color/text_primary" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btn_calib_view_bird_only"
+            style="@style/Widget.EVCam.OptionPill.Compact"
+            android:layout_marginEnd="6dp"
+            android:text="鸟瞰大图" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btn_calib_view_full_mode_a"
+            style="@style/Widget.EVCam.OptionPill.Compact"
+            android:layout_marginEnd="10dp"
+            android:text="完整模式 A" />
+
+        <androidx.appcompat.widget.AppCompatButton
+            android:id="@+id/btn_calib_done"
+            style="@style/Widget.EVCam.OptionPill.Compact"
+            android:text="完成调校" />
+    </LinearLayout>
+
+    <!-- 主体：左实时 360 预览 + 右 4.3 参数调节面板 -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:baselineAligned="false"
+        android:paddingStart="20dp"
+        android:paddingEnd="20dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="18dp">
+
+        <!-- 左侧：按需创建的实时 360 预览区 -->
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="1.15"
+            android:layout_marginEnd="14dp"
+            android:padding="2dp"
+            android:background="@color/ui_border">
+
+            <com.kooo.evcam.surround.SurroundCalibrationPreviewView
+                android:id="@+id/surround_calibration_preview"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent" />
+        </FrameLayout>
+
+        <!-- 右侧：标定参数调节区 -->
+        <ScrollView
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight="0.85"
+            android:scrollbars="none">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:paddingBottom="8dp">
+
+                <!-- 标定方案 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="标定方案"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <TextView
+                        android:id="@+id/tv_live_calibration_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="3dp"
+                        android:layout_marginBottom="10dp"
+                        android:text="当前方案：银河 E5 内置校准"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_calib_builtin"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="银河 E5 内置校准" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_calib_import_local"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="导入本地校准" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <!-- 地面拼接视野 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="12dp">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        android:text="地面拼接视野（拖动即刻生效）"
+                        android:textColor="@color/text_primary"
+                        android:textSize="15sp"
+                        android:fontFamily="sans-serif-medium" />
+
+                    <!-- 地面宽度 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_live_ground_width_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="地面宽度：206 cm（160–260）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_width_minus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_marginEnd="6dp"
+                            android:text="-5" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_width_plus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:text="+5" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_live_ground_width"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:layout_marginBottom="10dp" />
+
+                    <!-- 地面长度 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_live_ground_length_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="地面长度：530 cm（420–600）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_length_minus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_marginEnd="6dp"
+                            android:text="-10" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_length_plus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:text="+10" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_live_ground_length"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="180"
+                        android:layout_marginBottom="10dp" />
+
+                    <!-- 车头视野延伸 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_live_ground_ext_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="车头视野延伸：0 cm（0–100）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_ext_minus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_marginEnd="6dp"
+                            android:text="-10" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ground_ext_plus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:text="+10" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_live_ground_ext"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="100"
+                        android:layout_marginBottom="10dp" />
+
+                    <androidx.appcompat.widget.AppCompatButton
+                        android:id="@+id/btn_live_ground_reset_default"
+                        style="@style/Widget.EVCam.OptionPill"
+                        android:text="恢复 E5 默认拼接视野" />
+                </LinearLayout>
+
+                <!-- 引导线与车模 -->
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="14dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="10dp">
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="10dp">
+
+                        <TextView
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="动态转向与倒车辅助引导线"
+                            android:textColor="@color/text_primary"
+                            android:textSize="14sp" />
+
+                        <com.google.android.material.switchmaterial.SwitchMaterial
+                            android:id="@+id/switch_live_guidance_enabled"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content" />
+                    </LinearLayout>
+
+                    <View
+                        android:layout_width="match_parent"
+                        android:layout_height="1dp"
+                        android:background="@color/ui_border"
+                        android:layout_marginBottom="10dp" />
+
+                    <TextView
+                        android:id="@+id/tv_live_car_model_status"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="8dp"
+                        android:text="当前车模：银河 E5 内置车模"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="12sp" />
+
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_car_model_builtin"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="8dp"
+                            android:text="E5 内置车模" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_car_model_import_png"
+                            style="@style/Widget.EVCam.OptionPill"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="导入本地 PNG" />
+                    </LinearLayout>
+                </LinearLayout>
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:text="参数已实时保存；返回、切换设置分类或退后台时将自动销毁实时预览并释放闲置摄像头（不影响正在进行的录像）。"
+                    android:textColor="@color/text_hint"
+                    android:textSize="12sp" />
+            </LinearLayout>
+        </ScrollView>
+    </LinearLayout>
+</LinearLayout>
