@@ -465,34 +465,46 @@ public final class AppShellController {
         if (destination != R.id.nav_recording && fullscreenPreview) {
             setFullscreenPreview(false);
         }
-        boolean recording = destination == R.id.nav_recording;
-        activity.findViewById(R.id.main).setVisibility(recording ? View.VISIBLE : View.GONE);
-        View container = activity.findViewById(R.id.fragment_container);
+        applyRootContainerVisibility();
         fragments.popBackStack(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
         if (fragment != null) {
             FragmentTransaction transaction = fragments.beginTransaction();
             transaction.replace(R.id.fragment_container, fragment);
             transaction.commitAllowingStateLoss();
         }
-        container.setVisibility(recording ? View.GONE : View.VISIBLE);
         updateHeader();
     }
 
     public void restore(int destination) {
         if (destination == R.id.nav_secondary_display || destination == R.id.nav_feishu) {
             currentRoot = R.id.nav_settings;
+            applyRootContainerVisibility();
             updateHeader();
             return;
         }
         currentRoot = destination;
         for (int i = 0; i < destinations.length; i++) {
             if (destinations[i] == destination) {
+                applyRootContainerVisibility();
                 updateHeader();
                 return;
             }
         }
         currentRoot = R.id.nav_recording;
+        applyRootContainerVisibility();
         updateHeader();
+    }
+
+    private void applyRootContainerVisibility() {
+        boolean recording = currentRoot == R.id.nav_recording;
+        View mainView = activity.findViewById(R.id.main);
+        if (mainView != null) {
+            mainView.setVisibility(recording ? View.VISIBLE : View.GONE);
+        }
+        View container = activity.findViewById(R.id.fragment_container);
+        if (container != null) {
+            container.setVisibility(recording ? View.GONE : View.VISIBLE);
+        }
     }
 
     public void setPreviewEnabled(boolean enabled) {

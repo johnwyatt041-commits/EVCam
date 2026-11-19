@@ -142,6 +142,9 @@ public class PhotoGroupAdapter extends RecyclerView.Adapter<PhotoGroupAdapter.Vi
             imageView.setBackgroundColor(0xFF1A1A1A);
             return;
         }
+        if (!PlaybackImageMemory.canLoad(context)) {
+            return;
+        }
 
         RequestOptions options = new RequestOptions()
                 .centerCrop()

@@ -926,7 +926,7 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
             playerManager.release();
             playerManager = null;
         }
-        PlaybackImageMemory.clear(requireContext());
+        PlaybackImageMemory.clear(getContext());
         rootView = null;
         super.onDestroyView();
     }

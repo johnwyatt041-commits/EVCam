@@ -354,13 +354,16 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
     }
 
     private void loadImage(File photoFile, ImageView imageView) {
-        if (photoFile == null || !photoFile.exists() || getContext() == null) return;
+        Context context = getContext();
+        if (photoFile == null || !photoFile.exists() || !isAdded() || !PlaybackImageMemory.canLoad(context)) {
+            return;
+        }
         RequestOptions options = new RequestOptions()
                 .diskCacheStrategy(DiskCacheStrategy.RESOURCE)
                 .signature(new ObjectKey(photoFile.lastModified()))
                 .placeholder(android.R.color.black)
                 .error(android.R.color.black);
-        Glide.with(getContext()).load(photoFile).apply(options).into(imageView);
+        Glide.with(context).load(photoFile).apply(options).into(imageView);
     }
 
     private void updatePhotoList() {
@@ -649,7 +652,7 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
             photoList.setAdapter(null);
             photoList.getRecycledViewPool().clear();
         }
-        PlaybackImageMemory.clear(requireContext());
+        PlaybackImageMemory.clear(getContext());
         adapter = null;
         imageFront = imageBack = imageLeft = imageRight = imageSingle = null;
         rootView = null;

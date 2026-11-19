@@ -160,6 +160,9 @@ public class VideoGroupAdapter extends RecyclerView.Adapter<VideoGroupAdapter.Vi
             imageView.setBackgroundColor(0xFF1A1A1A);
             return;
         }
+        if (!PlaybackImageMemory.canLoad(context)) {
+            return;
+        }
 
         RequestOptions options = new RequestOptions()
                 .frame(0)

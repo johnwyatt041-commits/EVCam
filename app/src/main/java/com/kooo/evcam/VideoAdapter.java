@@ -173,6 +173,9 @@ public class VideoAdapter extends RecyclerView.Adapter<VideoAdapter.VideoViewHol
             imageView.setImageResource(android.R.drawable.ic_media_play);
             return;
         }
+        if (!com.kooo.evcam.playback.PlaybackImageMemory.canLoad(context)) {
+            return;
+        }
 
         // 使用文件修改时间作为缓存签名，文件变化时自动更新缓存
         RequestOptions options = new RequestOptions()

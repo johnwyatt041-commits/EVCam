@@ -101,9 +101,11 @@ final class PlaybackListViewHolders {
                               boolean isVideo) {
         int emptyBg = ContextCompat.getColor(context, R.color.preview_frame_background);
         if (file == null || !file.exists() || file.length() <= 0L) {
-            Glide.with(context).clear(imageView);
-            imageView.setImageDrawable(null);
+            PlaybackImageMemory.clearImageView(imageView);
             imageView.setBackgroundColor(emptyBg);
+            return;
+        }
+        if (!PlaybackImageMemory.canLoad(context)) {
             return;
         }
         RequestOptions options = new RequestOptions()

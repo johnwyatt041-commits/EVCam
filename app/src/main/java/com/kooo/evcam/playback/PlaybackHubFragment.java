@@ -127,9 +127,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
 
     @Override
     public void onDestroyView() {
-        if (getContext() != null) {
-            PlaybackImageMemory.clear(requireContext());
-        }
+        PlaybackImageMemory.clear(getContext());
         rootView = null;
         btnTabVideo = null;
         btnTabPhoto = null;

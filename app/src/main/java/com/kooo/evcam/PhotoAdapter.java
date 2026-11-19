@@ -171,6 +171,9 @@ public class PhotoAdapter extends RecyclerView.Adapter<PhotoAdapter.PhotoViewHol
             imageView.setImageResource(android.R.drawable.ic_menu_gallery);
             return;
         }
+        if (!com.kooo.evcam.playback.PlaybackImageMemory.canLoad(context)) {
+            return;
+        }
 
         // 使用文件修改时间作为缓存签名，文件变化时自动更新缓存
         RequestOptions options = new RequestOptions()
