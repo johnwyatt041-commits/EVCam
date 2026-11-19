@@ -1,7 +1,7 @@
 # 项目进度
 
-最后更新/核对：2026-11-19 12:08:00 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已完成 `P018` 回看销毁保护与重建恢复修复 `e946c50` / `build17` 封包，准备推送 `johnwyatt041-commits/EVCam` 并发布 Pre-release）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-19 12:11:00 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已完成 `P018` 回看销毁保护与重建恢复修复 `e946c50` / `build17` 封包、提交与 GitHub Pre-release 发布）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
@@ -9,7 +9,7 @@
 | --- | --- |
 | 分支与提交 | `codex/e5-recording-startup-fix`；最新代码提交 `e946c50`（Tag `v1.6.6-test-11191152-build17` / `1.6.6-test-11191152`，`versionCode = 84`） |
 | 本地交付 | `outputs/` 顶层保留 **`build16`** + **`build17`**（12 文件）；`build15` 已归档至 `outputs/archive/`（索引 `outputs/archive/INDEX.md`） |
-| GitHub | 正在准备将 `codex/e5-recording-startup-fix`、`v1.6.6-test-11190906-build16` 与 `v1.6.6-test-11191152-build17` 推送并发布至 `johnwyatt041-commits/EVCam` |
+| GitHub | `johnwyatt041-commits/EVCam` 已同步分支 `codex/e5-recording-startup-fix`、标签 `build16`/`build17` 并发布 Pre-release `v1.6.6-test-11191152-build17`（6 项资产 SHA256 核验一致） |
 | 离线与模拟器验证 | `build17`（`1.6.6-test-11191152`）已通过 `verify.ps1` `488` 测 `0` 失败 `0` 跳过、双风味 `0` Lint error（`2076` warnings）、`apksigner`/`libvhal_decoder.so` 校验及 `emulator-5556` `2560x1600@240`↔`reset` 重建实测（`PID=2966` 存活、`0` 崩溃） |
 | 实车状态 | 银河 E5 实车四路 `B/C→D` 切换及包 A–E 全集（`build17`）均**尚未上车实测** |
 
@@ -27,7 +27,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-19 12:08:00 +08:00 | P018 回看销毁保护修复与 build17 封包 | 修复 `PlaybackImageMemory.clearViews()` 在 `Activity.isDestroyed()` 调 `Glide.with()` 闪退，加固全量 Glide 加载/清理与 `AppShellController.restore()` 根容器显隐（`e946c50` / `v1.6.6-test-11191152-build17`），`488` 测 `0` 失败、`0` Lint error 及 `emulator-5556` 重建实测通过（`build15` 归档至 `outputs/archive/`） | [P018修复](tasks/fix-p018-playback-glide-destroy.md) · [P018](PITFALLS.md)
+- 2026-11-19 12:11:00 +08:00 | P018 回看销毁保护修复与 build17 发布 GitHub | 修复 `PlaybackImageMemory.clearViews()` 在 `Activity.isDestroyed()` 调 `Glide.with()` 闪退，加固全量 Glide 加载/清理与 `AppShellController.restore()` 根容器显隐（`e946c50` / `v1.6.6-test-11191152-build17`），`488` 测 `0` 失败、`0` Lint error、`emulator-5556` 重建实测通过并发布 GitHub Pre-release（`build15` 归档） | [P018修复](tasks/fix-p018-playback-glide-destroy.md) · [P018](PITFALLS.md)
 - 2026-11-19 11:26:00 +08:00 | build16 封包提交与历史归档索引 | 提交 `B/C→D` + `P019` 修复至 `b8c5773`（Tag `v1.6.6-test-11190906-build16`）并导出 `build16`，归档 `build14`、`11-17`/`11-18` 日志与 `workspace-cleanup` 任务，新增 [文档归档索引](archive/2026-11/INDEX.md) 与本地 `work/archive/INDEX.md` | [模式D卡顿修复](tasks/fix-mode-d-switch-stall.md) · [归档索引](archive/2026-11/INDEX.md)
 - 2026-11-19 09:20:00 +08:00 | 修复 B/C 切 D 卡顿与 P019 后台切模式 | `SingleCamera` 按路拆分 `CamLifecycle-<id>` 异步执行 `closeCamera()`/`openCamera()`，`MultiCameraManager.release()` 并行等待，`PreviewModeController` 延后后台页掩码，`MainActivity` 修复隐藏窗格空轮询；`emulator-5556` 全流程通过 | [模式D卡顿修复](tasks/fix-mode-d-switch-stall.md) · [P019](PITFALLS.md)
 - 2026-11-19 02:31:36 +08:00 | 默认车模替换、SAF 导入修复与 build15 发布 | 写入银河 E5 透明车模为默认资源并修 360 GL `GL_ONE` 预乘混合，补 `OpenDocument` 与弹窗提示（`111c1cb` / `build15`：`470` 测 `0` 失败、`0` Lint error） | [包 B 任务](tasks/fix-pack-b-preview-and-mode-d.md) · [P020](PITFALLS.md)

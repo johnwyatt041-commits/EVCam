@@ -1,10 +1,10 @@
 # P018 回看销毁保护与重建容器恢复修复
 
-最后更新：2026-11-19 12:07:00 +08:00
-最后核对：2026-11-19 12:07:00 +08:00
+最后更新：2026-11-19 12:11:00 +08:00
+最后核对：2026-11-19 12:11:00 +08:00
 任务/执行者：fix-p018-playback-glide-destroy / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：已完成离线验证、build17 封包与 emulator-5556 销毁重建实测（待实车验收）
+状态：已完成提交、封包 build17 与 GitHub Pre-release 发布（待实车验收）
 当前结论：已修复 `PlaybackImageMemory.clearViews()` 在 `Activity.isDestroyed()` 时调用 `Glide.with()` 闪退（`P018`），同步加固 `playback/` 与相册适配器 Glide 加载/清理及 `AppShellController.restore()` 根容器显隐恢复；`1.6.6-test-11191152`（`versionCode = 84`）通过 `verify.ps1` `488` 测 `0` 失败、双风味 `0` Lint error 及 `emulator-5556` 分辨率/DPI 重建实测（`PID` 不变、0 崩溃）。
 
 ## 修复清单
@@ -19,9 +19,10 @@
 
 ## 最近记录
 
+- 2026-11-19 12:11:00 +08:00 | 推送 fork 并发布 GitHub Pre-release (`build17`) | 已将 `codex/e5-recording-startup-fix` 及 `build16`/`build17` 标签推送至 `johnwyatt041-commits/EVCam`，发布 `v1.6.6-test-11191152-build17` Pre-release 并校验 6 项资产字节数与 SHA256 一致（`https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11191152-build17`） | [STATUS](../STATUS.md)
 - 2026-11-19 12:07:00 +08:00 | 完成 `emulator-5556` `wm size`/`density` 重建实测与清场 | `1.6.6-test-11191152`（剔除 `arm64-v8a` 的 Release 测试副本）实测在回看照片/视频页及切回记录仪隐藏 `PlaybackHubFragment` 后执行 `2560x1600@240` ↔ `reset`，`MainActivity` 窗口重建后 `PID=2966` 全程存活、`AndroidRuntime:E` 为 `0`、回看容器正常保留；已关闭模拟器与 `5039` 并清空 `work/tmp/fix-p018-playback-glide-destroy/` | [PlaybackImageMemory.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackImageMemory.java)
 - 2026-11-19 11:59:00 +08:00 | 离线构建与双风味 Lint 通过 | `.\tools\verify.ps1` 通过（`488` 测 `0` 失败 `0` 跳过，日志 `work/verification/build-20261119-115902-723.log`），双风味 `Lint` `0` errors（`2076` warnings，日志 `work/verification/lint-20261119-1153.log`） | [PlaybackImageMemoryTest.java](../../app/src/test/java/com/kooo/evcam/playback/PlaybackImageMemoryTest.java)
 
 ## 下一步
 
-1. 随 **`build17`** 一并同步至 `johnwyatt041-commits/EVCam` 并发布 Pre-release，待银河 E5 实车按总清单联合验收。
+1. 下载 GitHub Pre-release 或本地 `outputs/` 中 **`build17`**（独立版 A / 共存版 B 先后覆盖，切勿并行），在银河 E5 实车按总清单联合验收。
