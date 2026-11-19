@@ -83,4 +83,28 @@ public class RemoteRecordingHandoffTest {
             verify(controller).clearSegmentDurationOverride();
         }
     }
+
+    @Test public void startupFailureResetsRemoteStateAndSendsReason() {
+        try (MockedStatic<CameraForegroundService> foreground = mockStatic(CameraForegroundService.class);
+             MockedStatic<FloatingWindowService> floating = mockStatic(FloatingWindowService.class)) {
+            RemoteCommandHandler.CameraController controller = mock(RemoteCommandHandler.CameraController.class);
+            TestHandler handler = spy(createHandler(controller));
+            when(controller.startRecording(anyString())).thenReturn(true);
+            RemoteCommandHandler.RecordingStateListener listener = mock(RemoteCommandHandler.RecordingStateListener.class);
+            handler.setRecordingStateListener(listener);
+
+            ChatIdentifier chat = new ChatIdentifier.FeishuChatId("test-fail");
+            handler.startRemoteRecording(chat, 30);
+            assertTrue(handler.isRemoteRecording());
+            assertTrue(handler.isPreparingRecording());
+
+            handler.onRecordingStartupFailure("missing all files access");
+
+            assertFalse(handler.isRemoteRecording());
+            assertFalse(handler.isPreparingRecording());
+            verify(listener).onRemoteRecordingStop();
+            verify(controller).clearSegmentDurationOverride();
+            verify(handler).sendError(chat, "missing all files access");
+        }
+    }
 }

@@ -278,6 +278,7 @@ public abstract class RemoteCommandHandler {
         String platformName = getPlatformName();
         AppLog.e(TAG, platformName + " 远程录制启动失败");
         isRemoteRecording = false;
+        currentContext = null;
         
         // 清除分段时长覆盖
         if (cameraController != null) {
@@ -291,6 +292,36 @@ public abstract class RemoteCommandHandler {
         }
         
         sendError(ctx.getChatId(), "录制启动失败");
+        returnToBackgroundIfNeeded();
+    }
+
+    /**
+     * 录制已进入启动队列但未写入有效数据即发生致命故障/超时时的异步收尾。
+     */
+    public void onRecordingStartupFailure(String reason) {
+        if (!isRemoteRecording && !isPreparingRecording) {
+            return;
+        }
+        String platformName = getPlatformName();
+        AppLog.e(TAG, platformName + " 远程录制启动中断: " + reason);
+        if (autoStopHandler != null && autoStopRunnable != null) {
+            autoStopHandler.removeCallbacks(autoStopRunnable);
+        }
+        pendingDurationSeconds = 0;
+        isPreparingRecording = false;
+        isRemoteRecording = false;
+        RecordingContext ctx = currentContext;
+        currentContext = null;
+        if (cameraController != null) {
+            cameraController.clearSegmentDurationOverride();
+        }
+        if (recordingStateListener != null) {
+            recordingStateListener.onRemoteRecordingStop();
+        }
+        if (ctx != null) {
+            String message = (reason != null && !reason.trim().isEmpty()) ? reason.trim() : "录制启动失败";
+            sendError(ctx.getChatId(), message);
+        }
         returnToBackgroundIfNeeded();
     }
     

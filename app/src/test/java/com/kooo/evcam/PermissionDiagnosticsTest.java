@@ -37,12 +37,17 @@ public class PermissionDiagnosticsTest {
         );
 
         PermissionDiagnostics.DiagnosticReport report = PermissionDiagnostics.evaluate(env);
-        assertEquals(2, report.coreTotal);
+        assertEquals(3, report.coreTotal); // camera + media + allFiles (>= R)
         assertEquals(0, report.coreReady);
         assertEquals(4, report.recommendedTotal); // notifications + overlay + accessibility + battery
         assertEquals(0, report.recommendedReady);
-        assertEquals(4, report.optionalTotal); // mic + allFiles + usageStats + readLogs
+        assertEquals(3, report.optionalTotal); // mic + usageStats + readLogs
         assertEquals(0, report.optionalReady);
+
+        PermissionDiagnostics.DiagnosticItem allFiles = findItem(report, PermissionDiagnostics.ItemId.ALL_FILES);
+        assertNotNull(allFiles);
+        assertEquals(PermissionDiagnostics.Priority.CORE, allFiles.priority);
+        assertEquals(PermissionDiagnostics.Status.DENIED, allFiles.status);
 
         assertTrue(report.missingRuntimePermissions.contains(Manifest.permission.CAMERA));
         assertTrue(report.missingRuntimePermissions.contains(Manifest.permission.READ_MEDIA_VIDEO));
@@ -50,7 +55,7 @@ public class PermissionDiagnosticsTest {
         assertTrue(report.missingRuntimePermissions.contains(Manifest.permission.RECORD_AUDIO));
         assertTrue(report.missingRuntimePermissions.contains(Manifest.permission.POST_NOTIFICATIONS));
         assertFalse(report.missingRuntimePermissions.contains(Manifest.permission.READ_EXTERNAL_STORAGE));
-        assertTrue(report.buildHeadlineText().contains("缺少 2 项核心必需权限"));
+        assertTrue(report.buildHeadlineText().contains("缺少 3 项核心必需权限"));
     }
 
     @Test
@@ -117,8 +122,8 @@ public class PermissionDiagnosticsTest {
         assertEquals(PermissionDiagnostics.Status.PARTIAL, acc.status);
         assertFalse(acc.isReady());
 
-        assertEquals(1, report.coreReady);
-        assertEquals(2, report.coreTotal);
+        assertEquals(2, report.coreReady); // camera + allFiles
+        assertEquals(3, report.coreTotal);
         assertEquals(3, report.recommendedReady);
         assertEquals(4, report.recommendedTotal);
         assertTrue(report.missingRuntimePermissions.contains(Manifest.permission.READ_MEDIA_VIDEO));
@@ -146,11 +151,13 @@ public class PermissionDiagnosticsTest {
         );
 
         PermissionDiagnostics.DiagnosticReport report = PermissionDiagnostics.evaluate(env);
-        assertEquals(2, report.coreReady);
-        assertEquals(2, report.coreTotal);
+        assertEquals(3, report.coreReady);
+        assertEquals(3, report.coreTotal);
         assertEquals(1, report.recommendedReady);
         assertEquals(3, report.recommendedTotal);
-        assertNotNull(findItem(report, PermissionDiagnostics.ItemId.ALL_FILES));
+        PermissionDiagnostics.DiagnosticItem allFiles = findItem(report, PermissionDiagnostics.ItemId.ALL_FILES);
+        assertNotNull(allFiles);
+        assertEquals(PermissionDiagnostics.Priority.CORE, allFiles.priority);
         assertTrue(report.buildHeadlineText().contains("建议补齐 2 项后台保障权限"));
     }
 

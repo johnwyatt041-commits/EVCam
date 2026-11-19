@@ -4,10 +4,12 @@ package com.kooo.evcam.camera;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.FileTransferManager;
+import com.kooo.evcam.RecordingStorageAccess;
 import com.kooo.evcam.StorageHelper;
 import android.content.Context;
 import android.graphics.SurfaceTexture;
 import android.os.Environment;
+import android.os.Looper;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
@@ -23,6 +25,7 @@ import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * 四路摄像头管理器
@@ -116,7 +119,11 @@ public class MultiCameraManager {
     private Set<String> currentEnabledCameras = null;  // 当前启用的摄像头集合
     private int rebuildAttemptCount = 0;  // 重建尝试次数（0=首次, 1=重建MediaRecorder, 2+=回退Codec）
     private static final int CODEC_FALLBACK_THRESHOLD = 2;  // 触发 Codec 回退的阈值
+    private static final int MAX_NON_AUTO_REBUILD_ATTEMPTS = CODEC_FALLBACK_THRESHOLD + 1;
     private volatile boolean isRebuildingRecording = false;  // 是否正在重建录制（防止多摄像头并发触发）
+    private final AtomicBoolean startupFailureReported = new AtomicBoolean(false);
+    private volatile boolean startupInSyncPrepare = false;
+    private volatile String lastStartupErrorMessage = null;
     private StatusCallback statusCallback;
     private PreviewSizeCallback previewSizeCallback;
     private PhotoSurfaceProvider photoSurfaceProvider;
@@ -134,6 +141,10 @@ public class MultiCameraManager {
         recordingStartupFailureCallback=callback;
     }
 
+    public String getLastStartupErrorMessage() {
+        return lastStartupErrorMessage;
+    }
+
     private String recordingStartupDiagnostics() {
         Map<String,Boolean> ready;
         synchronized (sessionLock) { ready=new LinkedHashMap<>(cameraSessionReady); }
@@ -145,11 +156,49 @@ public class MultiCameraManager {
     }
 
     private void failRecordingStartup(String detail) {
-        AppLog.e(TAG,detail);
+        failRecordingStartupWithUserMessage(detail, "录像启动超时，未收到有效视频数据，请在设置中保存日志");
+    }
+
+    private void failRecordingStartupWithUserMessage(String detail, String userMessage) {
+        startupWatchdog.cancel();
+        AppLog.e(TAG, detail);
+        if (!startupFailureReported.compareAndSet(false, true)) {
+            AppLog.d(TAG, "Suppressing duplicate startup failure notification: " + detail);
+            return;
+        }
+        if (lastStartupErrorMessage == null && detail != null) {
+            lastStartupErrorMessage = detail;
+        }
         // Clear the waiting UI immediately, even if a failing storage device is slow to close.
         stopRecording(false);
-        if (recordingStartupFailureCallback!=null) recordingStartupFailureCallback.accept(
-                "录像启动超时，未收到有效视频数据，请在设置中保存日志");
+        final String message = (userMessage == null || userMessage.isEmpty())
+                ? "录像启动失败，请在设置中保存日志"
+                : userMessage;
+        if (recordingStartupFailureCallback != null) {
+            Runnable notify = () -> recordingStartupFailureCallback.accept(message);
+            if (Looper.myLooper() == Looper.getMainLooper()) {
+                notify.run();
+            } else {
+                mainHandler.post(notify);
+            }
+        }
+    }
+
+    private void handleRecorderError(String mode, String cameraId, String error) {
+        AppLog.e(TAG, mode + " recording error for camera " + cameraId + ": " + error);
+        if (error != null && !error.isEmpty()) {
+            lastStartupErrorMessage = error;
+        }
+        if (startupInSyncPrepare || hasNotifiedFirstDataWritten) {
+            return;
+        }
+        if (RecordingStorageAccess.isFatalWriteErrorMessage(error)) {
+            boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+            String userMessage = RecordingStorageAccess.formatUserStartupFailureMessage(error, missingAllFiles);
+            failRecordingStartupWithUserMessage(
+                    "Fatal startup storage write failure (" + mode + ", camera=" + cameraId + "): " + error,
+                    userMessage);
+        }
     }
     private Runnable sessionTimeoutRunnable = null;
     private final Object sessionLock = new Object();  // 用于同步 session 配置计数
@@ -777,7 +826,7 @@ public class MultiCameraManager {
 
             @Override
             public void onRecordError(String cameraId, String error) {
-                AppLog.e(TAG, "Recording error for camera " + cameraId + ": " + error);
+                handleRecorderError("MediaRecorder", cameraId, error);
             }
 
             @Override
@@ -1033,6 +1082,8 @@ public class MultiCameraManager {
 
         // 重置首次写入通知标志（每次录制只通知一次）
         hasNotifiedFirstDataWritten = false;
+        startupFailureReported.set(false);
+        lastStartupErrorMessage = null;
 
         // 记录当前录制参数（用于 Watchdog 重建）
         currentRecordingTimestamp = timestamp;
@@ -1120,44 +1171,49 @@ public class MultiCameraManager {
         // 第一步：准备所有 MediaRecorder（但不启动）
         // 使用每个摄像头的实际预览分辨率，而不是硬编码的值
         boolean prepareSuccess = true;
-        for (String key : keys) {
-            SingleCamera camera = cameras.get(key);
-            VideoRecorder recorder = recorders.get(key);
-            if (camera == null || recorder == null) {
-                continue;
+        startupInSyncPrepare = true;
+        try {
+            for (String key : keys) {
+                SingleCamera camera = cameras.get(key);
+                VideoRecorder recorder = recorders.get(key);
+                if (camera == null || recorder == null) {
+                    continue;
+                }
+
+                // 获取摄像头的实际预览分辨率
+                Size previewSize = camera.getPreviewSize();
+                if (previewSize == null) {
+                    AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x720");
+                    previewSize = new Size(1280, 720);  // 回退到常见分辨率
+                }
+
+                // 计算码率（基于分辨率和帧率）
+                int bitrate = appConfig.getActualBitrate(
+                        previewSize.getWidth(),
+                        previewSize.getHeight(),
+                        targetFrameRate);
+
+                // 设置录制参数
+                recorder.setSegmentDuration(segmentDurationMs);
+                recorder.setVideoBitrate(bitrate);
+                recorder.setVideoFrameRate(targetFrameRate);
+                // 注：最大编码分辨率限制使用 VideoRecorder 内部默认值（4096x4096）
+
+                AppLog.d(TAG, "Recording params for " + key + ": " +
+                        previewSize.getWidth() + "x" + previewSize.getHeight() +
+                        " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate));
+
+                // 所有摄像头使用统一的时间戳：日期_时间_摄像头位置.mp4
+                String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
+                // 只准备 MediaRecorder，获取 Surface，使用预览的实际分辨率
+                AppLog.d(TAG, "Preparing recording for " + key + " with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
+                if (!recorder.prepareRecording(path, previewSize.getWidth(), previewSize.getHeight())) {
+                    prepareSuccess = false;
+                    break;
+                }
             }
-            
-            // 获取摄像头的实际预览分辨率
-            Size previewSize = camera.getPreviewSize();
-            if (previewSize == null) {
-                AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x720");
-                previewSize = new Size(1280, 720);  // 回退到常见分辨率
-            }
-            
-            // 计算码率（基于分辨率和帧率）
-            int bitrate = appConfig.getActualBitrate(
-                    previewSize.getWidth(), 
-                    previewSize.getHeight(), 
-                    targetFrameRate);
-            
-            // 设置录制参数
-            recorder.setSegmentDuration(segmentDurationMs);
-            recorder.setVideoBitrate(bitrate);
-            recorder.setVideoFrameRate(targetFrameRate);
-            // 注：最大编码分辨率限制使用 VideoRecorder 内部默认值（4096x4096）
-            
-            AppLog.d(TAG, "Recording params for " + key + ": " + 
-                    previewSize.getWidth() + "x" + previewSize.getHeight() + 
-                    " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate));
-            
-            // 所有摄像头使用统一的时间戳：日期_时间_摄像头位置.mp4
-            String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
-            // 只准备 MediaRecorder，获取 Surface，使用预览的实际分辨率
-            AppLog.d(TAG, "Preparing recording for " + key + " with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
-            if (!recorder.prepareRecording(path, previewSize.getWidth(), previewSize.getHeight())) {
-                prepareSuccess = false;
-                break;
-            }
+        } finally {
+            startupInSyncPrepare = false;
         }
 
         if (!prepareSuccess) {
@@ -1212,6 +1268,7 @@ public class MultiCameraManager {
         };
         mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
 
+        startupWatchdog.start();
         return true;
     }
     
@@ -1298,6 +1355,7 @@ public class MultiCameraManager {
             }
         } else {
             AppLog.e(TAG, "All cameras failed to start recording");
+            startupWatchdog.cancel();
             isRecording = false;
             // 清理所有录制器
             for (String key : keys) {
@@ -1357,6 +1415,8 @@ public class MultiCameraManager {
 
         // 重置首次写入通知标志（每次录制只通知一次）
         hasNotifiedFirstDataWritten = false;
+        startupFailureReported.set(false);
+        lastStartupErrorMessage = null;
 
         // 检查是否使用中转写入模式
         AppConfig appConfig = new AppConfig(context);
@@ -1429,168 +1489,177 @@ public class MultiCameraManager {
 
         // 为每个摄像头创建软编码录制器并准备
         boolean prepareSuccess = true;
-        if (RecordingExperiment.compositeDaily(keys)) {
-            try {
-                Map<String,Size> sourceSizes = new LinkedHashMap<>();
-                for (String key : keys) {
-                    SingleCamera camera = cameras.get(key);
-                    if (camera == null || camera.getPreviewSize() == null) throw new IllegalStateException("Missing camera size: "+key);
-                    sourceSizes.put(key,camera.getPreviewSize());
-                }
-                compositeRecording = CompositeRecording.prepare(sourceSizes,saveDir,timestamp,appConfig,
-                        segmentDurationMs,compositeCallback(),segmentTimestampProvider);
-                registerCodecRecorder("combined",compositeRecording.recorder);
-                for (String key : keys) {
-                    SingleCamera camera = cameras.get(key);
-                    camera.setRecordingFrameRate(targetFrameRate);
-                    camera.setRecordSurface(compositeRecording.surface(key),true);
-                }
-            } catch (Exception e) {
-                AppLog.e(TAG,"Composite recording could not be prepared",e);
-                prepareSuccess=false;
-            }
-        }
-        for (String key : RecordingExperiment.compositeDaily(keys) ? java.util.Collections.<String>emptyList() : keys) {
-            SingleCamera camera = cameras.get(key);
-            if (camera == null) {
-                continue;
-            }
-
-            // 获取摄像头的实际预览分辨率
-            Size previewSize = camera.getPreviewSize();
-            if (previewSize == null) {
-                AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x800");
-                previewSize = new Size(1280, 800);
-            }
-            
-            // 最大编码分辨率限制（H.264 编码器硬件限制，固定值）
-            final int MAX_ENCODE_SIZE = 4096;
-
-            // 计算调整后的编码分辨率（3.2 画面画质缩放 + 防止超大分辨率失败，保持偶数对齐）
-            ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
-            int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
-            int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
-            if (encodeWidth > MAX_ENCODE_SIZE || encodeHeight > MAX_ENCODE_SIZE) {
-                float widthRatio = (float) MAX_ENCODE_SIZE / encodeWidth;
-                float heightRatio = (float) MAX_ENCODE_SIZE / encodeHeight;
-                float scaleFactor = Math.min(widthRatio, heightRatio);
-                encodeWidth = ((int) (encodeWidth * scaleFactor) / 2) * 2;  // 确保是偶数
-                encodeHeight = ((int) (encodeHeight * scaleFactor) / 2) * 2;
-                if (encodeWidth < 2) encodeWidth = 2;
-                if (encodeHeight < 2) encodeHeight = 2;
-                AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " +
-                        previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " +
-                        encodeWidth + "x" + encodeHeight + " (max: " + MAX_ENCODE_SIZE + ")");
-            }
-
-            // 计算码率（基于调整后的分辨率和帧率）
-            int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, targetFrameRate);
-
-            // 创建软编码录制器（使用调整后的分辨率）
-            CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
-                    camera.getCameraId(),
-                    encodeWidth,
-                    encodeHeight
-            );
-
-            Size sourceSize = camera.getPreviewSize();
-            int srcW = sourceSize != null ? sourceSize.getWidth() : encodeWidth;
-            int srcH = sourceSize != null ? sourceSize.getHeight() : encodeHeight;
-            configureCodecRecorderCommon(
-                    key, camera, codecRecorder, segmentDurationMs,
-                    bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight, appConfig, adjConfig);
-
-            // 设置回调
-            codecRecorder.setCallback(new RecordCallback() {
-                @Override
-                public void onRecordStart(String cameraId) {
-                    AppLog.d(TAG, "Codec recording started for camera " + cameraId);
-                }
-
-                @Override
-                public void onRecordStop(String cameraId) {
-                    AppLog.d(TAG, "Codec recording stopped for camera " + cameraId);
-                }
-
-                @Override
-                public void onRecordError(String cameraId, String error) {
-                    AppLog.e(TAG, "Codec recording error for camera " + cameraId + ": " + error);
-                }
-
-                @Override
-                public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {
-                    AppLog.d(TAG, "Codec prepare segment switch for camera " + cameraId + " (current segment: " + currentSegmentIndex + ")");
-                    // 软编码录制器使用独立的 SurfaceTexture，不需要暂停 Camera CaptureSession
-                    // 但为了一致性，我们记录日志
-                }
-
-                @Override
-                public void onSegmentSwitch(String cameraId, int newSegmentIndex, String completedFilePath) {
-                    AppLog.d(TAG, "Codec segment switch for camera " + cameraId + " to segment " + newSegmentIndex);
-                    
-                    // 如果使用中转写入，将上一个分段的文件传输到最终目录
-                    if (useRelayWrite && finalSaveDir != null && newSegmentIndex > 0 && completedFilePath != null) {
-                        // 传输已完成的文件（由回调提供确切路径，避免传输正在录制的新文件）
-                        scheduleRelayTransfer(completedFilePath);
+        startupInSyncPrepare = true;
+        try {
+            if (RecordingExperiment.compositeDaily(keys)) {
+                try {
+                    Map<String,Size> sourceSizes = new LinkedHashMap<>();
+                    for (String key : keys) {
+                        SingleCamera camera = cameras.get(key);
+                        if (camera == null || camera.getPreviewSize() == null) throw new IllegalStateException("Missing camera size: "+key);
+                        sourceSizes.put(key,camera.getPreviewSize());
                     }
-                    
-                    // 通知分段切换回调（只通知一次，第一个触发的摄像头会通知）
-                    if (segmentSwitchCallback != null && newSegmentIndex > lastNotifiedSegmentIndex) {
-                        lastNotifiedSegmentIndex = newSegmentIndex;
-                        segmentSwitchCallback.onSegmentSwitch(newSegmentIndex);
+                    compositeRecording = CompositeRecording.prepare(sourceSizes,saveDir,timestamp,appConfig,
+                            segmentDurationMs,compositeCallback(),segmentTimestampProvider);
+                    registerCodecRecorder("combined",compositeRecording.recorder);
+                    for (String key : keys) {
+                        SingleCamera camera = cameras.get(key);
+                        camera.setRecordingFrameRate(targetFrameRate);
+                        camera.setRecordSurface(compositeRecording.surface(key),true);
                     }
+                } catch (Exception e) {
+                    AppLog.e(TAG,"Composite recording could not be prepared",e);
+                    String detail = RecordingStorageAccess.describeThrowable(e);
+                    if (!detail.isEmpty()) {
+                        lastStartupErrorMessage = detail;
+                    }
+                    prepareSuccess=false;
+                }
+            }
+            for (String key : RecordingExperiment.compositeDaily(keys) ? java.util.Collections.<String>emptyList() : keys) {
+                SingleCamera camera = cameras.get(key);
+                if (camera == null) {
+                    continue;
                 }
 
-                @Override
-                public void onCorruptedFilesDeleted(String cameraId, List<String> deletedFiles) {
-                    if (deletedFiles != null && !deletedFiles.isEmpty()) {
-                        AppLog.w(TAG, "Corrupted files deleted for codec camera " + cameraId + ": " + deletedFiles.size() + " file(s)");
-                        for (String file : deletedFiles) {
-                            AppLog.d(TAG, "  Deleted: " + file);
+                // 获取摄像头的实际预览分辨率
+                Size previewSize = camera.getPreviewSize();
+                if (previewSize == null) {
+                    AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x800");
+                    previewSize = new Size(1280, 800);
+                }
+
+                // 最大编码分辨率限制（H.264 编码器硬件限制，固定值）
+                final int MAX_ENCODE_SIZE = 4096;
+
+                // 计算调整后的编码分辨率（3.2 画面画质缩放 + 防止超大分辨率失败，保持偶数对齐）
+                ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
+                int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
+                int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
+                if (encodeWidth > MAX_ENCODE_SIZE || encodeHeight > MAX_ENCODE_SIZE) {
+                    float widthRatio = (float) MAX_ENCODE_SIZE / encodeWidth;
+                    float heightRatio = (float) MAX_ENCODE_SIZE / encodeHeight;
+                    float scaleFactor = Math.min(widthRatio, heightRatio);
+                    encodeWidth = ((int) (encodeWidth * scaleFactor) / 2) * 2;  // 确保是偶数
+                    encodeHeight = ((int) (encodeHeight * scaleFactor) / 2) * 2;
+                    if (encodeWidth < 2) encodeWidth = 2;
+                    if (encodeHeight < 2) encodeHeight = 2;
+                    AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " +
+                            previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " +
+                            encodeWidth + "x" + encodeHeight + " (max: " + MAX_ENCODE_SIZE + ")");
+                }
+
+                // 计算码率（基于调整后的分辨率和帧率）
+                int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, targetFrameRate);
+
+                // 创建软编码录制器（使用调整后的分辨率）
+                CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
+                        camera.getCameraId(),
+                        encodeWidth,
+                        encodeHeight
+                );
+
+                Size sourceSize = camera.getPreviewSize();
+                int srcW = sourceSize != null ? sourceSize.getWidth() : encodeWidth;
+                int srcH = sourceSize != null ? sourceSize.getHeight() : encodeHeight;
+                configureCodecRecorderCommon(
+                        key, camera, codecRecorder, segmentDurationMs,
+                        bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight, appConfig, adjConfig);
+
+                // 设置回调
+                codecRecorder.setCallback(new RecordCallback() {
+                    @Override
+                    public void onRecordStart(String cameraId) {
+                        AppLog.d(TAG, "Codec recording started for camera " + cameraId);
+                    }
+
+                    @Override
+                    public void onRecordStop(String cameraId) {
+                        AppLog.d(TAG, "Codec recording stopped for camera " + cameraId);
+                    }
+
+                    @Override
+                    public void onRecordError(String cameraId, String error) {
+                        handleRecorderError("Codec", cameraId, error);
+                    }
+
+                    @Override
+                    public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {
+                        AppLog.d(TAG, "Codec prepare segment switch for camera " + cameraId + " (current segment: " + currentSegmentIndex + ")");
+                        // 软编码录制器使用独立的 SurfaceTexture，不需要暂停 Camera CaptureSession
+                        // 但为了一致性，我们记录日志
+                    }
+
+                    @Override
+                    public void onSegmentSwitch(String cameraId, int newSegmentIndex, String completedFilePath) {
+                        AppLog.d(TAG, "Codec segment switch for camera " + cameraId + " to segment " + newSegmentIndex);
+
+                        // 如果使用中转写入，将上一个分段的文件传输到最终目录
+                        if (useRelayWrite && finalSaveDir != null && newSegmentIndex > 0 && completedFilePath != null) {
+                            // 传输已完成的文件（由回调提供确切路径，避免传输正在录制的新文件）
+                            scheduleRelayTransfer(completedFilePath);
                         }
-                        // 通知 MainActivity 显示弹窗
-                        if (corruptedFilesCallback != null) {
-                            mainHandler.post(() -> corruptedFilesCallback.onCorruptedFilesDeleted(deletedFiles));
+
+                        // 通知分段切换回调（只通知一次，第一个触发的摄像头会通知）
+                        if (segmentSwitchCallback != null && newSegmentIndex > lastNotifiedSegmentIndex) {
+                            lastNotifiedSegmentIndex = newSegmentIndex;
+                            segmentSwitchCallback.onSegmentSwitch(newSegmentIndex);
                         }
                     }
-                }
 
-                @Override
-                public void onRecordingRebuildRequested(String cameraId, String reason) {
-                    // CodecVideoRecorder 通常不会触发此回调，但为了接口完整性实现
-                    AppLog.e(TAG, "Codec recording rebuild requested for camera " + cameraId + ", reason: " + reason);
-                    // Codec 模式不需要回退，记录日志即可
-                }
-
-                @Override
-                public void onFirstDataWritten(String cameraId) {
-                    AppLog.d(TAG, "Codec first data written for camera " + cameraId);
-                    startupWatchdog.cancel();
-                    // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
-                    if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
-                        hasNotifiedFirstDataWritten = true;
-                        AppLog.d(TAG, "Notifying external: first data written, recording truly started");
-                        mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
+                    @Override
+                    public void onCorruptedFilesDeleted(String cameraId, List<String> deletedFiles) {
+                        if (deletedFiles != null && !deletedFiles.isEmpty()) {
+                            AppLog.w(TAG, "Corrupted files deleted for codec camera " + cameraId + ": " + deletedFiles.size() + " file(s)");
+                            for (String file : deletedFiles) {
+                                AppLog.d(TAG, "  Deleted: " + file);
+                            }
+                            // 通知 MainActivity 显示弹窗
+                            if (corruptedFilesCallback != null) {
+                                mainHandler.post(() -> corruptedFilesCallback.onCorruptedFilesDeleted(deletedFiles));
+                            }
+                        }
                     }
+
+                    @Override
+                    public void onRecordingRebuildRequested(String cameraId, String reason) {
+                        // CodecVideoRecorder 通常不会触发此回调，但为了接口完整性实现
+                        AppLog.e(TAG, "Codec recording rebuild requested for camera " + cameraId + ", reason: " + reason);
+                        // Codec 模式不需要回退，记录日志即可
+                    }
+
+                    @Override
+                    public void onFirstDataWritten(String cameraId) {
+                        AppLog.d(TAG, "Codec first data written for camera " + cameraId);
+                        startupWatchdog.cancel();
+                        // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
+                        if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
+                            hasNotifiedFirstDataWritten = true;
+                            AppLog.d(TAG, "Notifying external: first data written, recording truly started");
+                            mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
+                        }
+                    }
+                });
+
+                // 准备录制
+                String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
+                AppLog.d(TAG, "Preparing codec recording for " + key + " with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
+
+                android.graphics.SurfaceTexture surfaceTexture = codecRecorder.prepareRecording(path);
+                if (surfaceTexture == null) {
+                    AppLog.e(TAG, "Failed to prepare codec recording for " + key);
+                    prepareSuccess = false;
+                    break;
                 }
-            });
 
-            // 准备录制
-            String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
-            AppLog.d(TAG, "Preparing codec recording for " + key + " with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
+                // 将 SurfaceTexture 设置给 Camera（通过 Surface）
+                android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
+                camera.setRecordSurface(recordSurface, true);  // Codec 模式
 
-            android.graphics.SurfaceTexture surfaceTexture = codecRecorder.prepareRecording(path);
-            if (surfaceTexture == null) {
-                AppLog.e(TAG, "Failed to prepare codec recording for " + key);
-                prepareSuccess = false;
-                break;
+                registerCodecRecorder(key, codecRecorder);
             }
-
-            // 将 SurfaceTexture 设置给 Camera（通过 Surface）
-            android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
-            camera.setRecordSurface(recordSurface, true);  // Codec 模式
-
-            registerCodecRecorder(key, codecRecorder);
+        } finally {
+            startupInSyncPrepare = false;
         }
 
         if (!prepareSuccess) {
@@ -1646,6 +1715,10 @@ public class MultiCameraManager {
 
     private void executeCodecRecordingStart(List<String> keys, int stableAttempt, boolean forcedReopen) {
         AppLog.d(TAG, "Attempting to start codec recording...");
+        if (startupFailureReported.get()) {
+            AppLog.w(TAG, "Startup already aborted, skipping delayed executeCodecRecordingStart");
+            return;
+        }
         if (isRecording) {
             AppLog.w(TAG, "Codec recording already active, skipping duplicate start");
             synchronized (sessionLock) {
@@ -1704,8 +1777,10 @@ public class MultiCameraManager {
                             // 重新准备只为这些摄像头
                             reprepareCodecRecordingForCameras(openedCameras);
                         } else {
-                            AppLog.e(TAG, "No cameras opened after force reopen");
-                            isRecording = false;
+                            clearSessionPendingState();
+                            failRecordingStartupWithUserMessage(
+                                    "No cameras opened after force reopen",
+                                    "录像启动失败，未检测到可用摄像头，请重试");
                         }
                     }
                 }, 2000);  // 增加等待时间到2秒，确保会话配置完成
@@ -1762,15 +1837,15 @@ public class MultiCameraManager {
             isRecording = true;
             AppLog.d(TAG, activeCount + " camera(s) started codec recording successfully");
         } else {
-            AppLog.e(TAG, "Failed to start codec recording on all cameras");
-            isRecording = false;
-            closeCompositeInputs();
-            for (CodecVideoRecorder recorder : codecRecorders.values()) {
-                recorder.release();
-            }
-            codecRecorders.clear();
+            failRecordingStartupWithUserMessage(
+                    "Failed to start codec recording on all cameras",
+                    "录像启动失败，请重试");
         }
 
+        clearSessionPendingState();
+    }
+
+    private void clearSessionPendingState() {
         synchronized (sessionLock) {
             pendingRecordingStart = null;
             sessionConfiguredCount = 0;
@@ -2162,7 +2237,13 @@ public class MultiCameraManager {
                         
                         AppLog.d(TAG, "Restarting recording with Codec mode, new timestamp: " + newTimestamp);
                         useCodecRecording = true;  // 切换到 Codec 模式
-                        startCodecRecording(newTimestamp, savedEnabledCameras);
+                        if (!startCodecRecording(newTimestamp, savedEnabledCameras)) {
+                            boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                            failRecordingStartupWithUserMessage(
+                                    "Codec fallback prepare failed: " + lastStartupErrorMessage,
+                                    RecordingStorageAccess.formatUserStartupFailureMessage(lastStartupErrorMessage, missingAllFiles));
+                            return;
+                        }
                         
                         // 通知外部时间戳已更新（用于远程录制查找文件）
                         if (timestampUpdateCallback != null) {
@@ -2178,14 +2259,29 @@ public class MultiCameraManager {
                     }
                 }, 500);
             } else {
-                // 非自动模式，只能再次尝试 MediaRecorder
-                AppLog.w(TAG, "Recording mode is '" + recordingMode + "' (not auto), retrying MediaRecorder...");
+                if (rebuildAttemptCount > MAX_NON_AUTO_REBUILD_ATTEMPTS) {
+                    AppLog.e(TAG, "Rebuild attempt " + rebuildAttemptCount + " exceeded limit in mode=" + recordingMode);
+                    failRecordingStartupWithUserMessage(
+                            "MediaRecorder rebuild exhausted (" + rebuildAttemptCount + ") in mode=" + recordingMode,
+                            "录像启动失败，请切换录像模式或在设置中保存日志");
+                    isRebuildingRecording = false;
+                    return;
+                }
+                // 非自动模式，只能有限次重试 MediaRecorder
+                AppLog.w(TAG, "Recording mode is '" + recordingMode + "' (not auto), retrying MediaRecorder ("
+                        + rebuildAttemptCount + "/" + MAX_NON_AUTO_REBUILD_ATTEMPTS + ")...");
                 
                 mainHandler.postDelayed(() -> {
                     try {
                         String newTimestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
                         AppLog.d(TAG, "Retrying MediaRecorder recording, new timestamp: " + newTimestamp);
-                        startMediaRecorderRecording(newTimestamp, savedEnabledCameras);
+                        if (!startMediaRecorderRecording(newTimestamp, savedEnabledCameras)) {
+                            boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                            failRecordingStartupWithUserMessage(
+                                    "MediaRecorder rebuild prepare failed: " + lastStartupErrorMessage,
+                                    RecordingStorageAccess.formatUserStartupFailureMessage(lastStartupErrorMessage, missingAllFiles));
+                            return;
+                        }
                         
                         // 通知外部时间戳已更新（用于远程录制查找文件）
                         if (timestampUpdateCallback != null) {
@@ -2206,7 +2302,13 @@ public class MultiCameraManager {
                     String newTimestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
                     
                     AppLog.d(TAG, "Restarting recording with MediaRecorder, new timestamp: " + newTimestamp);
-                    startMediaRecorderRecording(newTimestamp, savedEnabledCameras);
+                    if (!startMediaRecorderRecording(newTimestamp, savedEnabledCameras)) {
+                        boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                        failRecordingStartupWithUserMessage(
+                                "MediaRecorder rebuild prepare failed: " + lastStartupErrorMessage,
+                                RecordingStorageAccess.formatUserStartupFailureMessage(lastStartupErrorMessage, missingAllFiles));
+                        return;
+                    }
                     
                     // 通知外部时间戳已更新（用于远程录制查找文件）
                     if (timestampUpdateCallback != null) {
@@ -2477,7 +2579,7 @@ public class MultiCameraManager {
         return new RecordCallback() {
             @Override public void onRecordStart(String id) {}
             @Override public void onRecordStop(String id) {}
-            @Override public void onRecordError(String id,String error) { AppLog.e(TAG,"Composite: "+error); }
+            @Override public void onRecordError(String id,String error) { handleRecorderError("Composite", id, error); }
             @Override public void onPrepareSegmentSwitch(String id,int index) {}
             @Override public void onSegmentSwitch(String id,int index,String path) {
                 if (useRelayWrite && finalSaveDir!=null && path!=null) scheduleRelayTransfer(path);

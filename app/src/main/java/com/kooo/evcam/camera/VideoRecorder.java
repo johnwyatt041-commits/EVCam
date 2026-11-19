@@ -2,6 +2,7 @@ package com.kooo.evcam.camera;
 
 
 import com.kooo.evcam.AppLog;
+import com.kooo.evcam.RecordingStorageAccess;
 import android.media.MediaRecorder;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -362,6 +363,9 @@ public class VideoRecorder {
                     break;
             }
             AppLog.e(TAG, "Camera " + cameraId + " MediaRecorder ERROR: " + error + " (what=" + what + ", extra=" + extra + ")");
+            if (callback != null) {
+                callback.onRecordError(cameraId, "MediaRecorder error: " + error + " (what=" + what + ", extra=" + extra + ")");
+            }
         });
         
         mediaRecorder.setVideoSource(MediaRecorder.VideoSource.SURFACE);
@@ -443,7 +447,8 @@ public class VideoRecorder {
             currentFilePath = null;
             segmentIndex = 0;
             if (callback != null) {
-                callback.onRecordError(cameraId, e.getMessage());
+                String detail = RecordingStorageAccess.describeThrowable(e);
+                callback.onRecordError(cameraId, detail.isEmpty() ? e.getMessage() : detail);
             }
             return false;
         }
@@ -542,7 +547,8 @@ public class VideoRecorder {
                 state = RecordingState.IDLE;
             }
             if (callback != null) {
-                callback.onRecordError(cameraId, e.getMessage());
+                String detail = RecordingStorageAccess.describeThrowable(e);
+                callback.onRecordError(cameraId, detail.isEmpty() ? e.getMessage() : detail);
             }
             return false;
         }

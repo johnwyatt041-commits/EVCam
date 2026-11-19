@@ -380,11 +380,11 @@ public final class PermissionDiagnostics {
             items.add(new DiagnosticItem(
                     ItemId.ALL_FILES,
                     Category.SPECIAL,
-                    Priority.OPTIONAL,
+                    Priority.CORE,
                     "所有文件访问权限",
-                    "将录像写入 U 盘公共目录及跨目录局域网分享/删除管理",
+                    "将录像与照片写入 DCIM 公共目录和 U 盘，并支持跨目录管理",
                     env.allFilesGranted ? Status.GRANTED : Status.DENIED,
-                    env.allFilesGranted ? "已授权 ✓" : "未授权 - 无法直接读写外接 U 盘目录",
+                    env.allFilesGranted ? "已授权 ✓" : "未授权 - Android 11+ 无法写入公共录像目录及 U 盘",
                     env.allFilesGranted ? "已授权" : "去授权",
                     ActionKind.ALL_FILES_SETTINGS,
                     Collections.emptyList()

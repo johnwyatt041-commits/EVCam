@@ -43,8 +43,14 @@ try {
     if (-not $Online) { $gradleArguments += '--offline' }
     Push-Location $repositoryRoot
     try {
-        & (Join-Path $repositoryRoot 'gradlew.bat') @gradleArguments *> $logPath
-        $buildExitCode = $LASTEXITCODE
+        $prevErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & (Join-Path $repositoryRoot 'gradlew.bat') @gradleArguments *> $logPath
+            $buildExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $prevErrorAction
+        }
     } finally {
         Pop-Location
     }

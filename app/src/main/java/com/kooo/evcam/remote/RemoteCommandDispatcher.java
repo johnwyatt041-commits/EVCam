@@ -226,6 +226,17 @@ public class RemoteCommandDispatcher {
             }
         }
     }
+
+    /**
+     * 通知录制启动致命故障或超时，清理远程状态并回复失败原因
+     */
+    public void onRecordingStartupFailure(String reason) {
+        for (RemoteCommandHandler handler : handlers.values()) {
+            if (handler.isRemoteRecording() || handler.isPreparingRecording()) {
+                handler.onRecordingStartupFailure(reason);
+            }
+        }
+    }
     
     // ==================== 辅助方法 ====================
     

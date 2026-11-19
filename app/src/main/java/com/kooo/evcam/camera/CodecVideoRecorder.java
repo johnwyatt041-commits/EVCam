@@ -11,6 +11,7 @@ import android.os.Process;
 import android.view.Surface;
 
 import com.kooo.evcam.AppLog;
+import com.kooo.evcam.RecordingStorageAccess;
 
 import java.io.File;
 import java.io.IOException;
@@ -138,7 +139,7 @@ public class CodecVideoRecorder {
     private HandlerThread segmentThread;
     private Handler segmentHandler;
     
-    private Runnable segmentRunnable;
+    private volatile Runnable segmentRunnable;
     private int segmentIndex = 0;
     private String saveDirectory;
     private String cameraPosition;
@@ -146,20 +147,20 @@ public class CodecVideoRecorder {
     private long lastFileSize = 0;
     private static final long FILE_SIZE_CHECK_INTERVAL_MS = 5000;
     private static final long FIRST_CHECK_DELAY_MS = 500;  // 首次检查延迟（更快检测首次写入）
-    private Runnable fileSizeCheckRunnable;
+    private volatile Runnable fileSizeCheckRunnable;
     private long recordedFrameCount = 0;
     private List<String> recordedFilePaths = new ArrayList<>();  // 本次录制的所有文件路径
     
     // 首次写入检测（与 VideoRecorder 保持一致）
     private static final long FIRST_WRITE_TIMEOUT_MS = 10000;  // 首次写入超时（10秒）
     private volatile boolean hasFirstWrite = false;  // 是否已有首次写入
-    private Runnable firstWriteTimeoutRunnable;  // 首次写入超时检查任务
+    private volatile Runnable firstWriteTimeoutRunnable;  // 首次写入超时检查任务
     
     // 快速恢复机制
     private static final long RECOVERY_RETRY_INTERVAL_MS = 5000;  // 恢复重试间隔：5秒
     private static final int MAX_RECOVERY_ATTEMPTS = 60;  // 最大重试次数（5秒 × 60 = 5分钟内重试）
     private int recoveryAttempts = 0;  // 当前重试次数
-    private Runnable recoveryRunnable;  // 恢复重试任务
+    private volatile Runnable recoveryRunnable;  // 恢复重试任务
 
     // 编码器健康检查
     private static final long ENCODER_HEALTH_CHECK_INTERVAL_MS = 3000;  // 健康检查间隔：3秒
@@ -167,10 +168,12 @@ public class CodecVideoRecorder {
     private volatile long lastEncoderOutputTime = 0;  // 最后一次编码器输出时间
     private volatile int framesWithoutEncoderOutput = 0;  // 无编码器输出的连续帧数
     private volatile boolean encoderHealthy = true;  // 编码器是否健康
+    private volatile boolean fatalWriteError = false;  // 首次写入前的致命存储/权限错误（不可通过重建编码器恢复）
+    private volatile String fatalWriteErrorMessage = null;
     private long maxGlUs;
     private long totalGlUs;
     private long codecPolls, totalCodecPollUs, maxCodecPollUs;
-    private Runnable healthCheckRunnable;  // 健康检查任务
+    private volatile Runnable healthCheckRunnable;  // 健康检查任务
 
     // 回调
     private RecordCallback callback;
@@ -422,6 +425,8 @@ public class CodecVideoRecorder {
 
         // 重置健康检查状态
         this.encoderHealthy = true;
+        this.fatalWriteError = false;
+        this.fatalWriteErrorMessage = null;
         this.framesWithoutEncoderOutput = 0;
         this.lastEncoderOutputTime = System.currentTimeMillis();
 
@@ -658,6 +663,7 @@ public class CodecVideoRecorder {
      */
     public void stopRecording() {
         stopRequested = true;
+        cancelMonitoringTimers();
         if (!isRecording.get()) {
             AppLog.w(TAG, "Camera " + cameraId + " Not recording");
             return;
@@ -669,31 +675,7 @@ public class CodecVideoRecorder {
         isRecording.set(false);
         segmentRequested = false;
         if (drainHandler != null) drainHandler.removeCallbacks(delayedDrain);
-
-        // 取消所有定时器和任务
-        if (segmentRunnable != null) {
-            segmentHandler.removeCallbacks(segmentRunnable);
-            segmentRunnable = null;
-        }
-        if (fileSizeCheckRunnable != null) {
-            segmentHandler.removeCallbacks(fileSizeCheckRunnable);
-            fileSizeCheckRunnable = null;
-        }
-        // 取消首次写入超时检查
-        cancelFirstWriteTimeout();
-        
-        // 取消恢复重试任务
-        if (recoveryRunnable != null) {
-            segmentHandler.removeCallbacks(recoveryRunnable);
-            recoveryRunnable = null;
-        }
         recoveryAttempts = 0;
-
-        // 取消健康检查任务
-        if (healthCheckRunnable != null) {
-            segmentHandler.removeCallbacks(healthCheckRunnable);
-            healthCheckRunnable = null;
-        }
 
         // 在编码线程上执行停止操作
         if (encoderHandler != null) {
@@ -1014,17 +996,66 @@ public class CodecVideoRecorder {
      * 创建 MediaMuxer
      */
     private void createMuxer(String filePath) throws IOException {
-        muxer = new AsyncMuxerWriter(filePath, error -> {
-            encoderHealthy = false;
-            AppLog.e(TAG, "Camera " + cameraId + " Writer failed; incomplete video remains .pending", error);
-            if (callback != null) callback.onRecordError(cameraId, "Video writer failed: " + error.getMessage());
-        });
+        muxer = new AsyncMuxerWriter(filePath, this::handleMuxerFailure);
         videoTrackIndex = -1;
         muxerStarted = false;
         muxerClock.reset();
         encodedOutputFrameCount = 0;
 
         AppLog.d(TAG, "Camera " + cameraId + " Muxer created: " + filePath);
+    }
+
+    /** 处理写入器异常；首次写入前若遇到权限/只读/满盘等致命存储错误，立即中止无意义的重建循环。 */
+    void handleMuxerFailure(Throwable error) {
+        encoderHealthy = false;
+        AppLog.e(TAG, "Camera " + cameraId + " Writer failed; incomplete video remains .pending", error);
+        String detail = RecordingStorageAccess.describeThrowable(error);
+        boolean fatal = !hasFirstWrite && RecordingStorageAccess.isFatalWriteError(error);
+        if (fatal) {
+            fatalWriteError = true;
+            fatalWriteErrorMessage = detail;
+            stopRequested = true;
+            isRecording.set(false);
+            cancelMonitoringTimers();
+            if (drainHandler != null) {
+                drainHandler.removeCallbacks(delayedDrain);
+            }
+            AppLog.e(TAG, "Camera " + cameraId + " Fatal startup write error, aborting rebuild: " + detail);
+        }
+        if (callback != null) {
+            String message = detail.isEmpty() ? "unknown error" : detail;
+            callback.onRecordError(cameraId, fatal ? message : ("Video writer failed: " + message));
+        }
+    }
+
+    private void cancelMonitoringTimers() {
+        Handler handler = segmentHandler;
+        Runnable segment = segmentRunnable;
+        segmentRunnable = null;
+        Runnable sizeCheck = fileSizeCheckRunnable;
+        fileSizeCheckRunnable = null;
+        Runnable firstWrite = firstWriteTimeoutRunnable;
+        firstWriteTimeoutRunnable = null;
+        Runnable recovery = recoveryRunnable;
+        recoveryRunnable = null;
+        Runnable health = healthCheckRunnable;
+        healthCheckRunnable = null;
+        if (handler == null) {
+            return;
+        }
+        if (segment != null) handler.removeCallbacks(segment);
+        if (sizeCheck != null) handler.removeCallbacks(sizeCheck);
+        if (firstWrite != null) handler.removeCallbacks(firstWrite);
+        if (recovery != null) handler.removeCallbacks(recovery);
+        if (health != null) handler.removeCallbacks(health);
+    }
+
+    public boolean hasFatalWriteError() {
+        return fatalWriteError;
+    }
+
+    public String getFatalWriteErrorMessage() {
+        return fatalWriteErrorMessage;
     }
 
     // GL submission and output draining have separate owning threads.
@@ -1126,10 +1157,12 @@ public class CodecVideoRecorder {
 
     public String startupDiagnostics() {
         AsyncMuxerWriter writer = muxer;
-        return "camera=" + cameraId + ", started=" + isRecording.get() + ", inputCallbacks=" + inputFrameCallbacks
+        String base = "camera=" + cameraId + ", started=" + isRecording.get() + ", inputCallbacks=" + inputFrameCallbacks
                 + ", submitted=" + recordedFrameCount + ", encoded=" + encodedOutputFrameCount
                 + ", muxerStarted=" + muxerStarted + ", written=" + (writer == null ? 0 : writer.getWrittenSamples())
-                + ", healthy=" + encoderHealthy + ", e5Compatibility=" + e5Compatibility;
+                + ", healthy=" + encoderHealthy + ", fatalWriteError=" + fatalWriteError
+                + ", e5Compatibility=" + e5Compatibility;
+        return fatalWriteErrorMessage != null ? base + ", fatalDetail=" + fatalWriteErrorMessage : base;
     }
 
     /**
@@ -1203,13 +1236,16 @@ public class CodecVideoRecorder {
      * 调度快速恢复重试
      */
     private void scheduleRecoveryRetry() {
+        if (stopRequested || isReleased || fatalWriteError || segmentHandler == null) {
+            return;
+        }
         // 取消之前的恢复任务
         if (recoveryRunnable != null) {
             segmentHandler.removeCallbacks(recoveryRunnable);
         }
         
         recoveryRunnable = () -> {
-            if (!isReleased && encoderHandler != null) {
+            if (!isReleased && !stopRequested && !fatalWriteError && encoderHandler != null) {
                 AppLog.d(TAG, "Camera " + cameraId + " Recovery retry triggered");
                 // 在编码线程上执行恢复
                 encoderHandler.post(() -> attemptRecovery());
@@ -1227,7 +1263,7 @@ public class CodecVideoRecorder {
     }
 
     private void attemptRecoveryLocked() {
-        if (stopRequested || isReleased) return;
+        if (stopRequested || isReleased || fatalWriteError) return;
         AppLog.d(TAG, "Camera " + cameraId + " Attempting recovery (attempt " + recoveryAttempts + "/" + MAX_RECOVERY_ATTEMPTS + ")");
         
         boolean recoverySuccess = false;
@@ -1316,7 +1352,7 @@ public class CodecVideoRecorder {
         }
 
         healthCheckRunnable = () -> {
-            if (!isRecording.get() || isReleased || stopRequested) {
+            if (!isRecording.get() || isReleased || stopRequested || fatalWriteError) {
                 return;
             }
 
@@ -1363,7 +1399,7 @@ public class CodecVideoRecorder {
     }
 
     private void rebuildEncoderLocked() {
-        if (stopRequested || isReleased) return;
+        if (stopRequested || isReleased || fatalWriteError) return;
         AppLog.d(TAG, "Camera " + cameraId + " Rebuilding encoder due to health check failure");
 
         // 暂停录制
@@ -1530,7 +1566,7 @@ public class CodecVideoRecorder {
         cancelFirstWriteTimeout();
 
         firstWriteTimeoutRunnable = () -> {
-            if (isRecording.get() && !hasFirstWrite) {
+            if (isRecording.get() && !hasFirstWrite && !stopRequested && !fatalWriteError) {
                 AppLog.e(TAG, "Camera " + cameraId + " FIRST WRITE TIMEOUT: No data written in " + (FIRST_WRITE_TIMEOUT_MS / 1000) + " seconds");
                 // 触发编码器重建（通过健康检查机制处理）
                 encoderHealthy = false;

@@ -226,6 +226,8 @@ public class MainActivity extends AppCompatActivity implements
     private boolean wasManualRecordingBeforeRemote = false;  // 远程录制前是否有手动录制在进行
     private int pendingRemoteDurationSeconds = 0;  // 待启动的远程录制时长（等待首次写入后启动定时器）
     private boolean isPreparingRecording = false;  // 是否正在准备录制（等待首次写入）
+    private long lastStorageFailureToastMs = 0L;
+    private static final long STORAGE_FAILURE_TOAST_COOLDOWN_MS = 60_000L;
 
     // 远程查看服务相关（移到 Activity 级别）
 
@@ -1597,6 +1599,12 @@ public class MainActivity extends AppCompatActivity implements
             @Override
             public boolean startRecording(String timestamp) {
                 if (cameraManager != null) {
+                    RecordingStorageAccess.ProbeResult storageProbe =
+                            StorageHelper.probeRecordingWritable(MainActivity.this);
+                    if (!storageProbe.writable) {
+                        AppLog.e(TAG, "Remote recording preflight failed: " + storageProbe.errorDetail);
+                        return false;
+                    }
                     return cameraManager.startRecording(timestamp);
                 }
                 return false;
@@ -2223,20 +2231,7 @@ public class MainActivity extends AppCompatActivity implements
             });
 
             // 录制状态回调（监听录制成功或失败）
-            cameraManager.setRecordingStatusCallback((activeCameras, failedCameras) -> {
-                AppLog.d(TAG, "录制状态回调: 成功=" + activeCameras.size() + ", 失败=" + failedCameras.size());
-                if (activeCameras.isEmpty()) {
-                    // 所有摄像头都启动失败
-                    runOnUiThread(() -> {
-                        AppLog.e(TAG, "所有摄像头启动录制失败");
-                        isRecording = false;
-                        isAutoRecordingPending = false;
-                        isPreparingRecording = false;
-                        hidePreparingIndicator();
-                        Toast.makeText(this, "录制启动失败，请重试", Toast.LENGTH_SHORT).show();
-                    });
-                }
-            });
+            cameraManager.setRecordingStatusCallback(this::handleRecordingStatusUpdate);
 
             // 首次数据写入回调（录制计时器依赖此回调）
             cameraManager.setFirstDataWrittenCallback(() -> {
@@ -2371,20 +2366,7 @@ public class MainActivity extends AppCompatActivity implements
         });
 
         // 设置录制状态回调（监听录制成功或失败）
-        cameraManager.setRecordingStatusCallback((activeCameras, failedCameras) -> {
-            AppLog.d(TAG, "录制状态回调: 成功=" + activeCameras.size() + ", 失败=" + failedCameras.size());
-            if (activeCameras.isEmpty()) {
-                // 所有摄像头都启动失败
-                runOnUiThread(() -> {
-                    AppLog.e(TAG, "所有摄像头启动录制失败");
-                    isRecording = false;
-                    isAutoRecordingPending = false;
-                    isPreparingRecording = false;
-                    hidePreparingIndicator();
-                    Toast.makeText(this, "录制启动失败，请重试", Toast.LENGTH_SHORT).show();
-                });
-            }
-        });
+        cameraManager.setRecordingStatusCallback(this::handleRecordingStatusUpdate);
 
         // 设置首次数据写入回调
         cameraManager.setFirstDataWrittenCallback(() -> {
@@ -3143,8 +3125,13 @@ public class MainActivity extends AppCompatActivity implements
             }
             
             AppLog.d(TAG, "主题切换后自动恢复录制...");
-            startRecording();
-            Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+            if (startRecording()) {
+                Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+            } else {
+                shouldResumeRecordingAfterRecreate = false;
+                savedRecordingStartTime = 0;
+                savedSegmentCount = 1;
+            }
             // 注意：shouldResumeRecordingAfterRecreate 在首次数据写入回调中重置，
             // 以便计时器使用保存的时间
         }, 2000);  // 延迟2秒
@@ -3197,8 +3184,9 @@ public class MainActivity extends AppCompatActivity implements
             }
             
             AppLog.d(TAG, "自动开始录制...");
-            startRecording();
-            Toast.makeText(this, "已自动开始录制", Toast.LENGTH_SHORT).show();
+            if (startRecording()) {
+                Toast.makeText(this, "已自动开始录制", Toast.LENGTH_SHORT).show();
+            }
         }, 2000);  // 延迟2秒
     }
     
@@ -3285,8 +3273,9 @@ public class MainActivity extends AppCompatActivity implements
         
         // 满足所有条件，自动恢复录制
         AppLog.d(TAG, "自动录制检查：检测到未在录制，自动恢复录制...");
-        startRecording();
-        Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+        if (startRecording()) {
+            Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+        }
     }
     
     /**
@@ -3609,8 +3598,9 @@ public class MainActivity extends AppCompatActivity implements
                         screenStateHandler.postDelayed(() -> {
                             if (!isScreenOff && !isRecording && cameraManager.hasAvailableCameras()) {
                                 AppLog.d(TAG, "摄像头已就绪，开始恢复录制");
-                                startRecording();
-                                Toast.makeText(MainActivity.this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+                                if (startRecording()) {
+                                    Toast.makeText(MainActivity.this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+                                }
                             }
                         }, 2000);
                     } catch (Exception e) {
@@ -3621,10 +3611,11 @@ public class MainActivity extends AppCompatActivity implements
             }
             
             AppLog.d(TAG, "亮屏已持续10秒，自动恢复录制");
-            startRecording();
-            runOnUiThread(() -> {
-                Toast.makeText(MainActivity.this, "亮屏10秒，已自动恢复录制", Toast.LENGTH_SHORT).show();
-            });
+            if (startRecording()) {
+                runOnUiThread(() -> {
+                    Toast.makeText(MainActivity.this, "亮屏10秒，已自动恢复录制", Toast.LENGTH_SHORT).show();
+                });
+            }
         };
         
         screenStateHandler.postDelayed(screenOnStartRunnable, SCREEN_ON_DELAY_MS);
@@ -3655,17 +3646,56 @@ public class MainActivity extends AppCompatActivity implements
             // 用户手动开始录制，重置手动停止标记
             // 这样后续如果录制异常停止，可以自动恢复
             isManuallyStoppedRecording = false;
-            AppLog.d(TAG, "用户手动开始录制，自动录制检查已启用");
-            startRecording();
+            if (startRecording(true)) {
+                AppLog.d(TAG, "用户手动开始录制，自动录制检查已启用");
+            }
+        }
+    }
+
+    private void handleRecordingStatusUpdate(java.util.Set<String> activeCameras, java.util.Set<String> failedCameras) {
+        AppLog.d(TAG, "录制状态回调: 成功=" + activeCameras.size() + ", 失败=" + failedCameras.size());
+        if (activeCameras.isEmpty()) {
+            runOnUiThread(() -> {
+                AppLog.e(TAG, "所有摄像头启动录制失败");
+                resetRecordingStateAndUi();
+                if (remoteCommandDispatcher != null) {
+                    remoteCommandDispatcher.onRecordingStartupFailure("录制启动失败，所有摄像头均未能启动");
+                }
+                isRemoteRecording = false;
+                pendingRemoteDurationSeconds = 0;
+                Toast.makeText(this, "录制启动失败，请重试", Toast.LENGTH_SHORT).show();
+            });
         }
     }
 
     private void onRecordingStartupFailure(String message) {
-        stopRecording();
-        Toast.makeText(this,message,Toast.LENGTH_LONG).show();
+        boolean wasRemote = isRemoteRecording;
+        if (cameraManager != null && cameraManager.isRecording()) {
+            cameraManager.stopRecording(true);
+        }
+        resetRecordingStateAndUi();
+        if (remoteCommandDispatcher != null) {
+            remoteCommandDispatcher.onRecordingStartupFailure(message);
+        }
+        isRemoteRecording = false;
+        pendingRemoteDurationSeconds = 0;
+        if (!wasRemote
+                && isInterfaceInForeground()
+                && !isFinishing()
+                && !isDestroyed()
+                && RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(this)
+                && RecordingStorageAccess.isPermissionDeniedMessage(message)) {
+            showAllFilesPermissionRequiredDialog(StorageHelper.probeRecordingWritable(this));
+            return;
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show();
     }
 
-    private void startRecording() {
+    private boolean startRecording() {
+        return startRecording(false);
+    }
+
+    private boolean startRecording(boolean interactive) {
         if (cameraManager != null && !cameraManager.isRecording()) {
             // 从配置读取启用的录制摄像头
             AppConfig appConfig = new AppConfig(this);
@@ -3673,7 +3703,31 @@ public class MainActivity extends AppCompatActivity implements
             
             if (enabledCameras.isEmpty()) {
                 Toast.makeText(this, "请至少选择一个录制摄像头", Toast.LENGTH_SHORT).show();
-                return;
+                return false;
+            }
+
+            // 写入前置快速探测，防止缺失「所有文件访问权限」时进入长时间"准备录制…"及编码器重建循环
+            RecordingStorageAccess.ProbeResult storageProbe = StorageHelper.probeRecordingWritable(this);
+            if (!storageProbe.writable) {
+                AppLog.e(TAG, "Recording storage preflight failed: " + storageProbe.errorDetail
+                        + ", target=" + storageProbe.targetPath
+                        + ", missingAllFiles=" + storageProbe.missingAllFilesAccess);
+                if (storageProbe.needsAllFilesPermission()) {
+                    if (interactive) {
+                        showAllFilesPermissionRequiredDialog(storageProbe);
+                    } else {
+                        showStorageFailureToastRateLimited("缺少「所有文件访问权限」，无法写入录像目录，请点击设置授权");
+                    }
+                } else {
+                    String msg = RecordingStorageAccess.formatUserStartupFailureMessage(
+                            storageProbe.errorDetail, storageProbe.missingAllFilesAccess);
+                    if (interactive) {
+                        Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                    } else {
+                        showStorageFailureToastRateLimited(msg);
+                    }
+                }
+                return false;
             }
             
             // 检测U盘回退情况（用户选择了U盘但不可用）
@@ -3721,9 +3775,82 @@ public class MainActivity extends AppCompatActivity implements
                 }
                 com.kooo.evcam.camera.RecordingSoundPlayer.playStartSound(this, appConfig);
                 AppLog.d(TAG, "Recording started with " + enabledCameras.size() + " camera(s): " + enabledCameras);
+                return true;
             } else {
-                Toast.makeText(this, "录制失败", Toast.LENGTH_SHORT).show();
+                String detail = cameraManager.getLastStartupErrorMessage();
+                String failureMsg = (detail == null || detail.trim().isEmpty())
+                        ? "录制失败"
+                        : RecordingStorageAccess.formatUserStartupFailureMessage(
+                                detail, RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(this));
+                Toast.makeText(this, failureMsg, Toast.LENGTH_LONG).show();
+                return false;
             }
+        }
+        return false;
+    }
+
+    private void showStorageFailureToastRateLimited(String message) {
+        long now = android.os.SystemClock.elapsedRealtime();
+        if (lastStorageFailureToastMs == 0L || now - lastStorageFailureToastMs >= STORAGE_FAILURE_TOAST_COOLDOWN_MS) {
+            lastStorageFailureToastMs = now;
+            Toast.makeText(this, message, Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void showAllFilesPermissionRequiredDialog(RecordingStorageAccess.ProbeResult probe) {
+        if (isFinishing() || isDestroyed()) {
+            return;
+        }
+        String target = (probe != null && !probe.targetPath.isEmpty())
+                ? probe.targetPath
+                : StorageHelper.getRecordingDir(this).getAbsolutePath();
+        new androidx.appcompat.app.AlertDialog.Builder(this)
+                .setTitle("需要「所有文件访问权限」")
+                .setMessage("当前系统限制应用直接写入公共录像目录：\n" + target
+                        + "\n\n请授予「所有文件访问权限」后再开始录像。")
+                .setPositiveButton("去授权", (dialog, which) -> openAllFilesAccessSettings())
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private void openAllFilesAccessSettings() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                Intent intent = new Intent(
+                        android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+                        android.net.Uri.parse("package:" + getPackageName()));
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                startActivity(intent);
+                return;
+            }
+        } catch (Exception e) {
+            AppLog.w(TAG, "无法直接打开所有文件访问权限页，回退到应用详情页", e);
+        }
+        try {
+            Intent details = new Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.parse("package:" + getPackageName()));
+            details.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(details);
+        } catch (Exception e) {
+            openSettingsCategory(com.kooo.evcam.ui.SettingsCatalog.ID_SYSTEM_PERMISSIONS);
+        }
+    }
+
+    private void resetRecordingStateAndUi() {
+        isRecording = false;
+        isPreparingRecording = false;
+        isAutoRecordingPending = false;
+        if (!com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this)) {
+            CameraForegroundService.stop(this);
+        } else {
+            AppLog.d(TAG, "存在活跃后台保活能力，停止录制后保持 CameraForegroundService 运行");
+        }
+        stopBlinkAnimation();
+        stopRecordingTimer();
+        FloatingWindowService.sendRecordingStateChanged(this, false);
+        if (AppConfig.CAR_MODEL_L7_MULTI.equals(appConfig.getCarModel()) && btnStartRecord != null) {
+            btnStartRecord.setText("录像");
         }
     }
 
@@ -3738,29 +3865,7 @@ public class MainActivity extends AppCompatActivity implements
                     }
                 }
             });
-            isRecording = false;
-            isPreparingRecording = false;  // 重置准备中状态
-
-            // 若无后台保活需求（车辆触发规则/换挡弹出/保摄像头/补盲/悬浮窗/远程），才停止前台服务
-            if (!com.kooo.evcam.lifecycle.BackgroundCapabilityController.hasActiveBackgroundCapabilities(this)) {
-                CameraForegroundService.stop(this);
-            } else {
-                AppLog.d(TAG, "存在活跃后台保活能力，停止录制后保持 CameraForegroundService 运行");
-            }
-
-            // 停止闪烁动画，恢复红色
-            stopBlinkAnimation();
-            
-            // 停止录制计时器
-            stopRecordingTimer();
-
-            // 发送录制状态广播（通知悬浮窗）
-            FloatingWindowService.sendRecordingStateChanged(this, false);
-
-            // L7-多按钮布局：恢复录制按钮文字为"录像"
-            if (AppConfig.CAR_MODEL_L7_MULTI.equals(appConfig.getCarModel()) && btnStartRecord != null) {
-                btnStartRecord.setText("录像");
-            }
+            resetRecordingStateAndUi();
 
             Toast.makeText(this, "录制已停止", Toast.LENGTH_SHORT).show();
             com.kooo.evcam.camera.RecordingSoundPlayer.playStopSound(this, appConfig);
@@ -4324,8 +4429,9 @@ public class MainActivity extends AppCompatActivity implements
                         new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
                             if (!isRecording && cameraManager != null && cameraManager.hasAvailableCameras()) {
                                 AppLog.d(TAG, "自动恢复录制...");
-                                startRecording();
-                                Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+                                if (startRecording()) {
+                                    Toast.makeText(this, "已自动恢复录制", Toast.LENGTH_SHORT).show();
+                                }
                             }
                         }, 1500);  // 等待摄像头准备好
                     }

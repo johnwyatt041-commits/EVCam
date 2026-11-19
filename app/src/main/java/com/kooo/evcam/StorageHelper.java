@@ -254,6 +254,13 @@ public class StorageHelper {
         // 不使用中转写入，直接返回最终存储目录
         return getVideoDir(context);
     }
+
+    /**
+     * 通过真实的 .mp4.pending 写入探测检查当前录像目标目录是否可写。
+     */
+    public static RecordingStorageAccess.ProbeResult probeRecordingWritable(Context context) {
+        return RecordingStorageAccess.probeRecordingTarget(context);
+    }
     
     /**
      * 获取视频的最终存储目录
