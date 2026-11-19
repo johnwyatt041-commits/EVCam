@@ -1,10 +1,10 @@
 # 手机公共目录写入权限诊断与录像启动快速失败修复
 
-最后更新：2026-11-19 14:24:00 +08:00
-最后核对：2026-11-19 14:24:00 +08:00
+最后更新：2026-11-19 14:28:30 +08:00
+最后核对：2026-11-19 14:28:30 +08:00
 任务/执行者：fix-storage-permission-startup / Antigravity
 分支/工作树：codex/fix-storage-permission-startup / E:\GPT\EVCam-worktrees\fix-storage-permission-startup（基于 `5df4dcb` / `build17`，未合入主工作区未提交的 4.3 改动）
-状态：已完成代码修复、504 项离线测试与双风味 Lint 清零，待封包 build18 与发布 GitHub Pre-release
+状态：已完成提交、封包 build18 与 GitHub Pre-release 发布（待手机与实车实测）
 当前结论：手机端（Android 16 / `2211133C`，`1.6.6-test-11191152`）一直停在“准备录制…”的根因是未授 `MANAGE_EXTERNAL_STORAGE`，导致 `AsyncMuxerWriter.FileSink.start()` 写入 `DCIM/EVCam_Video/*.mp4.pending` 报 `EPERM (Operation not permitted)` 后陷入 3s 编码器重建循环直至 20s 看门狗超时；已在保留现有 `.mp4.pending` 文件协议的前提下完成全链路修复（`1.6.6-test-11191414`，`versionCode = 85`）。
 
 ## 修复清单
@@ -20,8 +20,9 @@
 
 ## 最近记录
 
+- 2026-11-19 14:28:30 +08:00 | 推送 fork 并发布 GitHub Pre-release (`build18`) | 已将 `06bcd22` 与文档提交推至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix` 并推送标签 `v1.6.6-test-11191414-build18`，发布 Pre-release 并核验 6 项资产字节数与 SHA256 一致，同步清理 `work/tmp/fix-storage-permission-startup/`（`https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11191414-build18`） | [STATUS](../STATUS.md)
 - 2026-11-19 14:24:00 +08:00 | 完成隔离修复、504 测与双风味 Lint 清零 | 离线 `verify.ps1`（`E:\GPT\EVCam\work\verification\build-20261119-142140-251.log`）通过 `504` 测（A/B 各 `62` 套 `252` 测）；双风味 Lint（`E:\GPT\EVCam\work\verification\lint-20261119-1422.log`）均为 `0` errors（`2076` warnings）；两版 Release APK 均通过 `apksigner verify` 并包含 `lib/arm64-v8a/libvhal_decoder.so` | [STATUS](../STATUS.md)
 
 ## 下一步
 
-1. 封包导出 `build18` 至 `outputs/` 并归档 `build16` 至 `outputs/archive/`，生成精确哈希与清单后发布 GitHub Pre-release，再于实机手机与银河 E5 实车验证授权前后开录表现。
+1. 下载 GitHub Pre-release 或本地 `outputs/` 中 **`build18`**，先在手机端实测未授权弹窗“去授权”与授权后录像写入；再按需在银河 E5 实车联测独立版 A / 共存版 B（先后覆盖，切勿并行）。

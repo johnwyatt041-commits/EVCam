@@ -1,15 +1,15 @@
 # 项目进度
 
-最后更新/核对：2026-11-19 14:25:30 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已完成 `build18` / `06bcd22` 手机公共目录权限诊断与快败修复封包、`build16` 归档，待推 fork 与发布 GitHub Pre-release）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-19 14:28:30 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已完成 `build18` / `06bcd22` 手机公共目录权限诊断与快败修复封包、提交与 GitHub Pre-release 发布）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | 隔离工作树分支 `codex/fix-storage-permission-startup`（基于 `5df4dcb` / `build17`）；代码提交 `06bcd22`（Tag `v1.6.6-test-11191414-build18` / `1.6.6-test-11191414`，`versionCode = 85`，未包含主工作区未发布的 4.3 改动） |
+| 分支与提交 | fork `codex/e5-recording-startup-fix` 已同步至本工作树最新提交（代码 `06bcd22` / Tag `v1.6.6-test-11191414-build18` / `1.6.6-test-11191414`，`versionCode = 85`；未包含主工作区未提交的 4.3 改动） |
 | 本地交付 | `outputs/` 顶层保留 **`build17`** + **`build18`**（12 文件）；`build16` 已归档至 `outputs/archive/`（索引 `outputs/archive/INDEX.md`） |
-| GitHub | 待将 `06bcd22` 与文档提交推至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix` 并发布 Pre-release `v1.6.6-test-11191414-build18` |
+| GitHub | `johnwyatt041-commits/EVCam` 已同步分支 `codex/e5-recording-startup-fix`、标签 `build18` 并发布 Pre-release `v1.6.6-test-11191414-build18`（6 项资产 SHA256 核验一致） |
 | 离线与设备验证 | `build18`（`1.6.6-test-11191414`）已通过 `verify.ps1` `504` 测 `0` 失败 `0` 跳过、双风味 `0` Lint error（`2076` warnings）、`apksigner`/`libvhal_decoder.so` 校验；`build18` 真机授权弹窗/开录与模拟器均**尚未安装实测** |
 | 实车状态 | 银河 E5 实车四路硬件录制、`B/C→D` 切换及包 A–E 全集（`build18`）均**尚未上车实测** |
 
@@ -26,7 +26,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-19 14:25:30 +08:00 | 手机权限诊断/快败修复与 build18 封包 | 将 `ALL_FILES` 设为 Android 11+ 核心必需权限，新增 `.mp4.pending` 实写探测、手动“去授权”弹窗、致命存储错误快败与 `RemoteCommandHandler` 收口（`06bcd22` / `build18`），`504` 测 `0` 失败、`0` Lint error，已归档 `build16` | [权限启动修复](tasks/fix-storage-permission-startup.md)
+- 2026-11-19 14:28:30 +08:00 | 手机权限诊断/快败修复与 build18 发布 GitHub | 将 `ALL_FILES` 设为 Android 11+ 核心必需权限，新增 `.mp4.pending` 实写探测、手动“去授权”弹窗、致命存储错误快败与 `RemoteCommandHandler` 收口（`06bcd22` / `v1.6.6-test-11191414-build18`），`504` 测 `0` 失败、`0` Lint error，已归档 `build16` 并发布 GitHub Pre-release（6 项资产 SHA256 一致） | [权限启动修复](tasks/fix-storage-permission-startup.md)
 - 2026-11-19 12:11:00 +08:00 | P018 回看销毁保护修复与 build17 发布 GitHub | 修复 `PlaybackImageMemory.clearViews()` 在 `Activity.isDestroyed()` 调 `Glide.with()` 闪退，加固全量 Glide 加载/清理与 `AppShellController.restore()` 根容器显隐恢复（`e946c50` / `v1.6.6-test-11191152-build17`），`488` 测 `0` 失败、`0` Lint error、`emulator-5556` 重建实测通过并发布 GitHub Pre-release（`build15` 归档） | [P018修复](tasks/fix-p018-playback-glide-destroy.md) · [P018](PITFALLS.md)
 - 2026-11-19 11:26:00 +08:00 | build16 封包提交与历史归档索引 | 提交 `B/C→D` + `P019` 修复至 `b8c5773`（Tag `v1.6.6-test-11190906-build16`）并导出 `build16`，归档 `build14`、`11-17`/`11-18` 日志与 `workspace-cleanup` 任务 | [模式D卡顿修复](tasks/fix-mode-d-switch-stall.md) · [归档索引](archive/2026-11/INDEX.md)
 - 2026-11-19 09:20:00 +08:00 | 修复 B/C 切 D 卡顿与 P019 后台切模式 | `SingleCamera` 按路拆分 `CamLifecycle-<id>` 异步执行 `closeCamera()`/`openCamera()`，`MultiCameraManager.release()` 并行等待，`PreviewModeController` 延后后台页掩码，`MainActivity` 修复隐藏窗格空轮询；`emulator-5556` 全流程通过 | [模式D卡顿修复](tasks/fix-mode-d-switch-stall.md) · [P019](PITFALLS.md)
