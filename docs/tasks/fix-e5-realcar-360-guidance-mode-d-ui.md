@@ -1,11 +1,11 @@
 # 修复银河 E5 实车 360 引导线、规则联动、模式 D 与轮位按钮及统一编辑调校
 
-最后更新：2026-11-21 02:52:45 +08:00
-最后核对：2026-11-21 02:52:45 +08:00
+最后更新：2026-11-21 02:59:13 +08:00
+最后核对：2026-11-21 02:59:13 +08:00
 任务/执行者：fix-e5-realcar-360-guidance-mode-d-ui / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：等待实测（方案 B 车框/零跳变/焦距缩放/辅助开关与原厂 `avm_calib_res` 导入已入库，暂未封包发布，待 E5 实车验证）
-当前结论：已完成「方案 B 修复 + 原厂标定文件夹直导」并提交至 `codex/e5-recording-startup-fix`（`1.6.6-test-11210240`，含 `birdOffsetYCm` 符号/24MB 提示/16MB 上限修正）；离线双风味 `534` 测、Debug/Release 构建与 Lint `0` errors 通过，暂未封包 `build21` 或上实车验证。
+状态：等待实测（`build21` 已发布，待 E5 实车验证）
+当前结论：已完成「方案 B + 原厂 `avm_calib_res` 导入」（`1.6.6-test-11210240`，`3869f7f`）封包 `build21` 与 fork Pre-release [`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)，双风味 `534` 测、构建、Lint `0` errors 与 6 资产 SHA256 一致；尚未上实车验证。
 
 ## 根因与改动清单
 
@@ -30,7 +30,7 @@
 
 ## 最近记录
 
-- 2026-11-21 02:52:45 +08:00 | 完成方案 B 修复与原厂 `avm_calib_res` 导入，验证通过并入库（`1.6.6-test-11210240`，暂未封包发布） | `verify.ps1` `534` 测 `0` 失败、`assembleDebug`/`assembleRelease`（`build-20261121-024314-279.log`）与 Lint `0` errors 通过；待封包与 E5 实车测试 | [SurroundFactoryCalibrationParser.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundFactoryCalibrationParser.java)
+- 2026-11-21 02:59:13 +08:00 | 提交 `3869f7f`、封包 `build21` 并发布 GitHub Pre-release | 推 `codex/e5-recording-startup-fix` 与 `v1.6.6-test-11210240-build21`，A/B（各 `7,922,152` B，`f54562fb...`/`533104f9...`）与 `mappings.zip`（`13,234,412` B）等 6 资产远端 SHA256 一致、`build19` 归档，离线 `534` 测/Lint `0` errors，待 E5 实车测试 | [SurroundFactoryCalibrationParser.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundFactoryCalibrationParser.java)
 - 2026-11-21 01:49:06 +08:00 | 记录 `build20` 实车 360 错位现象并核对原厂标定/车模影响（纯文档，未改源码） | 用户确认实车主要为车头/车尾与两侧对不上、比例怪异、缝隙明显（车模也为星舰7）；核实车模 PNG 不参与投影但代码 `E5_CAR_*` 达 `213×534 cm` 导致视觉比例与盲区/接缝失真，获取 E5 原厂标定（`avm_calib_res`）可治本且当前仅支持 JSON/ZIP 导入 | [SurroundCalibrationProfile.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationProfile.java#L19-L23)
 - 2026-11-20 00:43:30 +08:00 | 封包 `build20` 并发布 GitHub Pre-release | 提交 `4836da2`、标签 `v1.6.6-test-11192353-build20` 推送至 `johnwyatt041-commits/EVCam`，完成 `outputs/` 封包（A `7,887,580` B、`c0af422a...`；B `7,903,964` B、`07d96119...`；`mappings.zip` `13,169,763` B、`b1be5a6f...`）及 `build18` 归档，GitHub 6 资产大小与 SHA256 回读一致（待实车复测）
 - 2026-11-20 00:01:30 +08:00 | 新增 4.3 四路外参微调、分槽保存与 JSON 导出并完成全量离线验证（`1.6.6-test-11192353`） | `verify.ps1` 双风味 `530` 测 `0` 失败 `0` 跳过、`assembleDebug`/`assembleRelease` 成功（`build-20261119-235447-318.log`）；双风味 Lint `0` errors（`2162` warnings）；`check_docs.py` 通过 | [SurroundExtrinsicAdjustment.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundExtrinsicAdjustment.java)
@@ -38,4 +38,4 @@
 
 ## 下一步
 
-1. 等待用户确认是否封包 `build21` 并发布 GitHub Pre-release，随后在银河 E5 实车验证 4.3「参考网格/隐藏车模/单路独显/焦距缩放 Scale」，或导入提取后的 E5 原厂 `avm_calib_res` 标定目录。
+1. 安装 `build21`（`1.6.6-test-11210240`）上银河 E5 实车使用 4.3「参考网格/隐藏车模/单路独显/焦距缩放 Scale」调校验证，或直接导入提取到的 E5 原厂 `avm_calib_res` 标定目录。
