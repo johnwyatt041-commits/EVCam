@@ -150,6 +150,102 @@ public final class SurroundMeshBuilder {
 
         float[] finalVerts = new float[uniqueCount * BIRD_FLOATS_PER_VERTEX];
         System.arraycopy(tempVerts, 0, finalVerts, 0, finalVerts.length);
+        propagateBlindBoundaryUvs(finalVerts, indices);
+        return new GridMeshData(finalVerts, indices, BIRD_FLOATS_PER_VERTEX);
+    }
+
+    /**
+     * 基于工厂静态 `bird.mesh` 拓扑与接缝几何，按当前微调后的内外参重投影非车底地面顶点（零跳变，保留原接缝角度与盲区边界）。
+     */
+    @NonNull
+    public static GridMeshData reprojectBirdMesh(@NonNull GridMeshData baseMesh,
+                                                 @NonNull SurroundCalibrationProfile tunedProfile,
+                                                 @Nullable SurroundExtrinsicAdjustment adjustment) {
+        if (adjustment == null || adjustment.isIdentity()) {
+            return baseMesh;
+        }
+        CameraCalibration[] cams = {
+                tunedProfile.getCamera("front"),
+                tunedProfile.getCamera("back"),
+                tunedProfile.getCamera("left"),
+                tunedProfile.getCamera("right")
+        };
+        boolean[] tuned = {
+                !adjustment.getCamera("front").isZero(),
+                !adjustment.getCamera("back").isZero(),
+                !adjustment.getCamera("left").isZero(),
+                !adjustment.getCamera("right").isZero()
+        };
+        if (!tuned[0] && !tuned[1] && !tuned[2] && !tuned[3]) {
+            return baseMesh;
+        }
+
+        float[] verts = baseMesh.vertices.clone();
+        int vertCount = verts.length / BIRD_FLOATS_PER_VERTEX;
+        for (int i = 0; i < vertCount; i++) {
+            int base = i * BIRD_FLOATS_PER_VERTEX;
+            float under = verts[base + 9];
+            if (under >= 1.0f) {
+                continue;
+            }
+            float wx = verts[base];
+            float wy = verts[base + 1];
+            // 跳过远端 3D 碗面上翘边缘，仅重投影地面平坦视野区
+            if (Math.abs(wx) > 650.0f || Math.abs(wy) > 800.0f) {
+                continue;
+            }
+            int pIdx = Math.round(verts[base + 6]);
+            int sIdx = Math.round(verts[base + 7]);
+            boolean pValidIdx = pIdx >= 0 && pIdx < 4 && cams[pIdx] != null;
+            boolean sValidIdx = sIdx >= 0 && sIdx < 4 && cams[sIdx] != null;
+            boolean needPrimary = pValidIdx && tuned[pIdx];
+            boolean needSecondary = sValidIdx && sIdx != pIdx && tuned[sIdx];
+            if (!needPrimary && !needSecondary) {
+                continue;
+            }
+
+            boolean pOk = true;
+            if (needPrimary) {
+                double[] uv = cams[pIdx].projectWorldToUv(wx, wy, 0.0);
+                pOk = uv[2] >= 0.5;
+                verts[base + 2] = (float) uv[0];
+                verts[base + 3] = (float) uv[1];
+                if (sIdx == pIdx) {
+                    verts[base + 4] = (float) uv[0];
+                    verts[base + 5] = (float) uv[1];
+                }
+            }
+
+            boolean sOk = true;
+            if (needSecondary) {
+                double[] uv = cams[sIdx].projectWorldToUv(wx, wy, 0.0);
+                sOk = uv[2] >= 0.5;
+                verts[base + 4] = (float) uv[0];
+                verts[base + 5] = (float) uv[1];
+            } else if (sIdx == pIdx) {
+                sOk = pOk;
+            }
+
+            if (sIdx == pIdx) {
+                if (!pOk) {
+                    verts[base + 9] = 1.4f;
+                }
+            } else {
+                if (!pOk && !sOk) {
+                    verts[base + 9] = 1.4f;
+                } else if (!pOk) {
+                    verts[base + 8] = 1.0f;
+                } else if (!sOk) {
+                    verts[base + 8] = 0.0f;
+                }
+            }
+        }
+
+        propagateBlindBoundaryUvs(verts, baseMesh.indices);
+        return new GridMeshData(verts, baseMesh.indices, BIRD_FLOATS_PER_VERTEX);
+    }
+
+    private static void propagateBlindBoundaryUvs(@NonNull float[] finalVerts, @NonNull short[] indices) {
         // 车底盲区边界三角形一侧为有效地面 UV、另一侧原为 (0,0)，用同三角形有效邻点 UV 覆盖盲区顶点，避免跨图拉扯条纹
         for (int t = 0; t + 2 < indices.length; t += 3) {
             int i0 = (indices[t] & 0xFFFF) * BIRD_FLOATS_PER_VERTEX;
@@ -168,7 +264,6 @@ public final class SurroundMeshBuilder {
                 }
             }
         }
-        return new GridMeshData(finalVerts, indices, BIRD_FLOATS_PER_VERTEX);
     }
 
     /**
@@ -325,11 +420,22 @@ public final class SurroundMeshBuilder {
         }
     }
 
-    /** 构建 360 全景鸟瞰地面融合网格（支持根据 E5 视野参数实时重生成）。 */
+    /** 构建 360 全景鸟瞰地面融合网格（支持根据 E5 视野参数实时重生成及单路独显）。 */
     @NonNull
     public static GridMeshData buildBirdGroundMesh(@NonNull SurroundCalibrationProfile profile,
                                                    int cols,
                                                    int rows) {
+        return buildBirdGroundMesh(profile, cols, rows, -1);
+    }
+
+    /**
+     * 构建 360 全景鸟瞰地面融合网格；`soloCamIndex` 为 `0..3`（front/back/left/right）时仅采样对应单路摄像头用于标定对照。
+     */
+    @NonNull
+    public static GridMeshData buildBirdGroundMesh(@NonNull SurroundCalibrationProfile profile,
+                                                   int cols,
+                                                   int rows,
+                                                   int soloCamIndex) {
         int safeCols = Math.max(8, Math.min(80, cols));
         int safeRows = Math.max(8, Math.min(120, rows));
 
@@ -341,15 +447,25 @@ public final class SurroundMeshBuilder {
         double maxY = profile.getWorldMaxYCm();
         double worldSpanY = maxY - minY;
 
-        final float carMinX = SurroundCalibrationProfile.E5_CAR_MIN_X_CM;
-        final float carMaxX = SurroundCalibrationProfile.E5_CAR_MAX_X_CM;
-        final float carMinY = SurroundCalibrationProfile.E5_CAR_MIN_Y_CM;
-        final float carMaxY = SurroundCalibrationProfile.E5_CAR_MAX_Y_CM;
+        // 车底内框严格位于 E5 车体内部（避免吞噬前后摄近车真实路面）
+        final float blindMinX = -84.0f;
+        final float blindMaxX = 84.0f;
+        final float blindMinY = -216.0f;
+        final float blindMaxY = 216.0f;
 
         CameraCalibration frontCal = profile.getCamera("front");
         CameraCalibration backCal = profile.getCamera("back");
         CameraCalibration leftCal = profile.getCamera("left");
         CameraCalibration rightCal = profile.getCamera("right");
+
+        boolean soloMode = soloCamIndex >= CAM_FRONT && soloCamIndex <= CAM_RIGHT;
+        CameraCalibration soloCal = null;
+        if (soloMode) {
+            if (soloCamIndex == CAM_FRONT) soloCal = frontCal;
+            else if (soloCamIndex == CAM_BACK) soloCal = backCal;
+            else if (soloCamIndex == CAM_LEFT) soloCal = leftCal;
+            else soloCal = rightCal;
+        }
 
         int vIdx = 0;
         for (int r = 0; r <= safeRows; r++) {
@@ -362,26 +478,46 @@ public final class SurroundMeshBuilder {
                 double origX = (uRatio - 0.5) * 2.0 * halfW;
                 float ndcX = (float) (uRatio * 2.0 - 1.0);
 
-                // 车底区域把采样点夹回车身边缘并计算羽化系数（不遮断外圈地面，无需 glReadPixels）
+                if (soloMode) {
+                    double[] soloUv = soloCal != null
+                            ? soloCal.projectWorldToUv(origX, origY, 0.0)
+                            : new double[]{0.5, 0.5, 0.0};
+                    float under = soloUv[2] >= 0.5 ? 0.0f : 1.4f;
+                    int base = vIdx * BIRD_FLOATS_PER_VERTEX;
+                    verts[base] = ndcX;
+                    verts[base + 1] = ndcY;
+                    verts[base + 2] = (float) soloUv[0];
+                    verts[base + 3] = (float) soloUv[1];
+                    verts[base + 4] = (float) soloUv[0];
+                    verts[base + 5] = (float) soloUv[1];
+                    verts[base + 6] = (float) soloCamIndex;
+                    verts[base + 7] = (float) soloCamIndex;
+                    verts[base + 8] = 0.0f;
+                    verts[base + 9] = under;
+                    vIdx++;
+                    continue;
+                }
+
+                // 车底区域把采样点夹回车身内框并计算羽化系数（不遮断外圈地面，无需 glReadPixels）
                 double sampleX = origX;
                 double sampleY = origY;
                 float underCarWeight = 0.0f;
-                boolean underCar = origX > carMinX && origX < carMaxX
-                        && origY > carMinY && origY < carMaxY;
+                boolean underCar = origX > blindMinX && origX < blindMaxX
+                        && origY > blindMinY && origY < blindMaxY;
                 if (underCar) {
-                    double dLeft = origX - carMinX;
-                    double dRight = carMaxX - origX;
-                    double dRear = origY - carMinY;
-                    double dFront = carMaxY - origY;
+                    double dLeft = origX - blindMinX;
+                    double dRight = blindMaxX - origX;
+                    double dRear = origY - blindMinY;
+                    double dFront = blindMaxY - origY;
                     double minEdge = Math.min(Math.min(dLeft, dRight), Math.min(dRear, dFront));
-                    if (minEdge == dLeft) sampleX = carMinX;
-                    else if (minEdge == dRight) sampleX = carMaxX;
-                    else if (minEdge == dRear) sampleY = carMinY;
-                    else sampleY = carMaxY;
-                    underCarWeight = smoothstep(0.0f, 24.0f, (float) minEdge);
+                    if (minEdge == dLeft) sampleX = blindMinX;
+                    else if (minEdge == dRight) sampleX = blindMaxX;
+                    else if (minEdge == dRear) sampleY = blindMinY;
+                    else sampleY = blindMaxY;
+                    underCarWeight = smoothstep(0.0f, 22.0f, (float) minEdge);
                 }
 
-                // 前/后相机 vs 左/右相机象限混合权重（沿车身四角斜向 45° 融合带平滑过渡）
+                // 前/后相机 vs 左/右相机象限混合权重（沿车身四角约 ~58° 工厂接缝线平滑过渡）
                 CameraCalibration longCal = origY >= 0.0 ? frontCal : backCal;
                 int longIdx = origY >= 0.0 ? CAM_FRONT : CAM_BACK;
                 CameraCalibration sideCal = origX < 0.0 ? leftCal : rightCal;
@@ -396,9 +532,10 @@ public final class SurroundMeshBuilder {
 
                 double absX = Math.abs(origX);
                 double absY = Math.abs(origY);
-                double seamCarY = origY >= 0.0 ? 269.0 : 259.0;
-                double seamSigned = (absY - seamCarY) - (absX - 106.0);
-                float blendLongToSide = (float) clamp((seamSigned / 44.0) + 0.5, 0.0, 1.0);
+                double seamCarX = 76.5;
+                double seamCarY = origY >= 0.0 ? 235.0 : 232.0;
+                double seamSigned = 0.530 * (absY - seamCarY) - 0.848 * (absX - seamCarX);
+                float blendLongToSide = (float) clamp((seamSigned / 36.0) + 0.5, 0.0, 1.0);
                 // primary = side, secondary = long; blendWeight = 1 表示完全使用 secondary (front/back)
                 if (longUv[2] < 0.5) blendLongToSide = 0.0f;
                 if (sideUv[2] < 0.5) blendLongToSide = 1.0f;

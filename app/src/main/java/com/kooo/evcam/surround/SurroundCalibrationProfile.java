@@ -16,11 +16,17 @@ public final class SurroundCalibrationProfile {
     public static final int IMAGE_WIDTH = 1280;
     public static final int IMAGE_HEIGHT = 800;
 
-    // 银河 E5 车体物理包络（cm）
-    public static final float E5_CAR_MIN_X_CM = -106.5f;
-    public static final float E5_CAR_MAX_X_CM = 106.5f;
-    public static final float E5_CAR_MIN_Y_CM = -259.5f;
-    public static final float E5_CAR_MAX_Y_CM = 274.5f;
+    // 银河 E5 实车物理包络（cm，约 190.0 × 462.0 cm）
+    public static final float E5_CAR_MIN_X_CM = -95.0f;
+    public static final float E5_CAR_MAX_X_CM = 95.0f;
+    public static final float E5_CAR_MIN_Y_CM = -231.0f;
+    public static final float E5_CAR_MAX_Y_CM = 231.0f;
+
+    // 银河 E5 俯视车模 PNG 显示框（含外后视镜扩展，保持 504×1024 图幅下车身≈190×462 cm 的 1:1 比例）
+    public static final float E5_CAR_QUAD_MIN_X_CM = -113.0f;
+    public static final float E5_CAR_QUAD_MAX_X_CM = 113.0f;
+    public static final float E5_CAR_QUAD_MIN_Y_CM = -232.0f;
+    public static final float E5_CAR_QUAD_MAX_Y_CM = 232.0f;
 
     // 360 鸟瞰车周 stitched 地面可视边距（cm）：让车模周围留出充足路面与转向轨线空间（对标 SC 俯视视场）
     public static final double BIRD_SIDE_MARGIN_CM = 125.0;
@@ -134,6 +140,7 @@ public final class SurroundCalibrationProfile {
     public final boolean isCustomCalibration;
     public final boolean useBuiltInMeshes;
     public final boolean hasExtrinsicAdjustments;
+    public final double birdCenterOffsetYCm;
     public final int groundWidthCm;
     public final int groundLengthCm;
     public final int groundFrontExtensionCm;
@@ -147,6 +154,7 @@ public final class SurroundCalibrationProfile {
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
         this(profileName, isCustomCalibration, !isCustomCalibration, false,
+                DEFAULT_BIRD_CENTER_OFFSET_Y_CM,
                 groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
     }
 
@@ -158,6 +166,7 @@ public final class SurroundCalibrationProfile {
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
         this(profileName, isCustomCalibration, useBuiltInMeshes, false,
+                DEFAULT_BIRD_CENTER_OFFSET_Y_CM,
                 groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
     }
 
@@ -169,10 +178,27 @@ public final class SurroundCalibrationProfile {
                                       int groundLengthCm,
                                       int groundFrontExtensionCm,
                                       @NonNull Map<String, CameraCalibration> cameras) {
+        this(profileName, isCustomCalibration, useBuiltInMeshes, hasExtrinsicAdjustments,
+                DEFAULT_BIRD_CENTER_OFFSET_Y_CM,
+                groundWidthCm, groundLengthCm, groundFrontExtensionCm, cameras);
+    }
+
+    public SurroundCalibrationProfile(@NonNull String profileName,
+                                      boolean isCustomCalibration,
+                                      boolean useBuiltInMeshes,
+                                      boolean hasExtrinsicAdjustments,
+                                      double birdCenterOffsetYCm,
+                                      int groundWidthCm,
+                                      int groundLengthCm,
+                                      int groundFrontExtensionCm,
+                                      @NonNull Map<String, CameraCalibration> cameras) {
         this.profileName = profileName;
         this.isCustomCalibration = isCustomCalibration;
         this.useBuiltInMeshes = useBuiltInMeshes;
         this.hasExtrinsicAdjustments = hasExtrinsicAdjustments;
+        this.birdCenterOffsetYCm = Double.isFinite(birdCenterOffsetYCm)
+                ? birdCenterOffsetYCm
+                : DEFAULT_BIRD_CENTER_OFFSET_Y_CM;
         this.groundWidthCm = Math.max(160, Math.min(260, groundWidthCm));
         this.groundLengthCm = Math.max(420, Math.min(600, groundLengthCm));
         this.groundFrontExtensionCm = Math.max(0, Math.min(100, groundFrontExtensionCm));

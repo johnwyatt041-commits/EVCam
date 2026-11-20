@@ -1,11 +1,11 @@
 # 修复银河 E5 实车 360 引导线、规则联动、模式 D 与轮位按钮及统一编辑调校
 
-最后更新：2026-11-20 00:43:30 +08:00
-最后核对：2026-11-20 00:43:30 +08:00
+最后更新：2026-11-21 02:52:45 +08:00
+最后核对：2026-11-21 02:52:45 +08:00
 任务/执行者：fix-e5-realcar-360-guidance-mode-d-ui / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：已提交 `4836da2`、归档 `build18` 并发布 GitHub Pre-release [`v1.6.6-test-11192353-build20`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11192353-build20)（离线 `530` 测 `0` 失败、`0` Lint error、6 资产远端 SHA256 核验一致；**待银河 E5 实车复测**）
-当前结论：依据银河 E5 实测问题已完成：① APVP `40007` 转向角/阿克曼/规则开关引导线；② 图 2 双层纯两侧金黄引导线；③ 模式 D 左右/转向灯联动与轮位按钮美化；④ 顶栏 360「编辑布局」引导线宽度（`50%–150%`）及全四分栏统一底色透明度；⑤ 4.3 四路外参微调（俯仰/高度/前后/偏航/滚转/左右）、按内置/本地导入分槽保存及标准 `calibration.json` 导出。上述能力均已合入 `4836da2` 并打标发布 `build20`，仅通过离线验证与远端包核验，实车信号/拼接与观感待上车复测。
+状态：等待实测（方案 B 车框/零跳变/焦距缩放/辅助开关与原厂 `avm_calib_res` 导入已入库，暂未封包发布，待 E5 实车验证）
+当前结论：已完成「方案 B 修复 + 原厂标定文件夹直导」并提交至 `codex/e5-recording-startup-fix`（`1.6.6-test-11210240`，含 `birdOffsetYCm` 符号/24MB 提示/16MB 上限修正）；离线双风味 `534` 测、Debug/Release 构建与 Lint `0` errors 通过，暂未封包 `build21` 或上实车验证。
 
 ## 根因与改动清单
 
@@ -22,15 +22,20 @@
    - `AppShellController` / `ui_preview_editor.xml` / `PreviewEditorController` / `MainActivity`：顶栏对 `360 A` 开放「编辑布局」，模式 A 提供宽度/透明度双滑条，B/C/D 提供「按键透明度」页复用同一全局 `preview_overlay_bg_alpha_percent` 与取消回滚。
 6. **4.3 四路外参微调、分槽保存与 JSON 导出**：
    - [SurroundExtrinsicAdjustment.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundExtrinsicAdjustment.java)、[SurroundCalibrationProfile.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationProfile.java)、[SurroundCalibrationManager.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationManager.java)、[AppConfig.java](../../app/src/main/java/com/kooo/evcam/AppConfig.java)：内置（星舰7）与本地导入两槽独立存读，切换不覆盖；仅导入新文件时经 [SurroundAssetImportHelper.java](../../app/src/main/java/com/kooo/evcam/ui/SurroundAssetImportHelper.java) 重置本地槽。支持导出 `vehicle_centered: true` 的标准 1.3 `calibration.json` 往返无漂移。
-   - [SurroundGlRenderer.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundGlRenderer.java)、[fragment_surround_calibration_live.xml](../../app/src/main/res/layout/fragment_surround_calibration_live.xml)、[SurroundCalibrationLiveFragment.java](../../app/src/main/java/com/kooo/evcam/ui/SurroundCalibrationLiveFragment.java)：未微调保持零回退静态 `bird.mesh`，非零微调按 `(44, 68)` 实时重算鸟瞰（保留 `front/rear_wheels.mesh`），`4.3` 页提供前/后/左/右切换、常用（俯仰/高度/前后）与折叠高级（偏航/滚转/左右）及 SAF/本地降级导出。
-7. **版本与单测**：`app/build.gradle.kts` 升至 `1.6.6-test-11192353`；补齐并更新 [SurroundCalibrationAndGuidanceTest.java](../../app/src/test/java/com/kooo/evcam/surround/SurroundCalibrationAndGuidanceTest.java)（外参正交/方向/JSON 往返/实时网格）等测试。
+   - [SurroundGlRenderer.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundGlRenderer.java)、[fragment_surround_calibration_live.xml](../../app/src/main/res/layout/fragment_surround_calibration_live.xml)、[SurroundCalibrationLiveFragment.java](../../app/src/main/java/com/kooo/evcam/ui/SurroundCalibrationLiveFragment.java)：未微调保持零回退静态 `bird.mesh`，非零微调原位重投影鸟瞰（保留 `front/rear_wheels.mesh`），`4.3` 页提供前/后/左/右切换、常用与折叠高级参数及 SAF/本地降级导出。
+7. **版本与单测**：`app/build.gradle.kts` 升至 `1.6.6-test-11210240`；补齐并更新 [SurroundCalibrationAndGuidanceTest.java](../../app/src/test/java/com/kooo/evcam/surround/SurroundCalibrationAndGuidanceTest.java)。
+8. **方案 B（E5 车框/零跳变/焦距缩放+辅助开关）与原厂 `avm_calib_res` 导入**：
+   - 修正 `E5_CAR_*` 物理轮廓为 `190×462 cm` 及车模贴图框 `226×464 cm`（[SurroundCalibrationProfile.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationProfile.java)）；[SurroundMeshBuilder.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundMeshBuilder.java) 新增 `reprojectBirdMesh` 沿用工厂 `bird.mesh` 接缝拓扑原位重投影消跳变、`SurroundExtrinsicAdjustment` 新增焦距 `scale`（`70%–130%`）与 `Δcx/Δcy/Δk1`、`SurroundGuidanceCalculator` 与 `4.3` 界面新增 `250 cm`「参考网格/隐藏车模/单路独显」。
+   - 新增 [SurroundFactoryCalibrationParser.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundFactoryCalibrationParser.java)，支持 `Table.db`（392B）+ 704B 1.3 `.param` + 可选轮位 `.db` / `config.ini`（`bottom_det`）校验转换，并与 [SurroundCalibrationManager.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationManager.java) / [SurroundAssetImportHelper.java](../../app/src/main/java/com/kooo/evcam/ui/SurroundAssetImportHelper.java) 打通 `Download` 扫描、`.zip` 与 SAF `OpenDocumentTree` 原厂目录直导。
 
 ## 最近记录
 
+- 2026-11-21 02:52:45 +08:00 | 完成方案 B 修复与原厂 `avm_calib_res` 导入，验证通过并入库（`1.6.6-test-11210240`，暂未封包发布） | `verify.ps1` `534` 测 `0` 失败、`assembleDebug`/`assembleRelease`（`build-20261121-024314-279.log`）与 Lint `0` errors 通过；待封包与 E5 实车测试 | [SurroundFactoryCalibrationParser.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundFactoryCalibrationParser.java)
+- 2026-11-21 01:49:06 +08:00 | 记录 `build20` 实车 360 错位现象并核对原厂标定/车模影响（纯文档，未改源码） | 用户确认实车主要为车头/车尾与两侧对不上、比例怪异、缝隙明显（车模也为星舰7）；核实车模 PNG 不参与投影但代码 `E5_CAR_*` 达 `213×534 cm` 导致视觉比例与盲区/接缝失真，获取 E5 原厂标定（`avm_calib_res`）可治本且当前仅支持 JSON/ZIP 导入 | [SurroundCalibrationProfile.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundCalibrationProfile.java#L19-L23)
 - 2026-11-20 00:43:30 +08:00 | 封包 `build20` 并发布 GitHub Pre-release | 提交 `4836da2`、标签 `v1.6.6-test-11192353-build20` 推送至 `johnwyatt041-commits/EVCam`，完成 `outputs/` 封包（A `7,887,580` B、`c0af422a...`；B `7,903,964` B、`07d96119...`；`mappings.zip` `13,169,763` B、`b1be5a6f...`）及 `build18` 归档，GitHub 6 资产大小与 SHA256 回读一致（待实车复测）
 - 2026-11-20 00:01:30 +08:00 | 新增 4.3 四路外参微调、分槽保存与 JSON 导出并完成全量离线验证（`1.6.6-test-11192353`） | `verify.ps1` 双风味 `530` 测 `0` 失败 `0` 跳过、`assembleDebug`/`assembleRelease` 成功（`build-20261119-235447-318.log`）；双风味 Lint `0` errors（`2162` warnings）；`check_docs.py` 通过 | [SurroundExtrinsicAdjustment.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundExtrinsicAdjustment.java)
 - 2026-11-19 23:04:30 +08:00 | 新增 360 引导线宽度调节、全四分栏「编辑布局」统一按键底色透明度与消隙（`1.6.6-test-11192257`） | `verify.ps1` `524` 测 `0` 失败、构建成功、Lint `0` errors | [PreviewEditorController.java](../../app/src/main/java/com/kooo/evcam/ui/PreviewEditorController.java)
 
 ## 下一步
 
-1. 在银河 E5 实车安装 `build20`（`1.6.6-test-11192353`）复测：APVP 40007 转向曲线、车速规则开关引导线、模式 D 转向灯联动、360 宽度/底色透明度调节，以及车位内用 4.3「四路镜头外参微调」调平前后视角并验证分槽保存与导出。
+1. 等待用户确认是否封包 `build21` 并发布 GitHub Pre-release，随后在银河 E5 实车验证 4.3「参考网格/隐藏车模/单路独显/焦距缩放 Scale」，或导入提取后的 E5 原厂 `avm_calib_res` 标定目录。

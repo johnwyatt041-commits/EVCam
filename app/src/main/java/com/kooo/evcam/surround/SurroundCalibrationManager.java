@@ -4,6 +4,7 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.database.Cursor;
 import android.net.Uri;
+import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
 
 import androidx.annotation.NonNull;
@@ -19,6 +20,9 @@ import com.google.gson.JsonPrimitive;
 import com.google.gson.JsonSyntaxException;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.ConvertedFactoryBundle;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.FactoryBundleInput;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.NamedBytes;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
@@ -44,8 +48,11 @@ import java.util.zip.ZipInputStream;
 public final class SurroundCalibrationManager {
 
     private static final long MAX_CALIBRATION_FILE_BYTES = 2L * 1024L * 1024L;
-    private static final long MAX_CALIBRATION_ZIP_BYTES = 8L * 1024L * 1024L;
-    private static final long MAX_MESH_FILE_BYTES = 4L * 1024L * 1024L;
+    private static final long MAX_CALIBRATION_ZIP_BYTES = 24L * 1024L * 1024L;
+    private static final long MAX_MESH_FILE_BYTES = 8L * 1024L * 1024L;
+    private static final long MAX_BIRD_MESH_BYTES = 16L * 1024L * 1024L;
+    private static final long MAX_FACTORY_TABLE_BYTES = 16L * 1024L * 1024L;
+    private static final long MAX_FACTORY_INI_BYTES = 256L * 1024L;
 
     public static final String CUSTOM_CALIBRATION_FILE_NAME = "custom_e5_calibration.json";
     public static final String CUSTOM_BIRD_MESH_FILE_NAME = "custom_bird.mesh";
@@ -260,6 +267,7 @@ public final class SurroundCalibrationManager {
         // 若标定坐标未以车体中心为 Y 原点（例如原始坐标前后相机中点约 -142.4cm），自动平移对齐车体中心；
         // 若 JSON 已显式声明 vehicle_centered=true（例如用户微调后导出的档案），则严格保留原始外参坐标不再二次平移。
         boolean explicitVehicleCentered = optBoolean(root, "vehicle_centered", false);
+        double birdOffsetYCm = optDouble(root, "bird_offset_y_cm", Double.NaN);
         CameraCalibration frontCal = parsed.get("front");
         CameraCalibration backCal = parsed.get("back");
         if (!explicitVehicleCentered && frontCal != null && backCal != null) {
@@ -276,12 +284,18 @@ public final class SurroundCalibrationManager {
                             c.xi, c.usePolynomialDistortion, c.distortion));
                 }
                 parsed = recentered;
+                if (!Double.isFinite(birdOffsetYCm)) {
+                    birdOffsetYCm = midYCm;
+                }
             }
+        }
+        if (!Double.isFinite(birdOffsetYCm)) {
+            birdOffsetYCm = SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM;
         }
 
         String name = optString(root, "profile_name", "本地导入 E5 校准");
-        return new SurroundCalibrationProfile(name, true, false,
-                groundWidthCm, groundLengthCm, groundFrontExtensionCm, parsed);
+        return new SurroundCalibrationProfile(name, true, false, false,
+                birdOffsetYCm, groundWidthCm, groundLengthCm, groundFrontExtensionCm, parsed);
     }
 
     /** 将生效中的 360 标定档案（含已应用的外参微调）序列化为标准 1.3 `calibration.json` 文本。 */
@@ -305,6 +319,7 @@ public final class SurroundCalibrationManager {
         root.add("image_size", imageSize);
         root.addProperty("lens_model", "opencv_fisheye_theta_polynomial");
         root.addProperty("vehicle_centered", true);
+        root.addProperty("bird_offset_y_cm", profile.birdCenterOffsetYCm);
 
         JsonObject camerasObj = new JsonObject();
         String[][] exportKeys = {
@@ -386,12 +401,15 @@ public final class SurroundCalibrationManager {
         }
     }
 
-    /** 扫描目录下可用于导入的 E5 `calibration.json` 或标定 `.zip` 候选文件（含一层子目录）。 */
+    /** 扫描目录下可用于导入的 E5 `calibration.json`、标定 `.zip` 或原厂标定文件夹（`Table.db` + `.param`）。 */
     @NonNull
     public static List<File> findCalibrationCandidates(@Nullable File searchRoot) {
         List<File> out = new ArrayList<>();
         if (searchRoot == null || !searchRoot.isDirectory()) {
             return out;
+        }
+        if (isFactoryCalibrationDir(searchRoot)) {
+            out.add(searchRoot);
         }
         File[] children = searchRoot.listFiles();
         if (children == null) return out;
@@ -399,6 +417,13 @@ public final class SurroundCalibrationManager {
             if (child.isFile() && isCandidateCalibrationFile(child)) {
                 out.add(child);
             } else if (child.isDirectory()) {
+                if (isFactoryCalibrationDir(child)) {
+                    out.add(child);
+                }
+                File nestedData = new File(child, "data");
+                if (isFactoryCalibrationDir(nestedData)) {
+                    out.add(nestedData);
+                }
                 File nestedJson = new File(child, "calibration.json");
                 if (nestedJson.isFile() && isCandidateCalibrationFile(nestedJson)) {
                     out.add(nestedJson);
@@ -417,19 +442,46 @@ public final class SurroundCalibrationManager {
         return out;
     }
 
+    /** 判断目录是否为吉利/Flyme Auto 原厂 360 标定文件夹（同时含 `Table.db` 与至少一个 `.param`）。 */
+    public static boolean isFactoryCalibrationDir(@Nullable File dir) {
+        if (dir == null || !dir.isDirectory()) {
+            return false;
+        }
+        File[] files = dir.listFiles();
+        if (files == null) {
+            return false;
+        }
+        boolean hasTable = false;
+        boolean hasParam = false;
+        for (File f : files) {
+            if (!f.isFile()) continue;
+            String lower = f.getName().toLowerCase(Locale.US);
+            if ("table.db".equals(lower)) {
+                hasTable = f.length() >= SurroundFactoryCalibrationParser.TABLE_RECORD_BYTES;
+            } else if (lower.endsWith(".param") && f.length() == SurroundFactoryCalibrationParser.PARAM_FILE_BYTES) {
+                hasParam = true;
+            }
+        }
+        return hasTable && hasParam;
+    }
+
     private static boolean isCandidateCalibrationFile(@NonNull File f) {
         String name = f.getName().toLowerCase(Locale.US);
         if (name.endsWith(".zip")) {
-            return (name.contains("calib") || name.contains("avm") || name.contains("星舰"))
+            return (name.contains("calib") || name.contains("avm") || name.contains("星舰")
+                    || name.contains("e5") || name.contains("银河") || name.contains("360"))
                     && f.length() > 100 && f.length() <= MAX_CALIBRATION_ZIP_BYTES;
         }
         return ("calibration.json".equals(name) || (name.endsWith(".json") && name.contains("calib")))
                 && f.length() > 100 && f.length() <= MAX_CALIBRATION_FILE_BYTES;
     }
 
-    /** 验证并复制本地 E5 `calibration.json` 或标定 `.zip` 至应用私有目录。 */
+    /** 验证并导入本地 E5 `calibration.json`、标定 `.zip` 或原厂标定目录（`Table.db` + `.param`）。 */
     @NonNull
     public static ImportResult importCalibrationFile(@NonNull File sourceFile, @NonNull File internalDestDir) {
+        if (sourceFile.isDirectory()) {
+            return importFactoryCalibrationDirectory(sourceFile, internalDestDir);
+        }
         if (!sourceFile.isFile() || !sourceFile.canRead()) {
             return new ImportResult(false, "所选标定文件不存在或不可读", null);
         }
@@ -450,6 +502,254 @@ public final class SurroundCalibrationManager {
         }
     }
 
+    /** 导入原厂 360 标定文件夹（支持 `Table.db` + `.param`，若顶层缺少但含 `data/` 则自动下探，亦兼容 `calibration.json` 文件夹）。 */
+    @NonNull
+    public static ImportResult importFactoryCalibrationDirectory(@NonNull File dir, @NonNull File internalDestDir) {
+        if (!dir.isDirectory() || !dir.canRead()) {
+            return new ImportResult(false, "所选标定文件夹不存在或不可读", null);
+        }
+        File targetDir = dir;
+        if (!isFactoryCalibrationDir(targetDir)) {
+            File dataSub = new File(dir, "data");
+            if (isFactoryCalibrationDir(dataSub)) {
+                targetDir = dataSub;
+            }
+        }
+        File[] files = targetDir.listFiles();
+        if (files == null) {
+            return new ImportResult(false, "无法读取标定文件夹内容", null);
+        }
+
+        String calibJson = null;
+        byte[] birdMesh = null;
+        byte[] frontWheelsMesh = null;
+        byte[] rearWheelsMesh = null;
+
+        byte[] tableDb = null;
+        List<NamedBytes> paramFiles = new ArrayList<>();
+        byte[] frontWheelDb = null;
+        byte[] rearWheelDb = null;
+        byte[] configIni = null;
+
+        try {
+            for (File f : files) {
+                if (!f.isFile() || !f.canRead()) continue;
+                String lower = f.getName().toLowerCase(Locale.US);
+                if ("calibration.json".equals(lower)) {
+                    byte[] b = readFileBounded(f, MAX_CALIBRATION_FILE_BYTES);
+                    if (b != null) calibJson = new String(b, StandardCharsets.UTF_8);
+                } else if ("bird.mesh".equals(lower)) {
+                    birdMesh = readFileBounded(f, MAX_BIRD_MESH_BYTES);
+                } else if ("front_wheels.mesh".equals(lower)) {
+                    frontWheelsMesh = readFileBounded(f, MAX_MESH_FILE_BYTES);
+                } else if ("rear_wheels.mesh".equals(lower)) {
+                    rearWheelsMesh = readFileBounded(f, MAX_MESH_FILE_BYTES);
+                } else if ("table.db".equals(lower)) {
+                    tableDb = readFileBounded(f, MAX_FACTORY_TABLE_BYTES);
+                    if (tableDb == null) {
+                        return new ImportResult(false, "Table.db 大小超出限制（需 <= 16MB）", null);
+                    }
+                } else if (lower.endsWith(".param")) {
+                    byte[] b = readFileBounded(f, 4096);
+                    if (b != null) {
+                        paramFiles.add(new NamedBytes(f.getName(), b));
+                    }
+                } else if ("table_cam_two_front.db".equals(lower)) {
+                    frontWheelDb = readFileBounded(f, MAX_FACTORY_TABLE_BYTES);
+                } else if ("table_cam_two_rear.db".equals(lower)) {
+                    rearWheelDb = readFileBounded(f, MAX_FACTORY_TABLE_BYTES);
+                } else if ("config.ini".equals(lower)) {
+                    configIni = readFileBounded(f, MAX_FACTORY_INI_BYTES);
+                }
+            }
+
+            if (configIni == null && targetDir.getParentFile() != null) {
+                File parentIni = new File(targetDir.getParentFile(), "config.ini");
+                if (parentIni.isFile() && parentIni.canRead()) {
+                    configIni = readFileBounded(parentIni, MAX_FACTORY_INI_BYTES);
+                }
+            }
+
+            if (calibJson != null) {
+                return importCalibrationRaw(calibJson, dir.getName(), internalDestDir,
+                        birdMesh, frontWheelsMesh, rearWheelsMesh);
+            }
+            if (tableDb == null) {
+                return new ImportResult(false, "缺少 Table.db，请选择包含映射表的标定文件夹（如 avm_calib_res 或 data）。", null);
+            }
+            if (paramFiles.isEmpty()) {
+                return new ImportResult(false, "缺少 .param 标定参数文件，请与 Table.db 放在同一文件夹。", null);
+            }
+            ConvertedFactoryBundle converted = SurroundFactoryCalibrationParser.convertFactoryBundle(
+                    new FactoryBundleInput(dir.getName(), tableDb, paramFiles, frontWheelDb, rearWheelDb, configIni));
+            return importCalibrationRaw(converted.calibrationJson, dir.getName(), internalDestDir,
+                    converted.birdMesh, converted.frontWheelsMesh, converted.rearWheelsMesh);
+        } catch (IllegalArgumentException e) {
+            return new ImportResult(false, "原厂标定校验/转换失败：" + e.getMessage(), null);
+        } catch (IOException e) {
+            return new ImportResult(false, "读取原厂标定文件夹失败：" + e.getMessage(), null);
+        }
+    }
+
+    /** 通过系统文件夹选择器 (SAF Tree Uri) 导入原厂标定文件夹（支持 `avm_calib_res` / `data` / `calibration.json` 文件夹）。 */
+    @NonNull
+    public static ImportResult importCalibrationTreeUri(@NonNull Context context,
+                                                        @NonNull Uri treeUri,
+                                                        @NonNull File internalDestDir) {
+        ContentResolver resolver = context.getContentResolver();
+        String rootDocId;
+        try {
+            rootDocId = DocumentsContract.getTreeDocumentId(treeUri);
+        } catch (IllegalArgumentException e) {
+            return new ImportResult(false, "无法解析所选文件夹 Uri", null);
+        }
+        String folderName = queryTreeDisplayName(resolver, treeUri, rootDocId);
+
+        try {
+            TreeScanResult rootScan = scanTreeDocumentDir(resolver, treeUri, rootDocId);
+            TreeScanResult activeScan = rootScan;
+            byte[] parentConfigIni = rootScan.configIni;
+            if (!activeScan.hasFactoryOrJson() && rootScan.dataSubDocId != null) {
+                activeScan = scanTreeDocumentDir(resolver, treeUri, rootScan.dataSubDocId);
+                if (activeScan.configIni == null) {
+                    activeScan.configIni = parentConfigIni;
+                }
+            }
+            if (activeScan.calibJson != null) {
+                return importCalibrationRaw(activeScan.calibJson, folderName, internalDestDir,
+                        activeScan.birdMesh, activeScan.frontWheelsMesh, activeScan.rearWheelsMesh);
+            }
+            if (activeScan.tableDb == null) {
+                return new ImportResult(false, "所选文件夹缺少 Table.db（或 calibration.json），请选择原厂 avm_calib_res / data 目录。", null);
+            }
+            if (activeScan.paramFiles.isEmpty()) {
+                return new ImportResult(false, "所选文件夹缺少 .param 参数文件，请与 Table.db 放在同一目录。", null);
+            }
+            ConvertedFactoryBundle converted = SurroundFactoryCalibrationParser.convertFactoryBundle(
+                    new FactoryBundleInput(folderName, activeScan.tableDb, activeScan.paramFiles,
+                            activeScan.frontWheelDb, activeScan.rearWheelDb, activeScan.configIni));
+            return importCalibrationRaw(converted.calibrationJson, folderName, internalDestDir,
+                    converted.birdMesh, converted.frontWheelsMesh, converted.rearWheelsMesh);
+        } catch (IllegalArgumentException e) {
+            return new ImportResult(false, "原厂标定校验/转换失败：" + e.getMessage(), null);
+        } catch (IOException | SecurityException e) {
+            return new ImportResult(false, "读取标定文件夹失败：" + e.getMessage(), null);
+        }
+    }
+
+    private static final class TreeScanResult {
+        @Nullable String calibJson;
+        @Nullable byte[] birdMesh;
+        @Nullable byte[] frontWheelsMesh;
+        @Nullable byte[] rearWheelsMesh;
+        @Nullable byte[] tableDb;
+        final List<NamedBytes> paramFiles = new ArrayList<>();
+        @Nullable byte[] frontWheelDb;
+        @Nullable byte[] rearWheelDb;
+        @Nullable byte[] configIni;
+        @Nullable String dataSubDocId;
+
+        boolean hasFactoryOrJson() {
+            return calibJson != null || (tableDb != null && !paramFiles.isEmpty());
+        }
+    }
+
+    @NonNull
+    private static TreeScanResult scanTreeDocumentDir(@NonNull ContentResolver resolver,
+                                                      @NonNull Uri treeUri,
+                                                      @NonNull String parentDocId) throws IOException {
+        TreeScanResult scan = new TreeScanResult();
+        Uri childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(treeUri, parentDocId);
+        String[] projection = {
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE
+        };
+        try (Cursor cursor = resolver.query(childrenUri, projection, null, null, null)) {
+            if (cursor == null) {
+                throw new IOException("系统未能列举目录内容");
+            }
+            int idCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID);
+            int nameCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME);
+            int mimeCol = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE);
+            while (cursor.moveToNext()) {
+                String docId = idCol >= 0 ? cursor.getString(idCol) : null;
+                String name = nameCol >= 0 ? cursor.getString(nameCol) : null;
+                String mime = mimeCol >= 0 ? cursor.getString(mimeCol) : null;
+                if (docId == null || name == null) continue;
+                String lower = name.toLowerCase(Locale.US);
+                boolean isDir = DocumentsContract.Document.MIME_TYPE_DIR.equals(mime);
+                if (isDir) {
+                    if ("data".equals(lower) && scan.dataSubDocId == null) {
+                        scan.dataSubDocId = docId;
+                    }
+                    continue;
+                }
+                Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId);
+                if ("calibration.json".equals(lower)) {
+                    byte[] b = readUriBounded(resolver, docUri, MAX_CALIBRATION_FILE_BYTES);
+                    if (b != null) scan.calibJson = new String(b, StandardCharsets.UTF_8);
+                } else if ("bird.mesh".equals(lower)) {
+                    scan.birdMesh = readUriBounded(resolver, docUri, MAX_BIRD_MESH_BYTES);
+                } else if ("front_wheels.mesh".equals(lower)) {
+                    scan.frontWheelsMesh = readUriBounded(resolver, docUri, MAX_MESH_FILE_BYTES);
+                } else if ("rear_wheels.mesh".equals(lower)) {
+                    scan.rearWheelsMesh = readUriBounded(resolver, docUri, MAX_MESH_FILE_BYTES);
+                } else if ("table.db".equals(lower)) {
+                    byte[] b = readUriBounded(resolver, docUri, MAX_FACTORY_TABLE_BYTES);
+                    if (b == null) throw new IllegalArgumentException("Table.db 大小超出限制（需 <= 16MB）");
+                    scan.tableDb = b;
+                } else if (lower.endsWith(".param")) {
+                    byte[] b = readUriBounded(resolver, docUri, 4096);
+                    if (b != null) scan.paramFiles.add(new NamedBytes(name, b));
+                } else if ("table_cam_two_front.db".equals(lower)) {
+                    scan.frontWheelDb = readUriBounded(resolver, docUri, MAX_FACTORY_TABLE_BYTES);
+                } else if ("table_cam_two_rear.db".equals(lower)) {
+                    scan.rearWheelDb = readUriBounded(resolver, docUri, MAX_FACTORY_TABLE_BYTES);
+                } else if ("config.ini".equals(lower)) {
+                    scan.configIni = readUriBounded(resolver, docUri, MAX_FACTORY_INI_BYTES);
+                }
+            }
+        }
+        return scan;
+    }
+
+    @Nullable
+    private static byte[] readUriBounded(@NonNull ContentResolver resolver,
+                                         @NonNull Uri uri,
+                                         long maxBytes) throws IOException {
+        try (InputStream in = resolver.openInputStream(uri)) {
+            if (in == null) return null;
+            return readBoundedBytes(in, maxBytes);
+        }
+    }
+
+    @Nullable
+    private static byte[] readFileBounded(@NonNull File f, long maxBytes) throws IOException {
+        if (!f.isFile() || f.length() <= 0 || f.length() > maxBytes) {
+            return null;
+        }
+        try (FileInputStream fis = new FileInputStream(f)) {
+            return readBoundedBytes(fis, maxBytes);
+        }
+    }
+
+    @NonNull
+    private static String queryTreeDisplayName(@NonNull ContentResolver resolver,
+                                               @NonNull Uri treeUri,
+                                               @NonNull String rootDocId) {
+        try {
+            Uri docUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, rootDocId);
+            String name = queryDisplayName(resolver, docUri);
+            if (!name.isEmpty() && !"calibration.json".equals(name)) {
+                return name;
+            }
+        } catch (Exception ignored) {
+        }
+        String last = rootDocId.contains("/") ? rootDocId.substring(rootDocId.lastIndexOf('/') + 1) : rootDocId;
+        return last.isEmpty() ? "avm_calib_res" : last;
+    }
+
     /** 通过系统文件选择器 (SAF Uri) 验证并导入本地 E5 `calibration.json` 或标定 `.zip`。 */
     @NonNull
     public static ImportResult importCalibrationUri(@NonNull Context context,
@@ -463,7 +763,7 @@ public final class SurroundCalibrationManager {
             }
             byte[] bytes = readBoundedBytes(in, MAX_CALIBRATION_ZIP_BYTES);
             if (bytes == null) {
-                return new ImportResult(false, "标定文件大小超限（需 <= 8MB）", null);
+                return new ImportResult(false, "标定文件大小超限（需 <= 24MB）", null);
             }
             return importCalibrationBytes(bytes, displayName, internalDestDir);
         } catch (IOException e) {
@@ -493,6 +793,12 @@ public final class SurroundCalibrationManager {
         byte[] birdMesh = null;
         byte[] frontWheelsMesh = null;
         byte[] rearWheelsMesh = null;
+        byte[] tableDb = null;
+        List<NamedBytes> paramFiles = new ArrayList<>();
+        byte[] frontWheelDb = null;
+        byte[] rearWheelDb = null;
+        byte[] configIni = null;
+
         try (ZipInputStream zis = new ZipInputStream(new ByteArrayInputStream(zipBytes))) {
             ZipEntry entry;
             while ((entry = zis.getNextEntry()) != null) {
@@ -503,27 +809,52 @@ public final class SurroundCalibrationManager {
                 if (entryName.contains("..")) {
                     continue;
                 }
-                String baseName = new File(entryName).getName().toLowerCase(Locale.US);
-                if ("calibration.json".equals(baseName)) {
+                String baseName = new File(entryName).getName();
+                String lower = baseName.toLowerCase(Locale.US);
+                if ("calibration.json".equals(lower)) {
                     byte[] jsonBytes = readBoundedBytes(zis, MAX_CALIBRATION_FILE_BYTES);
                     if (jsonBytes != null) {
                         calibRaw = new String(jsonBytes, StandardCharsets.UTF_8);
                     }
-                } else if ("bird.mesh".equals(baseName)) {
-                    birdMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
-                } else if ("front_wheels.mesh".equals(baseName)) {
+                } else if ("bird.mesh".equals(lower)) {
+                    birdMesh = readBoundedBytes(zis, MAX_BIRD_MESH_BYTES);
+                } else if ("front_wheels.mesh".equals(lower)) {
                     frontWheelsMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
-                } else if ("rear_wheels.mesh".equals(baseName)) {
+                } else if ("rear_wheels.mesh".equals(lower)) {
                     rearWheelsMesh = readBoundedBytes(zis, MAX_MESH_FILE_BYTES);
+                } else if ("table.db".equals(lower)) {
+                    tableDb = readBoundedBytes(zis, MAX_FACTORY_TABLE_BYTES);
+                } else if (lower.endsWith(".param")) {
+                    byte[] pBytes = readBoundedBytes(zis, 4096);
+                    if (pBytes != null) {
+                        paramFiles.add(new NamedBytes(baseName, pBytes));
+                    }
+                } else if ("table_cam_two_front.db".equals(lower)) {
+                    frontWheelDb = readBoundedBytes(zis, MAX_FACTORY_TABLE_BYTES);
+                } else if ("table_cam_two_rear.db".equals(lower)) {
+                    rearWheelDb = readBoundedBytes(zis, MAX_FACTORY_TABLE_BYTES);
+                } else if ("config.ini".equals(lower)) {
+                    configIni = readBoundedBytes(zis, MAX_FACTORY_INI_BYTES);
                 }
             }
         } catch (IOException e) {
             return new ImportResult(false, "解析标定压缩包失败：" + e.getMessage(), null);
         }
-        if (calibRaw == null) {
-            return new ImportResult(false, "压缩包内未找到 calibration.json", null);
+        if (calibRaw != null) {
+            return importCalibrationRaw(calibRaw, displayName, internalDestDir,
+                    birdMesh, frontWheelsMesh, rearWheelsMesh);
         }
-        return importCalibrationRaw(calibRaw, displayName, internalDestDir, birdMesh, frontWheelsMesh, rearWheelsMesh);
+        if (tableDb != null && !paramFiles.isEmpty()) {
+            try {
+                ConvertedFactoryBundle converted = SurroundFactoryCalibrationParser.convertFactoryBundle(
+                        new FactoryBundleInput(displayName, tableDb, paramFiles, frontWheelDb, rearWheelDb, configIni));
+                return importCalibrationRaw(converted.calibrationJson, displayName, internalDestDir,
+                        converted.birdMesh, converted.frontWheelsMesh, converted.rearWheelsMesh);
+            } catch (IllegalArgumentException e) {
+                return new ImportResult(false, "原厂标定压缩包校验/转换失败：" + e.getMessage(), null);
+            }
+        }
+        return new ImportResult(false, "压缩包内未找到 calibration.json 或原厂 Table.db + .param", null);
     }
 
     @NonNull

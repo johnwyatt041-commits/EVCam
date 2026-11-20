@@ -646,7 +646,7 @@
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_calibration_import_local"
                                 style="@style/Widget.EVCam.OptionPill"
-                                android:text="导入 Download 本地校准" />
+                                android:text="导入本地/原厂校准" />
                         </LinearLayout>
                     </HorizontalScrollView>
 

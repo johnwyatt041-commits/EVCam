@@ -39,6 +39,16 @@ public final class SurroundExtrinsicAdjustment {
     public static final int MIN_POS_Z_CM = -40;
     public static final int MAX_POS_Z_CM = 40;
 
+    public static final float MIN_SCALE = 0.70f;
+    public static final float MAX_SCALE = 1.30f;
+    public static final float DEFAULT_SCALE = 1.00f;
+    public static final int MIN_CX_OFFSET_PX = -60;
+    public static final int MAX_CX_OFFSET_PX = 60;
+    public static final int MIN_CY_OFFSET_PX = -60;
+    public static final int MAX_CY_OFFSET_PX = 60;
+    public static final float MIN_K1_DELTA = -0.150f;
+    public static final float MAX_K1_DELTA = 0.150f;
+
     public static final List<String> CAMERA_KEYS = Collections.unmodifiableList(
             Arrays.asList("front", "back", "left", "right"));
 
@@ -48,9 +58,9 @@ public final class SurroundExtrinsicAdjustment {
     public static final SurroundExtrinsicAdjustment IDENTITY =
             new SurroundExtrinsicAdjustment(Collections.emptyMap());
 
-    /** 单路摄像头外参微调量（不可变）。 */
+    /** 单路摄像头外参及内参微调量（不可变）。 */
     public static final class CameraOffset {
-        public static final CameraOffset ZERO = new CameraOffset(0f, 0f, 0f, 0, 0, 0);
+        public static final CameraOffset ZERO = new CameraOffset(0f, 0f, 0f, 0, 0, 0, DEFAULT_SCALE, 0, 0, 0f);
 
         public final float pitchDeg;
         public final float yawDeg;
@@ -58,6 +68,10 @@ public final class SurroundExtrinsicAdjustment {
         public final int posXCm;
         public final int posYCm;
         public final int posZCm;
+        public final float scale;
+        public final int cxOffsetPx;
+        public final int cyOffsetPx;
+        public final float k1Delta;
 
         public CameraOffset(float pitchDeg,
                             float yawDeg,
@@ -65,12 +79,29 @@ public final class SurroundExtrinsicAdjustment {
                             int posXCm,
                             int posYCm,
                             int posZCm) {
+            this(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm, DEFAULT_SCALE, 0, 0, 0f);
+        }
+
+        public CameraOffset(float pitchDeg,
+                            float yawDeg,
+                            float rollDeg,
+                            int posXCm,
+                            int posYCm,
+                            int posZCm,
+                            float scale,
+                            int cxOffsetPx,
+                            int cyOffsetPx,
+                            float k1Delta) {
             this.pitchDeg = normalizeAngle(pitchDeg, MIN_PITCH_DEG, MAX_PITCH_DEG);
             this.yawDeg = normalizeAngle(yawDeg, MIN_YAW_DEG, MAX_YAW_DEG);
             this.rollDeg = normalizeAngle(rollDeg, MIN_ROLL_DEG, MAX_ROLL_DEG);
             this.posXCm = clampInt(posXCm, MIN_POS_X_CM, MAX_POS_X_CM);
             this.posYCm = clampInt(posYCm, MIN_POS_Y_CM, MAX_POS_Y_CM);
             this.posZCm = clampInt(posZCm, MIN_POS_Z_CM, MAX_POS_Z_CM);
+            this.scale = normalizeScale(scale);
+            this.cxOffsetPx = clampInt(cxOffsetPx, MIN_CX_OFFSET_PX, MAX_CX_OFFSET_PX);
+            this.cyOffsetPx = clampInt(cyOffsetPx, MIN_CY_OFFSET_PX, MAX_CY_OFFSET_PX);
+            this.k1Delta = normalizeK1Delta(k1Delta);
         }
 
         public boolean isZero() {
@@ -79,37 +110,71 @@ public final class SurroundExtrinsicAdjustment {
                     && Math.abs(rollDeg) < 1e-4f
                     && posXCm == 0
                     && posYCm == 0
-                    && posZCm == 0;
+                    && posZCm == 0
+                    && Math.abs(scale - DEFAULT_SCALE) < 1e-4f
+                    && cxOffsetPx == 0
+                    && cyOffsetPx == 0
+                    && Math.abs(k1Delta) < 1e-5f;
         }
 
         @NonNull
         public CameraOffset withPitchDeg(float nextPitchDeg) {
-            return new CameraOffset(nextPitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm);
+            return new CameraOffset(nextPitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
         public CameraOffset withYawDeg(float nextYawDeg) {
-            return new CameraOffset(pitchDeg, nextYawDeg, rollDeg, posXCm, posYCm, posZCm);
+            return new CameraOffset(pitchDeg, nextYawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
         public CameraOffset withRollDeg(float nextRollDeg) {
-            return new CameraOffset(pitchDeg, yawDeg, nextRollDeg, posXCm, posYCm, posZCm);
+            return new CameraOffset(pitchDeg, yawDeg, nextRollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
         public CameraOffset withPosXCm(int nextPosXCm) {
-            return new CameraOffset(pitchDeg, yawDeg, rollDeg, nextPosXCm, posYCm, posZCm);
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, nextPosXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
         public CameraOffset withPosYCm(int nextPosYCm) {
-            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, nextPosYCm, posZCm);
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, nextPosYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
         public CameraOffset withPosZCm(int nextPosZCm) {
-            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, nextPosZCm);
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, nextPosZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
+        }
+
+        @NonNull
+        public CameraOffset withScale(float nextScale) {
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    nextScale, cxOffsetPx, cyOffsetPx, k1Delta);
+        }
+
+        @NonNull
+        public CameraOffset withCxOffsetPx(int nextCxOffsetPx) {
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, nextCxOffsetPx, cyOffsetPx, k1Delta);
+        }
+
+        @NonNull
+        public CameraOffset withCyOffsetPx(int nextCyOffsetPx) {
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, nextCyOffsetPx, k1Delta);
+        }
+
+        @NonNull
+        public CameraOffset withK1Delta(float nextK1Delta) {
+            return new CameraOffset(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, nextK1Delta);
         }
 
         @NonNull
@@ -117,8 +182,9 @@ public final class SurroundExtrinsicAdjustment {
             if (isZero()) {
                 return "0";
             }
-            return String.format(Locale.US, "%.1f,%.1f,%.1f,%d,%d,%d",
-                    pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm);
+            return String.format(Locale.US, "%.1f,%.1f,%.1f,%d,%d,%d,%.2f,%d,%d,%.3f",
+                    pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @Override
@@ -131,12 +197,17 @@ public final class SurroundExtrinsicAdjustment {
                     && Float.compare(that.rollDeg, rollDeg) == 0
                     && posXCm == that.posXCm
                     && posYCm == that.posYCm
-                    && posZCm == that.posZCm;
+                    && posZCm == that.posZCm
+                    && Float.compare(that.scale, scale) == 0
+                    && cxOffsetPx == that.cxOffsetPx
+                    && cyOffsetPx == that.cyOffsetPx
+                    && Float.compare(that.k1Delta, k1Delta) == 0;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm);
+            return Objects.hash(pitchDeg, yawDeg, rollDeg, posXCm, posYCm, posZCm,
+                    scale, cxOffsetPx, cyOffsetPx, k1Delta);
         }
 
         @NonNull
@@ -227,7 +298,7 @@ public final class SurroundExtrinsicAdjustment {
             return "";
         }
         JsonObject root = new JsonObject();
-        root.addProperty("version", 1);
+        root.addProperty("version", 2);
         JsonObject camsObj = new JsonObject();
         for (String key : CAMERA_KEYS) {
             CameraOffset off = getCamera(key);
@@ -239,6 +310,10 @@ public final class SurroundExtrinsicAdjustment {
             item.addProperty("pos_x_cm", off.posXCm);
             item.addProperty("pos_y_cm", off.posYCm);
             item.addProperty("pos_z_cm", off.posZCm);
+            item.addProperty("scale", off.scale);
+            item.addProperty("cx_px", off.cxOffsetPx);
+            item.addProperty("cy_px", off.cyOffsetPx);
+            item.addProperty("k1_delta", off.k1Delta);
             camsObj.add(key, item);
         }
         root.add("cameras", camsObj);
@@ -271,13 +346,17 @@ public final class SurroundExtrinsicAdjustment {
                     continue;
                 }
                 JsonObject item = camEl.getAsJsonObject();
-                float pitch = optFloat(item, "pitch_deg");
-                float yaw = optFloat(item, "yaw_deg");
-                float roll = optFloat(item, "roll_deg");
+                float pitch = optFloat(item, "pitch_deg", 0f);
+                float yaw = optFloat(item, "yaw_deg", 0f);
+                float roll = optFloat(item, "roll_deg", 0f);
                 int dx = optInt(item, "pos_x_cm");
                 int dy = optInt(item, "pos_y_cm");
                 int dz = optInt(item, "pos_z_cm");
-                CameraOffset off = new CameraOffset(pitch, yaw, roll, dx, dy, dz);
+                float scale = optFloat(item, "scale", DEFAULT_SCALE);
+                int dcx = optInt(item, "cx_px");
+                int dcy = optInt(item, "cy_px");
+                float dk1 = optFloat(item, "k1_delta", 0f);
+                CameraOffset off = new CameraOffset(pitch, yaw, roll, dx, dy, dz, scale, dcx, dcy, dk1);
                 if (!off.isZero()) {
                     map.put(key, off);
                 }
@@ -290,10 +369,11 @@ public final class SurroundExtrinsicAdjustment {
     }
 
     /**
-     * 将单路位置偏移与局部旋转叠加到基准相机参数上（右手系 `q = R * (world - pos)`）：
+     * 将单路位置偏移、局部旋转及内参缩放/光心/畸变微调叠加到基准相机参数上（右手系 `q = R * (world - pos)`）：
      * - `+pitchDeg`：物理镜头向上仰/更平，减少对地俯角（地面采样点在原图下移，推走误入地面的远景）
      * - `+yawDeg`：物理镜头向右偏航
      * - `+rollDeg`：物理镜头顺时针滚转
+     * - `scale > 1.0`：按 `fx/scale` 缩小虚拟焦距，使鸟瞰/单视角画面中地面景物放大撑宽；`< 1.0` 则缩小收紧
      */
     @NonNull
     public static CameraCalibration applyToCamera(@NonNull CameraCalibration base,
@@ -333,6 +413,15 @@ public final class SurroundExtrinsicAdjustment {
         double[][] rBase = {base.r0, base.r1, base.r2};
         double[][] rNew = matMul3(d, rBase);
 
+        double safeScale = Math.max(MIN_SCALE, Math.min(MAX_SCALE, offset.scale));
+        double nextFx = base.fx / safeScale;
+        double nextFy = base.fy / safeScale;
+        double nextCx = Math.max(0.0, Math.min(SurroundCalibrationProfile.IMAGE_WIDTH, base.cx + offset.cxOffsetPx));
+        double nextCy = Math.max(0.0, Math.min(SurroundCalibrationProfile.IMAGE_HEIGHT, base.cy + offset.cyOffsetPx));
+        double[] nextDist = new double[Math.max(4, base.distortion.length)];
+        System.arraycopy(base.distortion, 0, nextDist, 0, base.distortion.length);
+        nextDist[0] += offset.k1Delta;
+
         return new CameraCalibration(
                 base.position,
                 nextX,
@@ -341,13 +430,13 @@ public final class SurroundExtrinsicAdjustment {
                 rNew[0],
                 rNew[1],
                 rNew[2],
-                base.fx,
-                base.fy,
-                base.cx,
-                base.cy,
+                nextFx,
+                nextFy,
+                nextCx,
+                nextCy,
                 base.xi,
                 base.usePolynomialDistortion,
-                base.distortion
+                nextDist
         );
     }
 
@@ -368,6 +457,7 @@ public final class SurroundExtrinsicAdjustment {
                 base.isCustomCalibration,
                 base.useBuiltInMeshes,
                 true,
+                base.birdCenterOffsetYCm,
                 base.groundWidthCm,
                 base.groundLengthCm,
                 base.groundFrontExtensionCm,
@@ -384,18 +474,36 @@ public final class SurroundExtrinsicAdjustment {
         return Math.abs(rounded) < 1e-4f ? 0f : rounded;
     }
 
+    private static float normalizeScale(float raw) {
+        if (!Float.isFinite(raw) || raw <= 0f) {
+            return DEFAULT_SCALE;
+        }
+        float clamped = Math.max(MIN_SCALE, Math.min(MAX_SCALE, raw));
+        float rounded = Math.round(clamped * 100.0f) / 100.0f;
+        return Math.abs(rounded - DEFAULT_SCALE) < 1e-4f ? DEFAULT_SCALE : rounded;
+    }
+
+    private static float normalizeK1Delta(float raw) {
+        if (!Float.isFinite(raw)) {
+            return 0f;
+        }
+        float clamped = Math.max(MIN_K1_DELTA, Math.min(MAX_K1_DELTA, raw));
+        float rounded = Math.round(clamped * 200.0f) / 200.0f;
+        return Math.abs(rounded) < 1e-5f ? 0f : rounded;
+    }
+
     private static int clampInt(int raw, int minVal, int maxVal) {
         return Math.max(minVal, Math.min(maxVal, raw));
     }
 
-    private static float optFloat(@NonNull JsonObject obj, @NonNull String key) {
+    private static float optFloat(@NonNull JsonObject obj, @NonNull String key, float fallback) {
         JsonElement el = obj.get(key);
-        if (el == null || el.isJsonNull()) return 0f;
+        if (el == null || el.isJsonNull()) return fallback;
         try {
             float v = el.getAsFloat();
-            return Float.isFinite(v) ? v : 0f;
+            return Float.isFinite(v) ? v : fallback;
         } catch (RuntimeException e) {
-            return 0f;
+            return fallback;
         }
     }
 

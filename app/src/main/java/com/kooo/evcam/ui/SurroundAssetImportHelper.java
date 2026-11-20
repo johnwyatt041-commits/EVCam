@@ -42,25 +42,91 @@ public final class SurroundAssetImportHelper {
     public static void showLocalCalibrationPicker(@NonNull Fragment fragment,
                                                   @NonNull ActivityResultLauncher<String[]> safLauncher,
                                                   @NonNull Consumer<SurroundCalibrationManager.ImportResult> onResult) {
+        showLocalCalibrationPicker(fragment, safLauncher, null, onResult);
+    }
+
+    public static void showLocalCalibrationPicker(@NonNull Fragment fragment,
+                                                  @NonNull ActivityResultLauncher<String[]> safLauncher,
+                                                  @Nullable ActivityResultLauncher<Uri> folderTreeLauncher,
+                                                  @NonNull Consumer<SurroundCalibrationManager.ImportResult> onResult) {
         Context ctx = fragment.getContext();
         if (ctx == null) return;
         File downloadDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
         List<File> candidates = SurroundCalibrationManager.findCalibrationCandidates(downloadDir);
-        showCandidateFilePicker(
-                fragment,
-                ctx,
-                candidates,
-                f -> f.getParentFile() != null && !"Download".equalsIgnoreCase(f.getParentFile().getName())
-                        ? f.getParentFile().getName() + "/" + f.getName()
-                        : f.getName(),
-                "选择本地 E5 校准文件（Download）",
-                "E5 calibration.json",
-                CALIBRATION_MIME_TYPES,
-                safLauncher,
-                selected -> {
+        if (candidates.isEmpty()) {
+            if (folderTreeLauncher != null) {
+                showCalibrationImportSourceDialog(fragment, ctx, safLauncher, folderTreeLauncher);
+            } else {
+                launchDocumentPicker(fragment, ctx, safLauncher, CALIBRATION_MIME_TYPES,
+                        "E5 calibration.json / .zip / 原厂文件夹");
+            }
+            return;
+        }
+        String[] labels = new String[candidates.size()];
+        for (int i = 0; i < candidates.size(); i++) {
+            File f = candidates.get(i);
+            if (f.isDirectory()) {
+                String parentName = f.getParentFile() != null && !"Download".equalsIgnoreCase(f.getParentFile().getName())
+                        ? f.getParentFile().getName() + "/"
+                        : "";
+                labels[i] = "[原厂目录] " + parentName + f.getName();
+            } else if (f.getParentFile() != null && !"Download".equalsIgnoreCase(f.getParentFile().getName())) {
+                labels[i] = f.getParentFile().getName() + "/" + f.getName();
+            } else {
+                labels[i] = f.getName();
+            }
+        }
+        MaterialAlertDialogBuilder builder = new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("选择 E5 校准文件或原厂目录（Download）")
+                .setItems(labels, (d, which) -> {
                     File internalDir = new File(ctx.getFilesDir(), "surround");
-                    onResult.accept(SurroundCalibrationManager.importCalibrationFile(selected, internalDir));
-                });
+                    onResult.accept(SurroundCalibrationManager.importCalibrationFile(candidates.get(which), internalDir));
+                })
+                .setNegativeButton("取消", null);
+        if (folderTreeLauncher != null) {
+            builder.setPositiveButton("选原厂文件夹",
+                    (d, w) -> launchFolderTreePicker(fragment, ctx, folderTreeLauncher));
+            builder.setNeutralButton("选文件(.json/.zip)",
+                    (d, w) -> launchDocumentPicker(fragment, ctx, safLauncher, CALIBRATION_MIME_TYPES,
+                            "E5 calibration.json / .zip"));
+        } else {
+            builder.setNeutralButton("系统文件选择器",
+                    (d, w) -> launchDocumentPicker(fragment, ctx, safLauncher, CALIBRATION_MIME_TYPES,
+                            "E5 calibration.json / .zip"));
+        }
+        builder.show();
+    }
+
+    private static void showCalibrationImportSourceDialog(@NonNull Fragment fragment,
+                                                          @NonNull Context ctx,
+                                                          @NonNull ActivityResultLauncher<String[]> safLauncher,
+                                                          @NonNull ActivityResultLauncher<Uri> folderTreeLauncher) {
+        String[] options = {
+                "选择原厂标定文件夹（avm_calib_res / data，含 Table.db + .param）",
+                "选择标定文件（calibration.json 或 .zip 压缩包）"
+        };
+        new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                .setTitle("导入 360 标定方案")
+                .setItems(options, (d, which) -> {
+                    if (which == 0) {
+                        launchFolderTreePicker(fragment, ctx, folderTreeLauncher);
+                    } else {
+                        launchDocumentPicker(fragment, ctx, safLauncher, CALIBRATION_MIME_TYPES,
+                                "E5 calibration.json / .zip");
+                    }
+                })
+                .setNegativeButton("取消", null)
+                .show();
+    }
+
+    private static void launchFolderTreePicker(@NonNull Fragment fragment,
+                                               @NonNull Context ctx,
+                                               @NonNull ActivityResultLauncher<Uri> folderLauncher) {
+        try {
+            folderLauncher.launch(null);
+        } catch (ActivityNotFoundException | SecurityException e) {
+            showMissingPickerOrPermissionDialog(fragment, ctx, "原厂标定文件夹（Table.db + .param）");
+        }
     }
 
     public static void showLocalCarModelPicker(@NonNull Fragment fragment,

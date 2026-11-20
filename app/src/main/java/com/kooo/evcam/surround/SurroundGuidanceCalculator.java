@@ -58,7 +58,7 @@ public final class SurroundGuidanceCalculator {
         double absRad = Math.toRadians(Math.abs(clampedAngle));
         boolean straight = absRad < 0.008;
 
-        double rearAxleY = SurroundCalibrationProfile.E5_CAR_MIN_Y_CM + 55.0;
+        double rearAxleY = SurroundCalibrationProfile.E5_CAR_MIN_Y_CM + 92.0;
         double turnRadiusCenter = straight ? 1e6 : E5_WHEELBASE_CM / Math.tan(absRad);
         double signTurn = clampedAngle >= 0.0 ? 1.0 : -1.0; // 右转为正 -> 圆心在 +X 侧
         double pivotX = signTurn * turnRadiusCenter;
@@ -190,6 +190,91 @@ public final class SurroundGuidanceCalculator {
         cursor = writeNdcTaperedRibbon(leftOuterPts, 0.0085f, 0.0038f, outerColor, 0.58f, out, cursor);
         cursor = writeNdcTaperedRibbon(rightInnerPts, 0.035f, 0.011f, innerColor, 0.50f, out, cursor);
         writeNdcTaperedRibbon(rightOuterPts, 0.0085f, 0.0038f, outerColor, 0.58f, out, cursor);
+        return new LineStripBatch(out, counts);
+    }
+
+    /**
+     * 生成 4.3 标定辅助用的标准 250 cm 车位与 100 cm 等距世界坐标参考网格，以及 E5 实车外廓框（[-95,+95] × [-231,+231] cm）。
+     */
+    @NonNull
+    public static LineStripBatch buildCalibrationGridBatch(@NonNull SurroundCalibrationProfile profile) {
+        double halfWorldW = halfW(profile.getHalfWorldWidthCm());
+        double minY = profile.getWorldMinYCm();
+        double maxY = profile.getWorldMaxYCm();
+        double spanY = Math.max(100.0, maxY - minY);
+
+        java.util.List<double[][]> segments = new java.util.ArrayList<>();
+        java.util.List<Double> halfWidths = new java.util.ArrayList<>();
+        java.util.List<float[]> colors = new java.util.ArrayList<>();
+
+        float[] slotLineColor = {0.28f, 0.88f, 1.00f, 0.72f};
+        float[] fineGridColor = {0.75f, 0.92f, 1.00f, 0.34f};
+        float[] carOutlineColor = {0.35f, 0.95f, 0.55f, 0.65f};
+
+        // 1. 标准 250 cm 车位两侧竖线 (X = ±125 cm) 与前后保险杠/1 米横线 (Y = ±231, ±331 cm)
+        double[] slotXs = {-125.0, 125.0};
+        for (double x : slotXs) {
+            if (Math.abs(x) <= halfWorldW + 5.0) {
+                segments.add(new double[][]{{x, minY}, {x, maxY}});
+                halfWidths.add(1.6);
+                colors.add(slotLineColor);
+            }
+        }
+        double[] slotYs = {-331.0, -231.0, 231.0, 331.0};
+        for (double y : slotYs) {
+            if (y >= minY && y <= maxY) {
+                segments.add(new double[][]{{-halfWorldW, y}, {halfWorldW, y}});
+                halfWidths.add(1.6);
+                colors.add(slotLineColor);
+            }
+        }
+
+        // 2. 100 cm 等距细标尺网格 (X = 0, ±100, ±200; Y = 0, ±100, ±200, ±300, ±400, ±500)
+        double[] gridXs = {-200.0, -100.0, 0.0, 100.0, 200.0};
+        for (double x : gridXs) {
+            if (Math.abs(x) <= halfWorldW + 5.0) {
+                segments.add(new double[][]{{x, minY}, {x, maxY}});
+                halfWidths.add(0.9);
+                colors.add(fineGridColor);
+            }
+        }
+        double[] gridYs = {-500.0, -400.0, -300.0, -200.0, -100.0, 0.0, 100.0, 200.0, 300.0, 400.0, 500.0};
+        for (double y : gridYs) {
+            if (y >= minY && y <= maxY) {
+                segments.add(new double[][]{{-halfWorldW, y}, {halfWorldW, y}});
+                halfWidths.add(0.9);
+                colors.add(fineGridColor);
+            }
+        }
+
+        // 3. 银河 E5 实车外廓参考框 [-95, +95] × [-231, +231] cm（4 条边）
+        double cxMin = SurroundCalibrationProfile.E5_CAR_MIN_X_CM;
+        double cxMax = SurroundCalibrationProfile.E5_CAR_MAX_X_CM;
+        double cyMin = SurroundCalibrationProfile.E5_CAR_MIN_Y_CM;
+        double cyMax = SurroundCalibrationProfile.E5_CAR_MAX_Y_CM;
+        double[][][] carEdges = {
+                {{cxMin, cyMin}, {cxMin, cyMax}},
+                {{cxMax, cyMin}, {cxMax, cyMax}},
+                {{cxMin, cyMax}, {cxMax, cyMax}},
+                {{cxMin, cyMin}, {cxMax, cyMin}}
+        };
+        for (double[][] edge : carEdges) {
+            segments.add(edge);
+            halfWidths.add(1.4);
+            colors.add(carOutlineColor);
+        }
+
+        int stripCount = segments.size();
+        int stripVerts = 4; // 2 points per segment -> 4 vertices in triangle strip
+        float[] out = new float[stripCount * stripVerts * FLOATS_PER_COLOR_VERTEX];
+        int[] counts = new int[stripCount];
+        int cursor = 0;
+        for (int i = 0; i < stripCount; i++) {
+            double hw = halfWidths.get(i);
+            cursor = writeWorldRibbon(segments.get(i), hw, hw, colors.get(i), 1.0f,
+                    halfWorldW, minY, spanY, out, cursor);
+            counts[i] = stripVerts;
+        }
         return new LineStripBatch(out, counts);
     }
 

@@ -113,6 +113,18 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
                 applyCalibrationImportResult(ctx, result);
             });
 
+    private final ActivityResultLauncher<android.net.Uri> calibrationFolderPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                Context ctx = getContext();
+                if (uri == null || ctx == null) {
+                    return;
+                }
+                File internalDir = new File(ctx.getFilesDir(), "surround");
+                SurroundCalibrationManager.ImportResult result =
+                        SurroundCalibrationManager.importCalibrationTreeUri(ctx, uri, internalDir);
+                applyCalibrationImportResult(ctx, result);
+            });
+
     @Nullable
     @Override
     public View onCreateView(@NonNull LayoutInflater inflater,
@@ -303,7 +315,8 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             refreshCalibrationAndModelUi(requireContext(), false);
         });
         btnCalibImportLocal.setOnClickListener(v -> SurroundAssetImportHelper.showLocalCalibrationPicker(
-                this, calibrationJsonPickerLauncher, result -> applyCalibrationImportResult(requireContext(), result)));
+                this, calibrationJsonPickerLauncher, calibrationFolderPickerLauncher,
+                result -> applyCalibrationImportResult(requireContext(), result)));
 
         wireStepPair(root, R.id.btn_ground_width_minus, R.id.btn_ground_width_plus, () -> {
             appConfig.setSurroundGroundWidthCm(appConfig.getSurroundGroundWidthCm() - 5);

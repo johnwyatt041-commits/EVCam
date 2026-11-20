@@ -244,9 +244,14 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private volatile boolean released = false;
     private volatile boolean stopped = false;
     private volatile boolean birdOnlyPreview = false;
+    private volatile boolean showCalibrationGrid = false;
+    private volatile boolean hideCarModelOverlay = false;
+    private volatile int soloCameraIndex = -1;
 
     @Nullable
     private SurroundCalibrationProfile activeBaseProfile;
+    @NonNull
+    private volatile SurroundExtrinsicAdjustment activeAdjustment = SurroundExtrinsicAdjustment.IDENTITY;
     @Nullable
     private String loadedCalibrationBaseSignature;
     @Nullable
@@ -262,9 +267,19 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private int birdIndexCount;
     private volatile boolean birdMeshIsWorldCm;
     @Nullable
+    private GridMeshData parsedBirdBaseMesh;
+    @Nullable
+    private String cachedBirdBaseAssetKey;
+    @Nullable
     private String cachedBirdAssetKey;
     @Nullable
     private SurroundCalibrationProfile cachedBirdProfile;
+    private int cachedBirdSoloIndex = -1;
+
+    private FloatBuffer calibrationGridBuffer;
+    private int[] calibrationGridCounts;
+    @Nullable
+    private SurroundCalibrationProfile cachedCalibrationGridProfile;
 
     private FloatBuffer roadVertexBuffer;
     private ShortBuffer roadIndexBuffer;
@@ -322,6 +337,27 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
     }
 
+    /** 4.3 标定页面辅助视图开关：参考网格、隐藏车模、以及单路独显（`-1` 关闭，`0..3` 为 front/back/left/right）。 */
+    public void setCalibrationAssistOptions(boolean showGrid, boolean hideCarModel, int soloCameraIndex) {
+        int clampedSolo = (soloCameraIndex >= SurroundMeshBuilder.CAM_FRONT
+                && soloCameraIndex <= SurroundMeshBuilder.CAM_RIGHT) ? soloCameraIndex : -1;
+        boolean changed;
+        synchronized (stateLock) {
+            changed = (this.showCalibrationGrid != showGrid)
+                    || (this.hideCarModelOverlay != hideCarModel)
+                    || (this.soloCameraIndex != clampedSolo);
+            if (this.soloCameraIndex != clampedSolo) {
+                this.birdMeshDirty.set(true);
+            }
+            this.showCalibrationGrid = showGrid;
+            this.hideCarModelOverlay = hideCarModel;
+            this.soloCameraIndex = clampedSolo;
+        }
+        if (changed) {
+            requestRenderSafe();
+        }
+    }
+
     public void markStopping() {
         this.stopped = true;
         this.released = true;
@@ -365,9 +401,12 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                         : AppConfig.SURROUND_CALIBRATION_E5_BUILTIN;
                 SurroundExtrinsicAdjustment adj = appConfig.getSurroundExtrinsicAdjustmentForSlot(effectiveSlot);
                 this.activeBaseProfile = base;
+                this.activeAdjustment = adj;
                 this.activeProfile = adj.applyToProfile(base);
                 this.loadedCalibrationBaseSignature = nextCalibSig;
                 this.loadedExtrinsicSignature = adj.toCompactSignature();
+                this.parsedBirdBaseMesh = null;
+                this.cachedBirdBaseAssetKey = null;
                 this.birdMeshDirty.set(true);
                 this.roadMeshDirty.set(true);
                 this.wheelMeshDirty.set(true);
@@ -386,15 +425,20 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                 existingBase.isCustomCalibration,
                                 existingBase.useBuiltInMeshes,
                                 false,
+                                existingBase.birdCenterOffsetYCm,
                                 width,
                                 length,
                                 ext,
                                 existingBase.cameras);
                     }
+                    this.activeAdjustment = adj;
                     this.activeProfile = adj.applyToProfile(this.activeBaseProfile);
                     this.loadedExtrinsicSignature = nextExtrinsicSig;
                     if (extrinsicChanged || !birdMeshIsWorldCm) {
                         this.birdMeshDirty.set(true);
+                    }
+                    if (extrinsicChanged) {
+                        this.roadMeshDirty.set(true);
                     }
                     if (dimensionsChanged) {
                         this.guidanceDirty.set(true);
@@ -598,6 +642,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
 
         final SurroundCalibrationProfile profile;
+        final SurroundExtrinsicAdjustment adjustment;
         final SurroundViewMode topMode;
         final SurroundViewMode bottomMode;
         final boolean collapsed;
@@ -609,8 +654,12 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         final boolean reverse;
         final int gap;
         final boolean birdOnly = this.birdOnlyPreview;
+        final boolean showGrid;
+        final boolean hideCar;
+        final int soloCam;
         synchronized (stateLock) {
             profile = this.activeProfile;
+            adjustment = this.activeAdjustment;
             topMode = this.effectiveTopMode;
             bottomMode = this.effectiveBottomMode;
             collapsed = this.wheelsCollapsed;
@@ -621,6 +670,9 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             angleDeg = this.wheelAngleDeg;
             reverse = this.inReverseGear;
             gap = this.gapPx;
+            showGrid = this.showCalibrationGrid;
+            hideCar = this.hideCarModelOverlay;
+            soloCam = this.soloCameraIndex;
         }
 
         GLES20.glViewport(0, 0, viewportWidth, viewportHeight);
@@ -636,7 +688,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                     profile.groundFrontExtensionCm,
                     gap
             );
-            drawBirdViewport(birdBox, profile, showGuidance, angleDeg, reverse);
+            drawBirdViewport(birdBox, profile, adjustment, showGuidance, angleDeg, reverse,
+                    showGrid, hideCar, soloCam);
             return;
         }
 
@@ -655,7 +708,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         // 1. 左侧 360 全景鸟瞰 + 离线 E5 车模 + 鸟瞰转向引导线
         boolean birdReverse = (topMode == SurroundViewMode.REAR)
                 || (reverse && topMode != SurroundViewMode.FRONT);
-        drawBirdViewport(layout.birdBox, profile, showGuidance, angleDeg, birdReverse);
+        drawBirdViewport(layout.birdBox, profile, adjustment, showGuidance, angleDeg, birdReverse,
+                showGrid, hideCar, soloCam);
 
         // 2. 右上视角（随档位 / 前视 / 后视 / 前轮 / 后轮）
         drawTopDetailViewport(layout.topDetailBox, profile, topMode, stretched, showGuidance,
@@ -669,13 +723,19 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void drawBirdViewport(@NonNull ViewportBox box,
                                   @NonNull SurroundCalibrationProfile profile,
+                                  @NonNull SurroundExtrinsicAdjustment adjustment,
                                   boolean showGuidance,
                                   float angleDeg,
-                                  boolean isReverse) {
+                                  boolean isReverse,
+                                  boolean showGrid,
+                                  boolean hideCarModel,
+                                  int soloCamIndex) {
         if (box.isEmpty() || birdProgram == 0) return;
-        ensureBirdMesh(profile);
-        uploadCarTextureIfNeeded();
-        updateCarQuad(profile);
+        ensureBirdMesh(profile, adjustment, soloCamIndex);
+        if (!hideCarModel) {
+            uploadCarTextureIfNeeded();
+            updateCarQuad(profile);
+        }
         if (birdVertexBuffer == null || birdIndexBuffer == null || birdIndexCount <= 0) return;
 
         int glY = box.glY(viewportHeight);
@@ -746,8 +806,13 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 drawGuidanceBatch(birdGuidanceBuffer, birdGuidanceCounts);
             }
 
+            if (showGrid) {
+                ensureCalibrationGridBatch(profile);
+                drawGuidanceBatch(calibrationGridBuffer, calibrationGridCounts);
+            }
+
             // 叠绘离线 E5 俯视车模纹理（BitmapFactory / Canvas 均输出预乘 Alpha，需用 GL_ONE 避免二次乘 Alpha 变暗）
-            if (carProgram != 0 && carTextureId != 0 && carQuadBuffer != null) {
+            if (!hideCarModel && carProgram != 0 && carTextureId != 0 && carQuadBuffer != null) {
                 GLES20.glEnable(GLES20.GL_BLEND);
                 GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
                 GLES20.glUseProgram(carProgram);
@@ -960,10 +1025,10 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         double halfW = Math.max(50.0, profile.getHalfWorldWidthCm());
         double minY = profile.getWorldMinYCm();
         double spanY = Math.max(100.0, profile.getWorldMaxYCm() - minY);
-        float left = (float) (SurroundCalibrationProfile.E5_CAR_MIN_X_CM / halfW);
-        float right = (float) (SurroundCalibrationProfile.E5_CAR_MAX_X_CM / halfW);
-        float bottom = (float) (((SurroundCalibrationProfile.E5_CAR_MIN_Y_CM - minY) / spanY) * 2.0 - 1.0);
-        float top = (float) (((SurroundCalibrationProfile.E5_CAR_MAX_Y_CM - minY) / spanY) * 2.0 - 1.0);
+        float left = (float) (SurroundCalibrationProfile.E5_CAR_QUAD_MIN_X_CM / halfW);
+        float right = (float) (SurroundCalibrationProfile.E5_CAR_QUAD_MAX_X_CM / halfW);
+        float bottom = (float) (((SurroundCalibrationProfile.E5_CAR_QUAD_MIN_Y_CM - minY) / spanY) * 2.0 - 1.0);
+        float top = (float) (((SurroundCalibrationProfile.E5_CAR_QUAD_MAX_Y_CM - minY) / spanY) * 2.0 - 1.0);
         float[] quad = {
                 left, top, 0f, 0f,
                 left, bottom, 0f, 1f,
@@ -973,28 +1038,53 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         carQuadBuffer = toFloatBuffer(quad, carQuadBuffer);
     }
 
-    private void ensureBirdMesh(@NonNull SurroundCalibrationProfile profile) {
+    private void ensureBirdMesh(@NonNull SurroundCalibrationProfile profile,
+                                @NonNull SurroundExtrinsicAdjustment adjustment,
+                                int soloCamIndex) {
         boolean dirty = birdMeshDirty.compareAndSet(true, false);
-        String assetKey = resolveCalibrationAssetKey(profile, true);
+        String assetKey = resolveCalibrationAssetKey(profile, true)
+                + "|" + adjustment.toCompactSignature()
+                + "|solo=" + soloCamIndex;
         if (!dirty && birdVertexBuffer != null
                 && assetKey.equals(cachedBirdAssetKey)
+                && cachedBirdSoloIndex == soloCamIndex
                 && (birdMeshIsWorldCm || cachedBirdProfile == profile)) {
             return;
         }
-        byte[] rawBird = profile.hasExtrinsicAdjustments ? null : loadCalibrationMeshBytes(
-                profile,
-                "bird.mesh",
-                SurroundCalibrationManager.CUSTOM_BIRD_MESH_FILE_NAME);
-        GridMeshData parsedBird = rawBird != null
-                ? SurroundMeshBuilder.parseBirdMeshBinary(rawBird, SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM)
-                : null;
-        if (parsedBird != null) {
-            birdVertexBuffer = toFloatBuffer(parsedBird.vertices, birdVertexBuffer);
-            birdIndexBuffer = toShortBuffer(parsedBird.indices, birdIndexBuffer);
-            birdIndexCount = parsedBird.indices.length;
+        if (soloCamIndex >= SurroundMeshBuilder.CAM_FRONT && soloCamIndex <= SurroundMeshBuilder.CAM_RIGHT) {
+            GridMeshData soloMesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 56, 84, soloCamIndex);
+            birdVertexBuffer = toFloatBuffer(soloMesh.vertices, birdVertexBuffer);
+            birdIndexBuffer = toShortBuffer(soloMesh.indices, birdIndexBuffer);
+            birdIndexCount = soloMesh.indices.length;
+            birdMeshIsWorldCm = false;
+            cachedBirdAssetKey = assetKey;
+            cachedBirdProfile = profile;
+            cachedBirdSoloIndex = soloCamIndex;
+            return;
+        }
+
+        String baseKey = resolveCalibrationAssetKey(profile, false);
+        if (parsedBirdBaseMesh == null || !baseKey.equals(cachedBirdBaseAssetKey)) {
+            byte[] rawBird = loadCalibrationMeshBytes(
+                    profile,
+                    "bird.mesh",
+                    SurroundCalibrationManager.CUSTOM_BIRD_MESH_FILE_NAME);
+            parsedBirdBaseMesh = rawBird != null
+                    ? SurroundMeshBuilder.parseBirdMeshBinary(rawBird, profile.birdCenterOffsetYCm)
+                    : null;
+            cachedBirdBaseAssetKey = baseKey;
+        }
+
+        if (parsedBirdBaseMesh != null) {
+            GridMeshData activeMesh = profile.hasExtrinsicAdjustments
+                    ? SurroundMeshBuilder.reprojectBirdMesh(parsedBirdBaseMesh, profile, adjustment)
+                    : parsedBirdBaseMesh;
+            birdVertexBuffer = toFloatBuffer(activeMesh.vertices, birdVertexBuffer);
+            birdIndexBuffer = toShortBuffer(activeMesh.indices, birdIndexBuffer);
+            birdIndexCount = activeMesh.indices.length;
             birdMeshIsWorldCm = true;
         } else {
-            GridMeshData mesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 44, 68);
+            GridMeshData mesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 56, 84, -1);
             birdVertexBuffer = toFloatBuffer(mesh.vertices, birdVertexBuffer);
             birdIndexBuffer = toShortBuffer(mesh.indices, birdIndexBuffer);
             birdIndexCount = mesh.indices.length;
@@ -1002,6 +1092,17 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
         cachedBirdAssetKey = assetKey;
         cachedBirdProfile = profile;
+        cachedBirdSoloIndex = soloCamIndex;
+    }
+
+    private void ensureCalibrationGridBatch(@NonNull SurroundCalibrationProfile profile) {
+        if (calibrationGridBuffer != null && cachedCalibrationGridProfile == profile) {
+            return;
+        }
+        LineStripBatch gridBatch = SurroundGuidanceCalculator.buildCalibrationGridBatch(profile);
+        calibrationGridBuffer = toFloatBuffer(gridBatch.triangleStripVertices, calibrationGridBuffer);
+        calibrationGridCounts = gridBatch.stripVertexCounts;
+        cachedCalibrationGridProfile = profile;
     }
 
     private void ensureRoadMesh(@NonNull SurroundCalibrationProfile profile,
@@ -1082,7 +1183,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         if (!profile.isCustomCalibration && profile.useBuiltInMeshes) {
             try (InputStream is = context.getAssets().open(
                     SurroundMeshBuilder.BUILTIN_MESH_ASSET_DIR + "/" + builtInAssetName)) {
-                return readAllBytesBounded(is, 4 * 1024 * 1024);
+                return readAllBytesBounded(is, 16 * 1024 * 1024);
             } catch (IOException e) {
                 AppLog.w(TAG, "Built-in mesh load fallback (" + builtInAssetName + "): " + e.getMessage());
                 return null;
@@ -1094,9 +1195,9 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 File parent = new File(calibPath).getParentFile();
                 if (parent != null) {
                     File meshFile = new File(parent, customFileName);
-                    if (meshFile.isFile() && meshFile.length() >= 32 && meshFile.length() <= 4L * 1024L * 1024L) {
+                    if (meshFile.isFile() && meshFile.length() >= 32 && meshFile.length() <= 16L * 1024L * 1024L) {
                         try (FileInputStream fis = new FileInputStream(meshFile)) {
-                            return readAllBytesBounded(fis, 4 * 1024 * 1024);
+                            return readAllBytesBounded(fis, 16 * 1024 * 1024);
                         } catch (IOException e) {
                             AppLog.w(TAG, "Custom mesh load fallback (" + customFileName + "): " + e.getMessage());
                         }

@@ -3,6 +3,10 @@ package com.kooo.evcam.surround;
 import com.kooo.evcam.surround.SurroundCalibrationManager.ImportResult;
 import com.kooo.evcam.surround.SurroundCalibrationProfile.CameraCalibration;
 import com.kooo.evcam.surround.SurroundExtrinsicAdjustment.CameraOffset;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.ConvertedFactoryBundle;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.FactoryBundleInput;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.NamedBytes;
+import com.kooo.evcam.surround.SurroundFactoryCalibrationParser.ParsedParamFile;
 import com.kooo.evcam.surround.SurroundGuidanceCalculator.LineStripBatch;
 import com.kooo.evcam.surround.SurroundMeshBuilder.GridMeshData;
 
@@ -11,8 +15,11 @@ import org.junit.Test;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.Collections;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -256,7 +263,38 @@ public class SurroundCalibrationAndGuidanceTest {
             assertArrayEquals(jCam.distortion, bCam.distortion, 1e-6);
         }
 
+        // Non-centered calibration.json must infer negative birdCenterOffsetYCm matching DEFAULT_BIRD_CENTER_OFFSET_Y_CM
+        assertEquals(SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM,
+                parsedJson.birdCenterOffsetYCm, 1.0);
+        String exportedJson = SurroundCalibrationManager.exportCalibrationJson(parsedJson);
+        SurroundCalibrationProfile reparsedExport = SurroundCalibrationManager.parseCalibrationJson(
+                exportedJson, 206, 530, 0);
+        assertEquals(parsedJson.birdCenterOffsetYCm, reparsedExport.birdCenterOffsetYCm, 1e-4);
+
         byte[] birdBytes = Files.readAllBytes(birdFile.toPath());
+        GridMeshData birdMeshFromJsonOffset = SurroundMeshBuilder.parseBirdMeshBinary(
+                birdBytes, parsedJson.birdCenterOffsetYCm);
+        assertNotNull(birdMeshFromJsonOffset);
+        boolean checkedParsedJsonFrontMatch = false;
+        for (int i = 0; i < 14732; i++) {
+            int base = i * SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX;
+            float wx = birdMeshFromJsonOffset.vertices[base];
+            float wy = birdMeshFromJsonOffset.vertices[base + 1];
+            int pIdx = Math.round(birdMeshFromJsonOffset.vertices[base + 6]);
+            int sIdx = Math.round(birdMeshFromJsonOffset.vertices[base + 7]);
+            float under = birdMeshFromJsonOffset.vertices[base + 9];
+            if (pIdx == SurroundMeshBuilder.CAM_FRONT && sIdx == SurroundMeshBuilder.CAM_FRONT
+                    && under < 0.1f && wy > 230.0f && wy < 450.0f && Math.abs(wx) < 80.0f) {
+                double[] uv = parsedJson.getCamera("front").projectWorldToUv(wx, wy, 0.0);
+                assertEquals(uv[0], birdMeshFromJsonOffset.vertices[base + 2], 2e-4);
+                assertEquals(uv[1], birdMeshFromJsonOffset.vertices[base + 3], 2e-4);
+                checkedParsedJsonFrontMatch = true;
+                break;
+            }
+        }
+        assertTrue("Parsed JSON birdCenterOffsetYCm should align bird.mesh with recentered camera",
+                checkedParsedJsonFrontMatch);
+
         GridMeshData birdMesh = SurroundMeshBuilder.parseBirdMeshBinary(
                 birdBytes, SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM);
         assertNotNull(birdMesh);
@@ -480,5 +518,270 @@ public class SurroundCalibrationAndGuidanceTest {
         for (float v : bird.vertices) {
             assertTrue(Float.isFinite(v));
         }
+
+        // 验证单路独显网格仅采样指定相机且产生有效顶点
+        GridMeshData soloLeft = SurroundMeshBuilder.buildBirdGroundMesh(
+                tuned, 20, 30, SurroundMeshBuilder.CAM_LEFT);
+        for (int i = 0; i < soloLeft.vertices.length; i += SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX) {
+            assertEquals(SurroundMeshBuilder.CAM_LEFT, Math.round(soloLeft.vertices[i + 6]));
+            assertEquals(SurroundMeshBuilder.CAM_LEFT, Math.round(soloLeft.vertices[i + 7]));
+        }
+
+        // 验证参考网格生成（250cm 车位 + 100cm 网格 + E5 实车外廓框）与实车尺寸常量
+        assertEquals(-95.0f, SurroundCalibrationProfile.E5_CAR_MIN_X_CM, 1e-4f);
+        assertEquals(231.0f, SurroundCalibrationProfile.E5_CAR_MAX_Y_CM, 1e-4f);
+        assertEquals(-113.0f, SurroundCalibrationProfile.E5_CAR_QUAD_MIN_X_CM, 1e-4f);
+        LineStripBatch gridBatch = SurroundGuidanceCalculator.buildCalibrationGridBatch(tuned);
+        assertTrue(gridBatch.stripVertexCounts.length >= 14);
+        assertTrue(gridBatch.triangleStripVertices.length > 0);
+    }
+
+    @Test
+    public void scaleAndIntrinsicAdjustmentsProjectSmoothlyAndReprojectBirdMeshWithoutTopologyJump() throws Exception {
+        SurroundCalibrationProfile base = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
+        CameraOffset scaleUp = CameraOffset.ZERO.withScale(1.10f).withCxOffsetPx(12).withCyOffsetPx(-8).withK1Delta(0.020f);
+        assertEquals(1.10f, scaleUp.scale, 1e-4f);
+        assertEquals(12, scaleUp.cxOffsetPx);
+        assertEquals(-8, scaleUp.cyOffsetPx);
+        assertEquals(0.020f, scaleUp.k1Delta, 1e-5f);
+
+        // v1 JSON 向后兼容，v2 JSON 完整保留 scale/cx/cy/k1_delta
+        SurroundExtrinsicAdjustment v1 = SurroundExtrinsicAdjustment.fromJson(
+                "{\"version\":1,\"cameras\":{\"front\":{\"pitch_deg\":5.0,\"yaw_deg\":0,\"roll_deg\":0,\"pos_x_cm\":0,\"pos_y_cm\":0,\"pos_z_cm\":0}}}");
+        assertEquals(5.0f, v1.getCamera("front").pitchDeg, 1e-4f);
+        assertEquals(1.00f, v1.getCamera("front").scale, 1e-4f);
+
+        SurroundExtrinsicAdjustment adj = SurroundExtrinsicAdjustment.IDENTITY
+                .withCamera("front", new CameraOffset(2.5f, 0f, 0f, 0, 10, 0, 1.10f, 8, -6, 0.015f));
+        assertEquals(adj, SurroundExtrinsicAdjustment.fromJson(adj.toJson()));
+
+        // 验证 scale > 1.0 使同一世界坐标更贴近光心（图像采样点内收 → 鸟瞰景物放大）
+        CameraCalibration baseFront = base.getCamera("front");
+        CameraOffset scale110 = CameraOffset.ZERO.withScale(1.10f);
+        CameraCalibration scaledFront = SurroundExtrinsicAdjustment.applyToCamera(
+                baseFront, scale110);
+        assertEquals(baseFront.fx / (double) scale110.scale, scaledFront.fx, 1e-6);
+        double[] baseCornerUv = baseFront.projectWorldToUv(150.0, 360.0, 0.0);
+        double[] scaledCornerUv = scaledFront.projectWorldToUv(150.0, 360.0, 0.0);
+        assertTrue(Math.abs(scaledCornerUv[0] - 0.5) < Math.abs(baseCornerUv[0] - 0.5));
+
+        // 验证 reprojectBirdMesh 基于 factory bird.mesh 原地重投影：拓扑/索引不变、仅前摄区 UV 变化、纯后/左/右区 UV 零改动
+        File assetDir = resolveAssetDir("src/main/assets/surround/default", "app/src/main/assets/surround/default");
+        GridMeshData baseBird = SurroundMeshBuilder.parseBirdMeshBinary(
+                Files.readAllBytes(new File(assetDir, "bird.mesh").toPath()),
+                SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM);
+        assertNotNull(baseBird);
+
+        SurroundCalibrationProfile tuned = adj.applyToProfile(base);
+        GridMeshData reprojected = SurroundMeshBuilder.reprojectBirdMesh(baseBird, tuned, adj);
+        assertSame(baseBird.indices, reprojected.indices);
+        assertEquals(baseBird.vertices.length, reprojected.vertices.length);
+
+        boolean sawFrontChange = false;
+        boolean sawUntouchedBack = false;
+        int vertCount = baseBird.vertices.length / SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX;
+        for (int i = 0; i < vertCount; i++) {
+            int b = i * SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX;
+            float wx = baseBird.vertices[b];
+            float wy = baseBird.vertices[b + 1];
+            float under = baseBird.vertices[b + 9];
+            int pIdx = Math.round(baseBird.vertices[b + 6]);
+            int sIdx = Math.round(baseBird.vertices[b + 7]);
+            if (under >= 1.0f || Math.abs(wx) > 600.0f || Math.abs(wy) > 700.0f) continue;
+            if (pIdx == SurroundMeshBuilder.CAM_FRONT && sIdx == SurroundMeshBuilder.CAM_FRONT) {
+                if (Math.abs(baseBird.vertices[b + 2] - reprojected.vertices[b + 2]) > 1e-4f) {
+                    sawFrontChange = true;
+                }
+            } else if (pIdx == SurroundMeshBuilder.CAM_BACK && sIdx == SurroundMeshBuilder.CAM_BACK) {
+                assertEquals(baseBird.vertices[b + 2], reprojected.vertices[b + 2], 1e-6f);
+                assertEquals(baseBird.vertices[b + 3], reprojected.vertices[b + 3], 1e-6f);
+                sawUntouchedBack = true;
+            }
+        }
+        assertTrue(sawFrontChange);
+        assertTrue(sawUntouchedBack);
+    }
+
+    @Test
+    public void factoryCalibrationBinaryFormatsConvertAccuratelyAndImportFromDirAndZip() throws Exception {
+        // 1. 以真实默认标定参数合成 704B .param + 兼容 Table.db + 72B/tri 原厂轮位表 + config.ini
+        SurroundCalibrationProfile refProfile = SurroundCalibrationManager.createBuiltInE5Profile(206, 530, 0);
+        double birdOffsetYCm = SurroundCalibrationProfile.DEFAULT_BIRD_CENTER_OFFSET_Y_CM;
+        double[][] refRvecs = {
+                {2.0047062942946026, 0.01233817150697631, -0.00817919985530552},
+                {-0.015264409444235247, 2.6844161057687024, -1.6286187772113236},
+                {1.8056369136002137, 1.8004553392443894, -0.7082604364473017},
+                {1.746858692861991, -1.76243049024881, 0.7325385786179394}
+        };
+        String[] keys = {"front", "back", "left", "right"};
+        byte[] paramBytes = new byte[SurroundFactoryCalibrationParser.PARAM_FILE_BYTES];
+        ByteBuffer pBuf = ByteBuffer.wrap(paramBytes).order(ByteOrder.LITTLE_ENDIAN);
+        pBuf.putInt(0, 1);
+        pBuf.putInt(4, 3);
+        pBuf.putInt(8, 704);
+        pBuf.putInt(12, -1);
+        pBuf.putInt(16, 1);
+        for (int i = 0; i < 4; i++) {
+            CameraCalibration c = refProfile.getCamera(keys[i]);
+            assertNotNull(c);
+            int intrOff = 32 + i * 96;
+            pBuf.putDouble(intrOff, c.fx);
+            pBuf.putDouble(intrOff + 8, c.fy);
+            pBuf.putDouble(intrOff + 16, c.cx);
+            pBuf.putDouble(intrOff + 24, c.cy);
+            for (int k = 0; k < 4; k++) {
+                pBuf.putDouble(intrOff + 32 + k * 8, c.distortion[k]);
+            }
+            int rOff = 416 + i * 36;
+            pBuf.putInt(rOff, 3);
+            pBuf.putInt(rOff + 4, 1);
+            pBuf.putInt(rOff + 8, 6);
+            for (int k = 0; k < 3; k++) {
+                pBuf.putDouble(rOff + 12 + k * 8, refRvecs[i][k]);
+            }
+            int tOff = 560 + i * 36;
+            pBuf.putInt(tOff, 3);
+            pBuf.putInt(tOff + 4, 1);
+            pBuf.putInt(tOff + 8, 6);
+            pBuf.putDouble(tOff + 12, c.posXCm / 100.0);
+            pBuf.putDouble(tOff + 20, (c.posYCm + birdOffsetYCm) / 100.0);
+            pBuf.putDouble(tOff + 28, c.posZCm / 100.0);
+        }
+
+        ParsedParamFile parsedParam = SurroundFactoryCalibrationParser.parseParam704(paramBytes, "calib_e5.param");
+        for (String key : keys) {
+            CameraCalibration expected = refProfile.getCamera(key);
+            CameraCalibration actual = parsedParam.rawCameras.get(key);
+            assertNotNull(expected);
+            assertNotNull(actual);
+            assertEquals(expected.posYCm, actual.posYCm - birdOffsetYCm, 1e-6);
+            for (int j = 0; j < 3; j++) {
+                assertEquals(expected.r0[j], actual.r0[j], 1e-9);
+                assertEquals(expected.r1[j], actual.r1[j], 1e-9);
+                assertEquals(expected.r2[j], actual.r2[j], 1e-9);
+            }
+        }
+
+        // 2. 合成每路 5 条 (= 20 采样顶点 >= 16) 与 .param 完全吻合的 Table.db (392B * 20)
+        int[] posIds = {0, 2, 4, 6}; // right, front, left, rear
+        double[][] sampleOrigins = {
+                {2.2, -0.9},  // right
+                {0.0, 2.2},   // front
+                {-2.2, -0.9}, // left
+                {0.0, -5.0}   // rear
+        };
+        byte[] tableDbBytes = new byte[20 * SurroundFactoryCalibrationParser.TABLE_RECORD_BYTES];
+        ByteBuffer tBuf = ByteBuffer.wrap(tableDbBytes).order(ByteOrder.LITTLE_ENDIAN);
+        int recIdx = 0;
+        for (int cam = 0; cam < 4; cam++) {
+            CameraCalibration rawCam = parsedParam.rawCameras.get(PARAM_KEYS_FOR_TABLE[cam]);
+            assertNotNull(rawCam);
+            for (int q = 0; q < 5; q++) {
+                int off = recIdx * SurroundFactoryCalibrationParser.TABLE_RECORD_BYTES;
+                tBuf.putInt(off, posIds[cam]);
+                double[][] quad = {
+                        {sampleOrigins[cam][0] + q * 0.05, sampleOrigins[cam][1]},
+                        {sampleOrigins[cam][0] + q * 0.05 + 0.05, sampleOrigins[cam][1]},
+                        {sampleOrigins[cam][0] + q * 0.05, sampleOrigins[cam][1] + 0.05},
+                        {sampleOrigins[cam][0] + q * 0.05 + 0.05, sampleOrigins[cam][1] + 0.05}
+                };
+                for (int slot = 0; slot < 4; slot++) {
+                    double[] uv = rawCam.projectWorldToUv(quad[slot][0] * 100.0, quad[slot][1] * 100.0, 0.0);
+                    double rawV = 1.0 - uv[1];
+                    int sOff = off + 8 + slot * 48;
+                    tBuf.putDouble(sOff, quad[slot][0]);
+                    tBuf.putDouble(sOff + 8, quad[slot][1]);
+                    tBuf.putDouble(sOff + 16, 0.0);
+                    tBuf.putDouble(sOff + 24, 1.0);
+                    tBuf.putDouble(sOff + 32, uv[0]);
+                    tBuf.putDouble(sOff + 40, rawV);
+                }
+                recIdx++;
+            }
+        }
+
+        // 3. 合成符合 72B/tri 面积=2.0 的原厂轮位映射 table_cam_two_front.db
+        byte[] wheelDb = buildSyntheticWheelDb();
+        byte[] configIni = "bottom_det = -1.43 # car offset\n".getBytes(StandardCharsets.UTF_8);
+
+        ConvertedFactoryBundle bundleWithNativeWheels = SurroundFactoryCalibrationParser.convertFactoryBundle(
+                new FactoryBundleInput("E5_OEM", tableDbBytes,
+                        Collections.singletonList(new NamedBytes("calib_e5.param", paramBytes)),
+                        wheelDb, wheelDb, configIni));
+        assertTrue(bundleWithNativeWheels.usedNativeWheelTables);
+        assertTrue(bundleWithNativeWheels.maxUvError < 1e-6);
+        assertNotNull(SurroundMeshBuilder.parseBirdMeshBinary(
+                bundleWithNativeWheels.birdMesh, bundleWithNativeWheels.birdOffsetYCm));
+        assertNotNull(SurroundMeshBuilder.parseWheelMeshPair(bundleWithNativeWheels.frontWheelsMesh));
+
+        // 无轮子映射表时自动合成 55×36 网格
+        ConvertedFactoryBundle bundleSynthWheels = SurroundFactoryCalibrationParser.convertFactoryBundle(
+                new FactoryBundleInput("E5_OEM_NOWHEEL", tableDbBytes,
+                        Collections.singletonList(new NamedBytes("calib_e5.param", paramBytes)),
+                        null, null, configIni));
+        assertFalse(bundleSynthWheels.usedNativeWheelTables);
+        assertEquals(760320, bundleSynthWheels.frontWheelsMesh.length);
+        assertEquals(760320, bundleSynthWheels.rearWheelsMesh.length);
+
+        // 4. 端到端测试目录扫描、原厂文件夹导入与原厂 ZIP 导入
+        File tmpRoot = Files.createTempDirectory("evcam_oem_import_test").toFile();
+        File oemDir = new File(tmpRoot, "avm_calib_res");
+        File dataDir = new File(oemDir, "data");
+        assertTrue(dataDir.mkdirs());
+        Files.write(new File(oemDir, "config.ini").toPath(), configIni);
+        Files.write(new File(dataDir, "Table.db").toPath(), tableDbBytes);
+        Files.write(new File(dataDir, "calib_e5.param").toPath(), paramBytes);
+        Files.write(new File(dataDir, "table_cam_two_front.db").toPath(), wheelDb);
+        Files.write(new File(dataDir, "table_cam_two_rear.db").toPath(), wheelDb);
+
+        assertFalse(SurroundCalibrationManager.findCalibrationCandidates(tmpRoot).isEmpty());
+        File internalDir = new File(tmpRoot, "internal");
+        ImportResult dirImport = SurroundCalibrationManager.importCalibrationFile(oemDir, internalDir);
+        assertTrue(dirImport.message, dirImport.success);
+        assertTrue(new File(internalDir, SurroundCalibrationManager.CUSTOM_CALIBRATION_FILE_NAME).isFile());
+        assertTrue(new File(internalDir, SurroundCalibrationManager.CUSTOM_BIRD_MESH_FILE_NAME).isFile());
+        assertTrue(new File(internalDir, SurroundCalibrationManager.CUSTOM_FRONT_WHEELS_MESH_FILE_NAME).isFile());
+        assertTrue(new File(internalDir, SurroundCalibrationManager.CUSTOM_REAR_WHEELS_MESH_FILE_NAME).isFile());
+
+        File oemZip = new File(tmpRoot, "e5_avm_calib.zip");
+        try (ZipOutputStream zos = new ZipOutputStream(new FileOutputStream(oemZip))) {
+            zos.putNextEntry(new ZipEntry("avm_calib_res/config.ini"));
+            zos.write(configIni);
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("avm_calib_res/data/Table.db"));
+            zos.write(tableDbBytes);
+            zos.closeEntry();
+            zos.putNextEntry(new ZipEntry("avm_calib_res/data/calib_e5.param"));
+            zos.write(paramBytes);
+            zos.closeEntry();
+        }
+        File internalZipDir = new File(tmpRoot, "internal_zip");
+        ImportResult zipImport = SurroundCalibrationManager.importCalibrationFile(oemZip, internalZipDir);
+        assertTrue(zipImport.message, zipImport.success);
+        assertTrue(new File(internalZipDir, SurroundCalibrationManager.CUSTOM_CALIBRATION_FILE_NAME).isFile());
+        assertTrue(new File(internalZipDir, SurroundCalibrationManager.CUSTOM_BIRD_MESH_FILE_NAME).isFile());
+        assertEquals(760320L, new File(internalZipDir, SurroundCalibrationManager.CUSTOM_FRONT_WHEELS_MESH_FILE_NAME).length());
+    }
+
+    private static final String[] PARAM_KEYS_FOR_TABLE = {"right", "front", "left", "back"};
+
+    private static byte[] buildSyntheticWheelDb() {
+        // 4 个三角形覆盖左 [-1,0]×[-1,1] (cam=0.1) 与右 [0,1]×[-1,1] (cam=1.1)，每区面积恰为 2.0
+        float[][][] tris = {
+                {{-1f, -1f, 0f, 0.2f, 0.2f, 0.1f}, {0f, -1f, 0f, 0.8f, 0.2f, 0.1f}, {0f, 1f, 0f, 0.8f, 0.8f, 0.1f}},
+                {{-1f, -1f, 0f, 0.2f, 0.2f, 0.1f}, {0f, 1f, 0f, 0.8f, 0.8f, 0.1f}, {-1f, 1f, 0f, 0.2f, 0.8f, 0.1f}},
+                {{0f, -1f, 0f, 0.2f, 0.2f, 1.1f}, {1f, -1f, 0f, 0.8f, 0.2f, 1.1f}, {1f, 1f, 0f, 0.8f, 0.8f, 1.1f}},
+                {{0f, -1f, 0f, 0.2f, 0.2f, 1.1f}, {1f, 1f, 0f, 0.8f, 0.8f, 1.1f}, {0f, 1f, 0f, 0.2f, 0.8f, 1.1f}}
+        };
+        byte[] bytes = new byte[tris.length * SurroundFactoryCalibrationParser.WHEEL_TRIANGLE_BYTES];
+        ByteBuffer buf = ByteBuffer.wrap(bytes).order(ByteOrder.LITTLE_ENDIAN);
+        for (float[][] tri : tris) {
+            for (float[] v : tri) {
+                for (float f : v) {
+                    buf.putFloat(f);
+                }
+            }
+        }
+        return bytes;
     }
 }

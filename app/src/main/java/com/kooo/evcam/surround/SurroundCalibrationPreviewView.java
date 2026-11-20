@@ -56,6 +56,9 @@ public final class SurroundCalibrationPreviewView extends FrameLayout {
     private boolean birdOnlyMode = true;
     private boolean inReverseGear = false;
     private volatile float currentWheelAngleDeg = 0f;
+    private boolean showCalibrationGrid = true;
+    private boolean hideCarModelOverlay = false;
+    private int soloCameraIndex = -1;
 
     @Nullable private Surface cachedFrontSurface;
     @Nullable private Surface cachedBackSurface;
@@ -147,6 +150,17 @@ public final class SurroundCalibrationPreviewView extends FrameLayout {
         updateBadgeText();
     }
 
+    /** 设置 4.3 实时标定辅助开关：参考网格、隐藏车模及单路独显（`-1` 关闭）。 */
+    public void setCalibrationAssistOptions(boolean showGrid, boolean hideCarModel, int soloCameraIndex) {
+        this.showCalibrationGrid = showGrid;
+        this.hideCarModelOverlay = hideCarModel;
+        this.soloCameraIndex = soloCameraIndex;
+        SurroundGlRenderer renderer = this.glRenderer;
+        if (renderer != null) {
+            renderer.setCalibrationAssistOptions(showGrid, hideCarModel, soloCameraIndex);
+        }
+    }
+
     /** 按需启动实时预览；若无可用 CameraManager 则展示清晰状态说明且不创建 GL 资源。 */
     public void startPreview(@Nullable MultiCameraManager cameraManager, @Nullable String unavailableReason) {
         this.boundCameraManager = cameraManager;
@@ -207,6 +221,7 @@ public final class SurroundCalibrationPreviewView extends FrameLayout {
                 }));
         createdHolder[0] = renderer;
         renderer.setBirdOnlyPreview(birdOnlyMode);
+        renderer.setCalibrationAssistOptions(showCalibrationGrid, hideCarModelOverlay, soloCameraIndex);
         glView.setRenderer(renderer);
         renderer.markRendererAttached();
         glView.setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY);

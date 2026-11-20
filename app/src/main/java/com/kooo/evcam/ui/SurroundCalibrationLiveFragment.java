@@ -63,11 +63,20 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
 
     private String selectedExtrinsicCam = "front";
     private boolean advancedExtrinsicsExpanded = false;
+    private boolean assistShowGrid = true;
+    private boolean assistHideCarModel = false;
+    private boolean assistSoloCamera = false;
     private TextView tvExtrinsicSummary;
+    private TextView tvExtrinsicCamTip;
+    private Button btnAssistGrid;
+    private Button btnAssistHideCar;
+    private Button btnAssistSoloCam;
     private Button btnExtCamFront;
     private Button btnExtCamBack;
     private Button btnExtCamLeft;
     private Button btnExtCamRight;
+    private TextView tvExtScaleValue;
+    private SeekBar seekExtScale;
     private TextView tvExtPitchValue;
     private SeekBar seekExtPitch;
     private TextView tvExtZValue;
@@ -82,6 +91,12 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
     private SeekBar seekExtRoll;
     private TextView tvExtXValue;
     private SeekBar seekExtX;
+    private TextView tvExtCxValue;
+    private SeekBar seekExtCx;
+    private TextView tvExtCyValue;
+    private SeekBar seekExtCy;
+    private TextView tvExtK1Value;
+    private SeekBar seekExtK1;
     private Button btnExtResetCamera;
     private Button btnExtResetAll;
     private Button btnCalibExportJson;
@@ -106,6 +121,16 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
                 File internalDir = new File(ctx.getFilesDir(), "surround");
                 SurroundCalibrationManager.ImportResult result =
                         SurroundCalibrationManager.importCalibrationUri(ctx, uri, internalDir);
+                applyCalibrationImportResult(ctx, result);
+            });
+
+    private final ActivityResultLauncher<android.net.Uri> calibrationFolderPickerLauncher =
+            registerForActivityResult(new ActivityResultContracts.OpenDocumentTree(), uri -> {
+                Context ctx = getContext();
+                if (uri == null || ctx == null) return;
+                File internalDir = new File(ctx.getFilesDir(), "surround");
+                SurroundCalibrationManager.ImportResult result =
+                        SurroundCalibrationManager.importCalibrationTreeUri(ctx, uri, internalDir);
                 applyCalibrationImportResult(ctx, result);
             });
 
@@ -179,10 +204,16 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
         btnCalibImportLocal = view.findViewById(R.id.btn_live_calib_import_local);
 
         tvExtrinsicSummary = view.findViewById(R.id.tv_live_extrinsic_summary);
+        tvExtrinsicCamTip = view.findViewById(R.id.tv_live_ext_cam_tip);
+        btnAssistGrid = view.findViewById(R.id.btn_live_assist_grid);
+        btnAssistHideCar = view.findViewById(R.id.btn_live_assist_hide_car);
+        btnAssistSoloCam = view.findViewById(R.id.btn_live_assist_solo_cam);
         btnExtCamFront = view.findViewById(R.id.btn_live_ext_cam_front);
         btnExtCamBack = view.findViewById(R.id.btn_live_ext_cam_back);
         btnExtCamLeft = view.findViewById(R.id.btn_live_ext_cam_left);
         btnExtCamRight = view.findViewById(R.id.btn_live_ext_cam_right);
+        tvExtScaleValue = view.findViewById(R.id.tv_live_ext_scale_value);
+        seekExtScale = view.findViewById(R.id.seekbar_live_ext_scale);
         tvExtPitchValue = view.findViewById(R.id.tv_live_ext_pitch_value);
         seekExtPitch = view.findViewById(R.id.seekbar_live_ext_pitch);
         tvExtZValue = view.findViewById(R.id.tv_live_ext_z_value);
@@ -197,6 +228,12 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
         seekExtRoll = view.findViewById(R.id.seekbar_live_ext_roll);
         tvExtXValue = view.findViewById(R.id.tv_live_ext_x_value);
         seekExtX = view.findViewById(R.id.seekbar_live_ext_x);
+        tvExtCxValue = view.findViewById(R.id.tv_live_ext_cx_value);
+        seekExtCx = view.findViewById(R.id.seekbar_live_ext_cx);
+        tvExtCyValue = view.findViewById(R.id.tv_live_ext_cy_value);
+        seekExtCy = view.findViewById(R.id.seekbar_live_ext_cy);
+        tvExtK1Value = view.findViewById(R.id.tv_live_ext_k1_value);
+        seekExtK1 = view.findViewById(R.id.seekbar_live_ext_k1);
         btnExtResetCamera = view.findViewById(R.id.btn_live_ext_reset_camera);
         btnExtResetAll = view.findViewById(R.id.btn_live_ext_reset_all);
         btnCalibExportJson = view.findViewById(R.id.btn_live_calib_export_json);
@@ -235,7 +272,8 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
             refreshPreviewAndUi(requireContext(), true);
         });
         btnCalibImportLocal.setOnClickListener(v -> SurroundAssetImportHelper.showLocalCalibrationPicker(
-                this, calibrationJsonPickerLauncher, result -> applyCalibrationImportResult(requireContext(), result)));
+                this, calibrationJsonPickerLauncher, calibrationFolderPickerLauncher,
+                result -> applyCalibrationImportResult(requireContext(), result)));
 
         wireExtrinsicControls(root);
 
@@ -369,6 +407,7 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
             manager = ((SurroundLivePreviewHost) getActivity()).acquireCameraManagerForSurroundCalibration();
         }
         previewView.startPreview(manager, "相机尚未就绪，暂时无法显示实时 360 画面");
+        syncAssistOptionsToPreview();
     }
 
     private void stopLivePreview() {
@@ -472,17 +511,50 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
     }
 
     private void wireExtrinsicControls(@NonNull View root) {
+        if (btnAssistGrid != null) {
+            btnAssistGrid.setOnClickListener(v -> {
+                assistShowGrid = !assistShowGrid;
+                syncAssistOptionsToPreview();
+                if (getContext() != null) refreshExtrinsicUi(getContext(), true);
+            });
+        }
+        if (btnAssistHideCar != null) {
+            btnAssistHideCar.setOnClickListener(v -> {
+                assistHideCarModel = !assistHideCarModel;
+                syncAssistOptionsToPreview();
+                if (getContext() != null) refreshExtrinsicUi(getContext(), true);
+            });
+        }
+        if (btnAssistSoloCam != null) {
+            btnAssistSoloCam.setOnClickListener(v -> {
+                assistSoloCamera = !assistSoloCamera;
+                syncAssistOptionsToPreview();
+                if (getContext() != null) refreshExtrinsicUi(getContext(), true);
+            });
+        }
+
         if (btnExtCamFront != null) btnExtCamFront.setOnClickListener(v -> selectExtrinsicCamera("front"));
         if (btnExtCamBack != null) btnExtCamBack.setOnClickListener(v -> selectExtrinsicCamera("back"));
         if (btnExtCamLeft != null) btnExtCamLeft.setOnClickListener(v -> selectExtrinsicCamera("left"));
         if (btnExtCamRight != null) btnExtCamRight.setOnClickListener(v -> selectExtrinsicCamera("right"));
 
-        wireAngleExtrinsicControl(
+        wireFloatExtrinsicControl(
+                root,
+                R.id.btn_live_ext_scale_minus,
+                R.id.btn_live_ext_scale_plus,
+                seekExtScale,
+                SurroundExtrinsicAdjustment.MIN_SCALE,
+                0.01f,
+                0.01f,
+                off -> off.scale,
+                CameraOffset::withScale);
+        wireFloatExtrinsicControl(
                 root,
                 R.id.btn_live_ext_pitch_minus,
                 R.id.btn_live_ext_pitch_plus,
                 seekExtPitch,
                 SurroundExtrinsicAdjustment.MIN_PITCH_DEG,
+                0.5f,
                 0.5f,
                 off -> off.pitchDeg,
                 CameraOffset::withPitchDeg);
@@ -504,25 +576,6 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
                 2,
                 off -> off.posYCm,
                 CameraOffset::withPosYCm);
-
-        wireAngleExtrinsicControl(
-                root,
-                R.id.btn_live_ext_yaw_minus,
-                R.id.btn_live_ext_yaw_plus,
-                seekExtYaw,
-                SurroundExtrinsicAdjustment.MIN_YAW_DEG,
-                0.5f,
-                off -> off.yawDeg,
-                CameraOffset::withYawDeg);
-        wireAngleExtrinsicControl(
-                root,
-                R.id.btn_live_ext_roll_minus,
-                R.id.btn_live_ext_roll_plus,
-                seekExtRoll,
-                SurroundExtrinsicAdjustment.MIN_ROLL_DEG,
-                0.5f,
-                off -> off.rollDeg,
-                CameraOffset::withRollDeg);
         wireIntExtrinsicControl(
                 root,
                 R.id.btn_live_ext_x_minus,
@@ -532,6 +585,55 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
                 2,
                 off -> off.posXCm,
                 CameraOffset::withPosXCm);
+
+        wireFloatExtrinsicControl(
+                root,
+                R.id.btn_live_ext_yaw_minus,
+                R.id.btn_live_ext_yaw_plus,
+                seekExtYaw,
+                SurroundExtrinsicAdjustment.MIN_YAW_DEG,
+                0.5f,
+                0.5f,
+                off -> off.yawDeg,
+                CameraOffset::withYawDeg);
+        wireFloatExtrinsicControl(
+                root,
+                R.id.btn_live_ext_roll_minus,
+                R.id.btn_live_ext_roll_plus,
+                seekExtRoll,
+                SurroundExtrinsicAdjustment.MIN_ROLL_DEG,
+                0.5f,
+                0.5f,
+                off -> off.rollDeg,
+                CameraOffset::withRollDeg);
+        wireIntExtrinsicControl(
+                root,
+                R.id.btn_live_ext_cx_minus,
+                R.id.btn_live_ext_cx_plus,
+                seekExtCx,
+                SurroundExtrinsicAdjustment.MIN_CX_OFFSET_PX,
+                2,
+                off -> off.cxOffsetPx,
+                CameraOffset::withCxOffsetPx);
+        wireIntExtrinsicControl(
+                root,
+                R.id.btn_live_ext_cy_minus,
+                R.id.btn_live_ext_cy_plus,
+                seekExtCy,
+                SurroundExtrinsicAdjustment.MIN_CY_OFFSET_PX,
+                2,
+                off -> off.cyOffsetPx,
+                CameraOffset::withCyOffsetPx);
+        wireFloatExtrinsicControl(
+                root,
+                R.id.btn_live_ext_k1_minus,
+                R.id.btn_live_ext_k1_plus,
+                seekExtK1,
+                SurroundExtrinsicAdjustment.MIN_K1_DELTA,
+                0.005f,
+                0.005f,
+                off -> off.k1Delta,
+                CameraOffset::withK1Delta);
 
         if (btnExtToggleAdvanced != null) {
             btnExtToggleAdvanced.setOnClickListener(v -> {
@@ -582,29 +684,30 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
         CameraOffset update(CameraOffset current, int nextVal);
     }
 
-    private void wireAngleExtrinsicControl(@NonNull View root,
+    private void wireFloatExtrinsicControl(@NonNull View root,
                                            int minusId,
                                            int plusId,
                                            @Nullable SeekBar seekBar,
-                                           float minDeg,
-                                           float stepDeg,
+                                           float minVal,
+                                           float buttonStep,
+                                           float barStep,
                                            @NonNull Function<CameraOffset, Float> getter,
                                            @NonNull FloatOffsetUpdater updater) {
         View minus = root.findViewById(minusId);
         View plus = root.findViewById(plusId);
         if (minus != null) {
-            minus.setOnClickListener(v -> applyExtrinsicStep(off -> updater.update(off, getter.apply(off) - stepDeg)));
+            minus.setOnClickListener(v -> applyExtrinsicStep(off -> updater.update(off, getter.apply(off) - buttonStep)));
         }
         if (plus != null) {
-            plus.setOnClickListener(v -> applyExtrinsicStep(off -> updater.update(off, getter.apply(off) + stepDeg)));
+            plus.setOnClickListener(v -> applyExtrinsicStep(off -> updater.update(off, getter.apply(off) + buttonStep)));
         }
         if (seekBar != null) {
             seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
                 @Override
                 public void onProgressChanged(SeekBar bar, int progress, boolean fromUser) {
                     if (!fromUser || bindingUi) return;
-                    float nextDeg = minDeg + progress * 0.5f;
-                    applyExtrinsicDrag(off -> updater.update(off, nextDeg));
+                    float nextVal = minVal + progress * barStep;
+                    applyExtrinsicDrag(off -> updater.update(off, nextVal));
                 }
 
                 @Override
@@ -679,9 +782,25 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
 
     private void selectExtrinsicCamera(@NonNull String camKey) {
         this.selectedExtrinsicCam = SurroundExtrinsicAdjustment.normalizeCameraKey(camKey);
+        if (assistSoloCamera) {
+            syncAssistOptionsToPreview();
+        }
         if (getContext() != null) {
             refreshExtrinsicUi(getContext(), false);
         }
+    }
+
+    private void syncAssistOptionsToPreview() {
+        if (previewView == null) return;
+        int soloIdx = assistSoloCamera ? cameraKeyToIndex(selectedExtrinsicCam) : -1;
+        previewView.setCalibrationAssistOptions(assistShowGrid, assistHideCarModel, soloIdx);
+    }
+
+    private static int cameraKeyToIndex(@NonNull String camKey) {
+        if ("back".equals(camKey)) return com.kooo.evcam.surround.SurroundMeshBuilder.CAM_BACK;
+        if ("left".equals(camKey)) return com.kooo.evcam.surround.SurroundMeshBuilder.CAM_LEFT;
+        if ("right".equals(camKey)) return com.kooo.evcam.surround.SurroundMeshBuilder.CAM_RIGHT;
+        return com.kooo.evcam.surround.SurroundMeshBuilder.CAM_FRONT;
     }
 
     @NonNull
@@ -705,11 +824,28 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
                     : String.format(Locale.US, "当前编辑槽：%s（未微调，使用原始网格；切换方案独立记忆）", slotTitle));
         }
 
+        UiOptionPillHelper.apply(btnAssistGrid, ctx, assistShowGrid);
+        UiOptionPillHelper.apply(btnAssistHideCar, ctx, assistHideCarModel);
+        UiOptionPillHelper.apply(btnAssistSoloCam, ctx, assistSoloCamera);
+
         updateCameraTabPill(btnExtCamFront, ctx, "front", "前摄", adj);
         updateCameraTabPill(btnExtCamBack, ctx, "back", "后摄", adj);
         updateCameraTabPill(btnExtCamLeft, ctx, "left", "左摄", adj);
         updateCameraTabPill(btnExtCamRight, ctx, "right", "右摄", adj);
 
+        if (tvExtrinsicCamTip != null) {
+            if ("left".equals(selectedExtrinsicCam) || "right".equals(selectedExtrinsicCam)) {
+                tvExtrinsicCamTip.setText("侧摄调法：先开「参考网格」，用滚转/偏航对齐竖线，再调画面缩放和 ΔX 对齐 250cm 车位宽。");
+            } else {
+                tvExtrinsicCamTip.setText("前后摄调法：先调俯仰压低远景，再用「画面缩放」把车头/车尾宽窄拉到与两侧车位线接上。");
+            }
+        }
+
+        if (tvExtScaleValue != null) {
+            int scalePct = Math.round(offset.scale * 100.0f);
+            tvExtScaleValue.setText(String.format(Locale.US,
+                    "画面缩放：%d%%（+放大撑宽 / -缩小收紧）", scalePct));
+        }
         if (tvExtPitchValue != null) {
             tvExtPitchValue.setText(String.format(Locale.US,
                     "俯仰角 ΔPitch：%+.1f°（正=压低远景 / 负=抬高）", offset.pitchDeg));
@@ -722,6 +858,10 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
             tvExtYValue.setText(String.format(Locale.US,
                     "前后偏移 ΔY：%d cm（正=靠前 / 负=靠后）", offset.posYCm));
         }
+        if (tvExtXValue != null) {
+            tvExtXValue.setText(String.format(Locale.US,
+                    "左右偏移 ΔX：%d cm（负=靠左 / 正=靠右）", offset.posXCm));
+        }
         if (tvExtYawValue != null) {
             tvExtYawValue.setText(String.format(Locale.US,
                     "偏航角 ΔYaw：%+.1f°（负=向左 / 正=向右）", offset.yawDeg));
@@ -730,9 +870,17 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
             tvExtRollValue.setText(String.format(Locale.US,
                     "滚转角 ΔRoll：%+.1f°（负=逆时针 / 正=顺时针）", offset.rollDeg));
         }
-        if (tvExtXValue != null) {
-            tvExtXValue.setText(String.format(Locale.US,
-                    "左右偏移 ΔX：%d cm（负=靠左 / 正=靠右）", offset.posXCm));
+        if (tvExtCxValue != null) {
+            tvExtCxValue.setText(String.format(Locale.US,
+                    "光心水平 Δcx：%d px（负=左移 / 正=右移）", offset.cxOffsetPx));
+        }
+        if (tvExtCyValue != null) {
+            tvExtCyValue.setText(String.format(Locale.US,
+                    "光心垂直 Δcy：%d px（负=上移 / 正=下移）", offset.cyOffsetPx));
+        }
+        if (tvExtK1Value != null) {
+            tvExtK1Value.setText(String.format(Locale.US,
+                    "鱼眼畸变 Δk1：%+.3f（调边角直线弯曲度）", offset.k1Delta));
         }
 
         if (layoutExtAdvanced != null) {
@@ -740,8 +888,8 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
         }
         if (btnExtToggleAdvanced != null) {
             btnExtToggleAdvanced.setText(advancedExtrinsicsExpanded
-                    ? "收起高级：偏航 / 滚转 / 左右偏移 ▴"
-                    : "展开高级：偏航 / 滚转 / 左右偏移 ▾");
+                    ? "收起高级：偏航 / 滚转 / 光心 / 畸变 ▴"
+                    : "展开高级：偏航 / 滚转 / 光心 / 畸变 ▾");
             UiOptionPillHelper.apply(btnExtToggleAdvanced, ctx, advancedExtrinsicsExpanded);
         }
         UiOptionPillHelper.apply(btnExtResetCamera, ctx, false);
@@ -752,6 +900,9 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
         boolean prevBinding = bindingUi;
         bindingUi = true;
         try {
+            if (seekExtScale != null) {
+                seekExtScale.setProgress(Math.round((offset.scale - SurroundExtrinsicAdjustment.MIN_SCALE) * 100.0f));
+            }
             if (seekExtPitch != null) {
                 seekExtPitch.setProgress(Math.round((offset.pitchDeg - SurroundExtrinsicAdjustment.MIN_PITCH_DEG) * 2.0f));
             }
@@ -761,14 +912,23 @@ public class SurroundCalibrationLiveFragment extends Fragment implements UiTheme
             if (seekExtY != null) {
                 seekExtY.setProgress(offset.posYCm - SurroundExtrinsicAdjustment.MIN_POS_Y_CM);
             }
+            if (seekExtX != null) {
+                seekExtX.setProgress(offset.posXCm - SurroundExtrinsicAdjustment.MIN_POS_X_CM);
+            }
             if (seekExtYaw != null) {
                 seekExtYaw.setProgress(Math.round((offset.yawDeg - SurroundExtrinsicAdjustment.MIN_YAW_DEG) * 2.0f));
             }
             if (seekExtRoll != null) {
                 seekExtRoll.setProgress(Math.round((offset.rollDeg - SurroundExtrinsicAdjustment.MIN_ROLL_DEG) * 2.0f));
             }
-            if (seekExtX != null) {
-                seekExtX.setProgress(offset.posXCm - SurroundExtrinsicAdjustment.MIN_POS_X_CM);
+            if (seekExtCx != null) {
+                seekExtCx.setProgress(offset.cxOffsetPx - SurroundExtrinsicAdjustment.MIN_CX_OFFSET_PX);
+            }
+            if (seekExtCy != null) {
+                seekExtCy.setProgress(offset.cyOffsetPx - SurroundExtrinsicAdjustment.MIN_CY_OFFSET_PX);
+            }
+            if (seekExtK1 != null) {
+                seekExtK1.setProgress(Math.round((offset.k1Delta - SurroundExtrinsicAdjustment.MIN_K1_DELTA) * 200.0f));
             }
         } finally {
             bindingUi = prevBinding;

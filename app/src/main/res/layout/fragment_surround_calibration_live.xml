@@ -149,11 +149,19 @@
                             style="@style/Widget.EVCam.OptionPill"
                             android:layout_width="0dp"
                             android:layout_weight="1"
-                            android:text="导入本地校准" />
+                            android:text="导入本地/原厂校准" />
                     </LinearLayout>
+
+                    <TextView
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="8dp"
+                        android:text="支持 calibration.json、.zip 压缩包，以及原厂 avm_calib_res / data 文件夹（Table.db + .param）。"
+                        android:textColor="@color/text_hint"
+                        android:textSize="11sp" />
                 </LinearLayout>
 
-                <!-- 四路镜头外参微调 -->
+                <!-- 四路镜头外参/内参微调 -->
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
@@ -165,7 +173,7 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:text="四路镜头外参微调（按方案独立保存）"
+                        android:text="四路镜头标定微调（外参 + 缩放 + 内参）"
                         android:textColor="@color/text_primary"
                         android:textSize="15sp"
                         android:fontFamily="sans-serif-medium" />
@@ -175,17 +183,48 @@
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="3dp"
-                        android:layout_marginBottom="10dp"
-                        android:text="不同标定方案独立保存，切换内置/导入不丢失；调整俯仰角可压平前视远景、对齐四边白线。"
+                        android:layout_marginBottom="8dp"
+                        android:text="不同标定方案独立保存，支持缩放拉齐前后/左右画面比例与四角对缝。"
                         android:textColor="@color/text_secondary"
                         android:textSize="12sp" />
+
+                    <!-- 标定辅助视图开关 -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:layout_marginBottom="8dp">
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_assist_grid"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="参考网格" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_assist_hide_car"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="6dp"
+                            android:text="隐藏车模" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_assist_solo_cam"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_width="0dp"
+                            android:layout_weight="1"
+                            android:text="单路独显" />
+                    </LinearLayout>
 
                     <!-- 镜头选择 -->
                     <LinearLayout
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
                         android:orientation="horizontal"
-                        android:layout_marginBottom="10dp">
+                        android:layout_marginBottom="6dp">
 
                         <androidx.appcompat.widget.AppCompatButton
                             android:id="@+id/btn_live_ext_cam_front"
@@ -218,6 +257,51 @@
                             android:layout_weight="1"
                             android:text="右摄" />
                     </LinearLayout>
+
+                    <TextView
+                        android:id="@+id/tv_live_ext_cam_tip"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginBottom="10dp"
+                        android:text="建议顺序：先展开「参考网格」调左右摄拉直车位线，再调前后摄缩放与俯仰对缝。"
+                        android:textColor="@color/text_hint"
+                        android:textSize="11sp" />
+
+                    <!-- 画面缩放 Scale -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_live_ext_scale_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="画面缩放：100%（+放大撑宽 / -缩小收紧）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ext_scale_minus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_marginEnd="6dp"
+                            android:text="-1%" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ext_scale_plus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:text="+1%" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_live_ext_scale"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="60"
+                        android:layout_marginBottom="10dp" />
 
                     <!-- 俯仰角 ΔPitch -->
                     <LinearLayout
@@ -327,12 +411,48 @@
                         android:max="120"
                         android:layout_marginBottom="10dp" />
 
+                    <!-- 左右偏移 ΔX -->
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical"
+                        android:layout_marginBottom="4dp">
+
+                        <TextView
+                            android:id="@+id/tv_live_ext_x_value"
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:text="左右偏移 ΔX：0 cm（负=靠左 / 正=靠右）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="13sp" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ext_x_minus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:layout_marginEnd="6dp"
+                            android:text="-2" />
+
+                        <androidx.appcompat.widget.AppCompatButton
+                            android:id="@+id/btn_live_ext_x_plus"
+                            style="@style/Widget.EVCam.OptionPill.Compact"
+                            android:text="+2" />
+                    </LinearLayout>
+
+                    <SeekBar
+                        android:id="@+id/seekbar_live_ext_x"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:max="80"
+                        android:layout_marginBottom="10dp" />
+
                     <!-- 高级参数折叠开关 -->
                     <androidx.appcompat.widget.AppCompatButton
                         android:id="@+id/btn_live_ext_toggle_advanced"
                         style="@style/Widget.EVCam.OptionPill.Compact"
                         android:layout_width="match_parent"
-                        android:text="展开高级：偏航 / 滚转 / 左右偏移 ▾" />
+                        android:text="展开高级：偏航 / 滚转 / 光心 / 畸变 ▾" />
 
                     <LinearLayout
                         android:id="@+id/layout_live_ext_advanced"
@@ -414,7 +534,7 @@
                             android:max="60"
                             android:layout_marginBottom="10dp" />
 
-                        <!-- 左右偏移 ΔX -->
+                        <!-- 光心水平 Δcx -->
                         <LinearLayout
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
@@ -423,31 +543,103 @@
                             android:layout_marginBottom="4dp">
 
                             <TextView
-                                android:id="@+id/tv_live_ext_x_value"
+                                android:id="@+id/tv_live_ext_cx_value"
                                 android:layout_width="0dp"
                                 android:layout_height="wrap_content"
                                 android:layout_weight="1"
-                                android:text="左右偏移 ΔX：0 cm（负=靠左 / 正=靠右）"
+                                android:text="光心水平 Δcx：0 px"
                                 android:textColor="@color/text_secondary"
                                 android:textSize="13sp" />
 
                             <androidx.appcompat.widget.AppCompatButton
-                                android:id="@+id/btn_live_ext_x_minus"
+                                android:id="@+id/btn_live_ext_cx_minus"
                                 style="@style/Widget.EVCam.OptionPill.Compact"
                                 android:layout_marginEnd="6dp"
                                 android:text="-2" />
 
                             <androidx.appcompat.widget.AppCompatButton
-                                android:id="@+id/btn_live_ext_x_plus"
+                                android:id="@+id/btn_live_ext_cx_plus"
                                 style="@style/Widget.EVCam.OptionPill.Compact"
                                 android:text="+2" />
                         </LinearLayout>
 
                         <SeekBar
-                            android:id="@+id/seekbar_live_ext_x"
+                            android:id="@+id/seekbar_live_ext_cx"
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
-                            android:max="80" />
+                            android:max="120"
+                            android:layout_marginBottom="10dp" />
+
+                        <!-- 光心垂直 Δcy -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="4dp">
+
+                            <TextView
+                                android:id="@+id/tv_live_ext_cy_value"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="光心垂直 Δcy：0 px"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_live_ext_cy_minus"
+                                style="@style/Widget.EVCam.OptionPill.Compact"
+                                android:layout_marginEnd="6dp"
+                                android:text="-2" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_live_ext_cy_plus"
+                                style="@style/Widget.EVCam.OptionPill.Compact"
+                                android:text="+2" />
+                        </LinearLayout>
+
+                        <SeekBar
+                            android:id="@+id/seekbar_live_ext_cy"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:max="120"
+                            android:layout_marginBottom="10dp" />
+
+                        <!-- 鱼眼畸变 Δk1 -->
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:orientation="horizontal"
+                            android:gravity="center_vertical"
+                            android:layout_marginBottom="4dp">
+
+                            <TextView
+                                android:id="@+id/tv_live_ext_k1_value"
+                                android:layout_width="0dp"
+                                android:layout_height="wrap_content"
+                                android:layout_weight="1"
+                                android:text="鱼眼畸变 Δk1：+0.000"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_live_ext_k1_minus"
+                                style="@style/Widget.EVCam.OptionPill.Compact"
+                                android:layout_marginEnd="6dp"
+                                android:text="-0.005" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_live_ext_k1_plus"
+                                style="@style/Widget.EVCam.OptionPill.Compact"
+                                android:text="+0.005" />
+                        </LinearLayout>
+
+                        <SeekBar
+                            android:id="@+id/seekbar_live_ext_k1"
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:max="60" />
                     </LinearLayout>
 
                     <!-- 底部操作按钮行 -->
