@@ -5,6 +5,7 @@ import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.FileTransferManager;
 import com.kooo.evcam.RecordingStorageAccess;
+import com.kooo.evcam.StorageCleanupManager;
 import com.kooo.evcam.StorageHelper;
 import android.content.Context;
 import android.graphics.SurfaceTexture;
@@ -122,6 +123,9 @@ public class MultiCameraManager {
     private static final int MAX_NON_AUTO_REBUILD_ATTEMPTS = CODEC_FALLBACK_THRESHOLD + 1;
     private volatile boolean isRebuildingRecording = false;  // 是否正在重建录制（防止多摄像头并发触发）
     private final AtomicBoolean startupFailureReported = new AtomicBoolean(false);
+    private final RecordingStartupTracker startupTracker = new RecordingStartupTracker();
+    private volatile List<String> currentRecordingKeys = java.util.Collections.emptyList();
+    private volatile long currentSegmentDurationMs = 60_000L;
     private volatile boolean startupInSyncPrepare = false;
     private volatile String lastStartupErrorMessage = null;
     private StatusCallback statusCallback;
@@ -149,6 +153,7 @@ public class MultiCameraManager {
         Map<String,Boolean> ready;
         synchronized (sessionLock) { ready=new LinkedHashMap<>(cameraSessionReady); }
         StringBuilder detail=new StringBuilder("Recording startup timeout; sessionReady="+ready);
+        detail.append("; startup=").append(startupTracker.formatSummary());
         for (Map.Entry<String,CodecVideoRecorder> entry : codecRecorders.entrySet()) {
             detail.append("; ").append(entry.getKey()).append(':').append(entry.getValue().startupDiagnostics());
         }
@@ -156,6 +161,20 @@ public class MultiCameraManager {
     }
 
     private void failRecordingStartup(String detail) {
+        if (startupTracker.isTracking()) {
+            RecordingStartupTracker.Outcome outcome = startupTracker.onWatchdogTimeout();
+            if (!outcome.allFailed && outcome.partialFailure) {
+                AppLog.e(TAG, "Partial recording startup timeout: " + detail
+                        + ", active=" + outcome.writtenKeys + ", failed=" + outcome.failedKeys);
+                cleanupFailedCameraRecorders(outcome.failedKeys);
+                if (recordingStatusCallback != null) {
+                    final Set<String> activeCopy = new java.util.LinkedHashSet<>(outcome.writtenKeys);
+                    final Set<String> failedCopy = new java.util.LinkedHashSet<>(outcome.failedKeys);
+                    mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
+                }
+                return;
+            }
+        }
         failRecordingStartupWithUserMessage(detail, "录像启动超时，未收到有效视频数据，请在设置中保存日志");
     }
 
@@ -184,19 +203,160 @@ public class MultiCameraManager {
         }
     }
 
+    private String resolveRecordingKeyByCameraId(String cameraId) {
+        if (cameraId == null || cameraId.isEmpty()) {
+            return null;
+        }
+        if ("combined".equals(cameraId)) {
+            return "combined";
+        }
+        List<String> recordingKeys = currentRecordingKeys;
+        if (recordingKeys != null) {
+            for (String key : recordingKeys) {
+                SingleCamera camera = cameras.get(key);
+                if (camera != null && cameraId.equals(camera.getCameraId())) {
+                    return key;
+                }
+            }
+        }
+        for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
+            if (cameraId.equals(entry.getValue().getCameraId())) {
+                return entry.getKey();
+            }
+        }
+        return null;
+    }
+
+    private static boolean isTerminalRecorderError(String error) {
+        if (error == null || error.isEmpty()) {
+            return false;
+        }
+        return error.contains("Encoder rebuild failed")
+                || error.contains("Max recovery")
+                || error.contains("Video writer failed")
+                || error.contains("MediaRecorder error")
+                || error.contains("Failed to switch segment");
+    }
+
+    private void cleanupFailedCameraRecorders(Set<String> failedKeys) {
+        if (failedKeys == null || failedKeys.isEmpty()) {
+            return;
+        }
+        for (String failedKey : failedKeys) {
+            cleanupFailedCameraRecorder(failedKey);
+        }
+    }
+
+    private void cleanupFailedCameraRecorder(String key) {
+        if (key == null || key.isEmpty() || "combined".equals(key)) {
+            return;
+        }
+        final CodecVideoRecorder codecRecorder = codecRecorders.remove(key);
+        if (codecRecorder != null) {
+            codecRecorder.requestStop();
+            new Thread(() -> {
+                try {
+                    codecRecorder.release();
+                } catch (Exception e) {
+                    AppLog.w(TAG, "Error releasing failed codec recorder for " + key, e);
+                }
+            }, "ReleaseFailedCodec-" + key).start();
+        }
+        final VideoRecorder videoRecorder = !useCodecRecording ? recorders.get(key) : null;
+        if (videoRecorder != null) {
+            new Thread(() -> {
+                try {
+                    videoRecorder.reset();
+                } catch (Exception e) {
+                    AppLog.w(TAG, "Error resetting failed video recorder for " + key, e);
+                }
+            }, "ResetFailedRecorder-" + key).start();
+        }
+        synchronized (sessionLock) {
+            cameraRecordingActive.put(key, false);
+        }
+        SingleCamera camera = cameras.get(key);
+        if (camera != null) {
+            camera.clearRecordSurface();
+            if (!camera.closeIfUnused()) {
+                camera.recreateSession();
+            }
+        }
+    }
+
+    private void handleFirstDataWrittenForKey(String key) {
+        RecordingStartupTracker.Outcome outcome = startupTracker.recordFirstDataWritten(key);
+        if (outcome.shouldCancelWatchdog) {
+            startupWatchdog.cancel();
+        }
+        if (outcome.shouldNotifyFirstWrite && !hasNotifiedFirstDataWritten) {
+            hasNotifiedFirstDataWritten = true;
+            if (firstDataWrittenCallback != null) {
+                AppLog.d(TAG, "Notifying external: first data written (" + key + "), recording truly started");
+                mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
+            }
+        }
+        if (outcome.partialFailure) {
+            cleanupFailedCameraRecorders(outcome.failedKeys);
+            if (recordingStatusCallback != null) {
+                final Set<String> activeCopy = new java.util.LinkedHashSet<>(outcome.writtenKeys);
+                final Set<String> failedCopy = new java.util.LinkedHashSet<>(outcome.failedKeys);
+                mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
+            }
+        }
+    }
+
     private void handleRecorderError(String mode, String cameraId, String error) {
         AppLog.e(TAG, mode + " recording error for camera " + cameraId + ": " + error);
         if (error != null && !error.isEmpty()) {
             lastStartupErrorMessage = error;
         }
-        if (startupInSyncPrepare || hasNotifiedFirstDataWritten) {
+        if (RecordingStorageAccess.isOutOfSpaceMessage(error)) {
+            StorageCleanupManager.triggerEmergencyCleanupIfActive();
+        }
+        if (startupInSyncPrepare) {
             return;
         }
-        if (RecordingStorageAccess.isFatalWriteErrorMessage(error)) {
+        String key = resolveRecordingKeyByCameraId(cameraId);
+        boolean fatalStorage = RecordingStorageAccess.isFatalWriteErrorMessage(error);
+        boolean codecFatal = false;
+        if (key != null) {
+            CodecVideoRecorder codecRecorder = codecRecorders.get(key);
+            codecFatal = codecRecorder != null && codecRecorder.hasFatalWriteError();
+        }
+        boolean terminal = fatalStorage || codecFatal || isTerminalRecorderError(error);
+        if (!terminal) {
+            return;
+        }
+        if (startupTracker.isTracking()) {
+            RecordingStartupTracker.Outcome outcome =
+                    startupTracker.recordCameraFailure(key, error, fatalStorage || codecFatal);
+            if (outcome.shouldCancelWatchdog) {
+                startupWatchdog.cancel();
+            }
+            if (outcome.allFailed) {
+                boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                String userMessage = RecordingStorageAccess.formatUserStartupFailureMessage(error, missingAllFiles);
+                failRecordingStartupWithUserMessage(
+                        "Recording failure (" + mode + ", camera=" + cameraId + "): " + error,
+                        userMessage);
+                return;
+            }
+            if (outcome.partialFailure) {
+                cleanupFailedCameraRecorder(key);
+                if (recordingStatusCallback != null) {
+                    final Set<String> activeCopy = new java.util.LinkedHashSet<>(outcome.writtenKeys);
+                    final Set<String> failedCopy = new java.util.LinkedHashSet<>(outcome.failedKeys);
+                    mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
+                }
+            }
+            return;
+        }
+        if (fatalStorage) {
             boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
             String userMessage = RecordingStorageAccess.formatUserStartupFailureMessage(error, missingAllFiles);
             failRecordingStartupWithUserMessage(
-                    "Fatal startup storage write failure (" + mode + ", camera=" + cameraId + "): " + error,
+                    "Fatal storage write failure (" + mode + ", camera=" + cameraId + "): " + error,
                     userMessage);
         }
     }
@@ -474,6 +634,25 @@ public class MultiCameraManager {
         setSingleSurroundSurface("back", back, stBack);
         setSingleSurroundSurface("left", left, stLeft);
         setSingleSurroundSurface("right", right, stRight);
+    }
+
+    /** 模式 A 原子挂载入口：合并关闭常规主预览与绑定 360 OES Surface，避免双次 session 重建抖动。 */
+    public void bindSurroundPreviewForModeA(Surface front, SurfaceTexture stFront,
+                                            Surface back, SurfaceTexture stBack,
+                                            Surface left, SurfaceTexture stLeft,
+                                            Surface right, SurfaceTexture stRight) {
+        bindSingleSurroundSurfaceForModeA("front", front, stFront);
+        bindSingleSurroundSurfaceForModeA("back", back, stBack);
+        bindSingleSurroundSurfaceForModeA("left", left, stLeft);
+        bindSingleSurroundSurfaceForModeA("right", right, stRight);
+    }
+
+    public void bindSingleSurroundSurfaceForModeA(String cameraKey, Surface surface, SurfaceTexture st) {
+        previewDemand.setCameraVisible(cameraKey, false);
+        SingleCamera camera = cameras.get(cameraKey);
+        if (camera != null) {
+            camera.setSurroundPreviewSurface(surface, st, true);
+        }
     }
 
     /** T07: 退出模式 A 或退后台时立即解绑全部四路 360 OES Surface。 */
@@ -874,6 +1053,10 @@ public class MultiCameraManager {
                         VideoRecorder recorder = recorders.get(key);
 
                         if (camera != null && recorder != null) {
+                            // 通知存储清理器记录写入速率并按需执行 O(1) 门控空间检查
+                            if (newSegmentIndex > 0 && completedFilePath != null) {
+                                StorageCleanupManager.notifySegmentCompleted(completedFilePath, currentSegmentDurationMs);
+                            }
                             // 如果使用中转写入，将上一个分段的文件传输到最终目录
                             if (useRelayWrite && finalSaveDir != null && newSegmentIndex > 0 && completedFilePath != null) {
                                 // 传输已完成的文件（由回调提供确切路径，避免传输正在录制的新文件）
@@ -919,13 +1102,8 @@ public class MultiCameraManager {
             @Override
             public void onFirstDataWritten(String cameraId) {
                 AppLog.d(TAG, "First data written for camera " + cameraId);
-                startupWatchdog.cancel();
-                // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
-                if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
-                    hasNotifiedFirstDataWritten = true;
-                    AppLog.d(TAG, "Notifying external: first data written, recording truly started");
-                    mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
-                }
+                String key = resolveRecordingKeyByCameraId(cameraId);
+                handleFirstDataWrittenForKey(key != null ? key : cameraId);
             }
         };
 
@@ -1186,6 +1364,10 @@ public class MultiCameraManager {
         int targetFrameRate = appConfig.getActualFrameRate(25);  // 使用25fps降低CPU占用
         AppLog.d(TAG, "Target frame rate: " + targetFrameRate + " fps (level: " + appConfig.getFramerateLevel() + ")");
 
+        currentRecordingKeys = new ArrayList<>(keys);
+        currentSegmentDurationMs = segmentDurationMs;
+        startupTracker.reset(keys);
+
         // 第一步：准备所有 MediaRecorder（但不启动）
         // 使用每个摄像头的实际预览分辨率，而不是硬编码的值
         boolean prepareSuccess = true;
@@ -1332,10 +1514,8 @@ public class MultiCameraManager {
             Boolean ready = cameraSessionReady.get(key);
             if (ready == null || !ready) {
                 // 会话未就绪
-                if (fromTimeout) {
-                    failedCameras.add(key);
-                    AppLog.w(TAG, "Camera " + key + " session not ready, skipping");
-                }
+                failedCameras.add(key);
+                AppLog.w(TAG, "Camera " + key + " session not ready, skipping");
                 continue;
             }
 
@@ -1360,6 +1540,15 @@ public class MultiCameraManager {
                 failedCameras.add(key);
             }
         }
+
+        if (!failedCameras.isEmpty()) {
+            for (String failedKey : failedCameras) {
+                startupTracker.recordCameraFailure(failedKey, "mediarecorder_start_failed", false);
+                if (!activeCameras.isEmpty()) {
+                    cleanupFailedCameraRecorder(failedKey);
+                }
+            }
+        }
         
         if (!activeCameras.isEmpty()) {
             isRecording = true;
@@ -1369,17 +1558,27 @@ public class MultiCameraManager {
             // 如果有失败的摄像头，通知上层
             if (!failedCameras.isEmpty() && recordingStatusCallback != null) {
                 AppLog.w(TAG, failedCameras.size() + " camera(s) failed to start: " + failedCameras);
-                recordingStatusCallback.onPartialRecordingStart(activeCameras, failedCameras);
+                final Set<String> activeCopy = new java.util.LinkedHashSet<>(activeCameras);
+                final Set<String> failedCopy = new java.util.LinkedHashSet<>(failedCameras);
+                mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
             }
         } else {
             AppLog.e(TAG, "All cameras failed to start recording");
             startupWatchdog.cancel();
+            startupTracker.reset(java.util.Collections.emptyList());
             isRecording = false;
             // 清理所有录制器
             for (String key : keys) {
                 VideoRecorder recorder = recorders.get(key);
                 if (recorder != null) {
-                    recorder.release();
+                    recorder.reset();
+                }
+                SingleCamera camera = cameras.get(key);
+                if (camera != null) {
+                    camera.clearRecordSurface();
+                    if (!camera.closeIfUnused()) {
+                        camera.recreateSession();
+                    }
                 }
             }
             // 通知上层完全失败
@@ -1388,7 +1587,9 @@ public class MultiCameraManager {
             }
             // 同时通知 recordingStatusCallback（如果有设置）
             if (recordingStatusCallback != null) {
-                recordingStatusCallback.onPartialRecordingStart(activeCameras, failedCameras);
+                final Set<String> activeCopy = new java.util.LinkedHashSet<>(activeCameras);
+                final Set<String> failedCopy = new java.util.LinkedHashSet<>(failedCameras);
+                mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
             }
         }
         
@@ -1499,6 +1700,13 @@ public class MultiCameraManager {
         int targetFrameRate = appConfig.getActualFrameRate(25);  // 使用25fps降低CPU占用
         AppLog.d(TAG, "Codec target frame rate: " + targetFrameRate + " fps (level: " + appConfig.getFramerateLevel() + ")");
 
+        currentRecordingKeys = new ArrayList<>(keys);
+        currentSegmentDurationMs = segmentDurationMs;
+        List<String> expectedTrackerKeys = RecordingExperiment.compositeDaily(keys)
+                ? java.util.Collections.singletonList("combined")
+                : keys;
+        startupTracker.reset(expectedTrackerKeys);
+
         // 清理之前的软编码录制器
         for (CodecVideoRecorder recorder : codecRecorders.values()) {
             recorder.release();
@@ -1585,79 +1793,7 @@ public class MultiCameraManager {
                         bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight, appConfig, adjConfig);
 
                 // 设置回调
-                codecRecorder.setCallback(new RecordCallback() {
-                    @Override
-                    public void onRecordStart(String cameraId) {
-                        AppLog.d(TAG, "Codec recording started for camera " + cameraId);
-                    }
-
-                    @Override
-                    public void onRecordStop(String cameraId) {
-                        AppLog.d(TAG, "Codec recording stopped for camera " + cameraId);
-                    }
-
-                    @Override
-                    public void onRecordError(String cameraId, String error) {
-                        handleRecorderError("Codec", cameraId, error);
-                    }
-
-                    @Override
-                    public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {
-                        AppLog.d(TAG, "Codec prepare segment switch for camera " + cameraId + " (current segment: " + currentSegmentIndex + ")");
-                        // 软编码录制器使用独立的 SurfaceTexture，不需要暂停 Camera CaptureSession
-                        // 但为了一致性，我们记录日志
-                    }
-
-                    @Override
-                    public void onSegmentSwitch(String cameraId, int newSegmentIndex, String completedFilePath) {
-                        AppLog.d(TAG, "Codec segment switch for camera " + cameraId + " to segment " + newSegmentIndex);
-
-                        // 如果使用中转写入，将上一个分段的文件传输到最终目录
-                        if (useRelayWrite && finalSaveDir != null && newSegmentIndex > 0 && completedFilePath != null) {
-                            // 传输已完成的文件（由回调提供确切路径，避免传输正在录制的新文件）
-                            scheduleRelayTransfer(completedFilePath);
-                        }
-
-                        // 通知分段切换回调（只通知一次，第一个触发的摄像头会通知）
-                        if (segmentSwitchCallback != null && newSegmentIndex > lastNotifiedSegmentIndex) {
-                            lastNotifiedSegmentIndex = newSegmentIndex;
-                            segmentSwitchCallback.onSegmentSwitch(newSegmentIndex);
-                        }
-                    }
-
-                    @Override
-                    public void onCorruptedFilesDeleted(String cameraId, List<String> deletedFiles) {
-                        if (deletedFiles != null && !deletedFiles.isEmpty()) {
-                            AppLog.w(TAG, "Corrupted files deleted for codec camera " + cameraId + ": " + deletedFiles.size() + " file(s)");
-                            for (String file : deletedFiles) {
-                                AppLog.d(TAG, "  Deleted: " + file);
-                            }
-                            // 通知 MainActivity 显示弹窗
-                            if (corruptedFilesCallback != null) {
-                                mainHandler.post(() -> corruptedFilesCallback.onCorruptedFilesDeleted(deletedFiles));
-                            }
-                        }
-                    }
-
-                    @Override
-                    public void onRecordingRebuildRequested(String cameraId, String reason) {
-                        // CodecVideoRecorder 通常不会触发此回调，但为了接口完整性实现
-                        AppLog.e(TAG, "Codec recording rebuild requested for camera " + cameraId + ", reason: " + reason);
-                        // Codec 模式不需要回退，记录日志即可
-                    }
-
-                    @Override
-                    public void onFirstDataWritten(String cameraId) {
-                        AppLog.d(TAG, "Codec first data written for camera " + cameraId);
-                        startupWatchdog.cancel();
-                        // 只在第一个摄像头首次写入时通知外部（每次录制只通知一次）
-                        if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback != null) {
-                            hasNotifiedFirstDataWritten = true;
-                            AppLog.d(TAG, "Notifying external: first data written, recording truly started");
-                            mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
-                        }
-                    }
-                });
+                codecRecorder.setCallback(createCodecRecordCallback(key));
 
                 // 准备录制
                 String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
@@ -1729,6 +1865,75 @@ public class MultiCameraManager {
 
         startupWatchdog.start();
         return true;
+    }
+
+    private RecordCallback createCodecRecordCallback(final String cameraKey) {
+        return new RecordCallback() {
+            @Override
+            public void onRecordStart(String cameraId) {
+                AppLog.d(TAG, "Codec recording started for camera " + cameraId);
+            }
+
+            @Override
+            public void onRecordStop(String cameraId) {
+                AppLog.d(TAG, "Codec recording stopped for camera " + cameraId);
+            }
+
+            @Override
+            public void onRecordError(String cameraId, String error) {
+                handleRecorderError("Codec", cameraId, error);
+            }
+
+            @Override
+            public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {
+                AppLog.d(TAG, "Codec prepare segment switch for camera " + cameraId + " (current segment: " + currentSegmentIndex + ")");
+            }
+
+            @Override
+            public void onSegmentSwitch(String cameraId, int newSegmentIndex, String completedFilePath) {
+                AppLog.d(TAG, "Codec segment switch for camera " + cameraId + " to segment " + newSegmentIndex);
+
+                if (newSegmentIndex > 0 && completedFilePath != null) {
+                    StorageCleanupManager.notifySegmentCompleted(completedFilePath, currentSegmentDurationMs);
+                }
+
+                if (useRelayWrite && finalSaveDir != null && newSegmentIndex > 0 && completedFilePath != null) {
+                    scheduleRelayTransfer(completedFilePath);
+                }
+
+                if (segmentSwitchCallback != null && newSegmentIndex > lastNotifiedSegmentIndex) {
+                    lastNotifiedSegmentIndex = newSegmentIndex;
+                    segmentSwitchCallback.onSegmentSwitch(newSegmentIndex);
+                }
+            }
+
+            @Override
+            public void onCorruptedFilesDeleted(String cameraId, List<String> deletedFiles) {
+                if (deletedFiles != null && !deletedFiles.isEmpty()) {
+                    AppLog.w(TAG, "Corrupted files deleted for codec camera " + cameraId + ": " + deletedFiles.size() + " file(s)");
+                    for (String file : deletedFiles) {
+                        AppLog.d(TAG, "  Deleted: " + file);
+                    }
+                    if (corruptedFilesCallback != null) {
+                        mainHandler.post(() -> corruptedFilesCallback.onCorruptedFilesDeleted(deletedFiles));
+                    }
+                }
+            }
+
+            @Override
+            public void onRecordingRebuildRequested(String cameraId, String reason) {
+                AppLog.e(TAG, "Codec recording rebuild requested for camera " + cameraId + ", reason: " + reason);
+            }
+
+            @Override
+            public void onFirstDataWritten(String cameraId) {
+                AppLog.d(TAG, "Codec first data written for camera " + cameraId + " (key=" + cameraKey + ")");
+                String resolvedKey = (cameraKey != null && !cameraKey.isEmpty())
+                        ? cameraKey
+                        : resolveRecordingKeyByCameraId(cameraId);
+                handleFirstDataWrittenForKey(resolvedKey != null ? resolvedKey : cameraId);
+            }
+        };
     }
 
     private void executeCodecRecordingStart(List<String> keys, int stableAttempt, boolean forcedReopen) {
@@ -1811,6 +2016,16 @@ public class MultiCameraManager {
 
         boolean anyActive = false;
         int activeCount = 0;
+        Set<String> activeCameras = new java.util.LinkedHashSet<>();
+        Set<String> failedCameras = new java.util.LinkedHashSet<>();
+        List<String> expectedRecordingKeys = currentRecordingKeys;
+        if (expectedRecordingKeys != null) {
+            for (String expectedKey : expectedRecordingKeys) {
+                if (!keys.contains(expectedKey)) {
+                    failedCameras.add(expectedKey);
+                }
+            }
+        }
 
         AppLog.d(TAG, "executeCodecRecordingStart: keys=" + keys + ", codecRecorders=" + codecRecorders.keySet() + ", cameraSessionReady=" + cameraSessionReady);
 
@@ -1820,22 +2035,27 @@ public class MultiCameraManager {
             // 强制重新打开后，跳过 session ready 检查，直接尝试启动录制
             if (!forcedReopen && (ready == null || !ready)) {
                 AppLog.w(TAG, "Camera " + key + " session not ready, skipping");
+                failedCameras.add(key);
                 continue;
             }
             // 帧稳定性检查：如果已经尝试了最大次数并强制重新打开过，就不再检查帧稳定性
             // 这样可以确保在后台启动录制时，即使帧暂时不稳定也能开始录制
             if (!unstable.isEmpty() && !forcedReopen && !isFrameStable(key, System.currentTimeMillis())) {
                 AppLog.w(TAG, "Camera " + key + " frame not stable, skipping (forcedReopen=" + forcedReopen + ")");
+                failedCameras.add(key);
                 continue;
             }
             CodecVideoRecorder codecRecorder = codecRecorders.get(compositeRecording == null ? key : "combined");
             if (codecRecorder == null) {
                 AppLog.e(TAG, "Camera " + key + " codecRecorder is null");
+                failedCameras.add(key);
                 continue;
             }
             if (codecRecorder.isRecording()) {
                 anyActive = true;
                 activeCount++;
+                activeCameras.add(key);
+                cameraRecordingActive.put(key, true);
                 continue;
             }
             AppLog.d(TAG, "Starting codec recording for camera " + key);
@@ -1844,16 +2064,37 @@ public class MultiCameraManager {
             if (started || codecRecorder.isRecording()) {
                 anyActive = true;
                 activeCount++;
+                activeCameras.add(key);
+                cameraRecordingActive.put(key, true);
                 AppLog.d(TAG, "Camera " + key + " codec recording started successfully");
             } else {
                 AppLog.e(TAG, "Failed to start codec recording for " + key);
+                cameraRecordingActive.put(key, false);
+                failedCameras.add(key);
             }
         }
 
-        if (anyActive) {
+        if (!failedCameras.isEmpty() && compositeRecording == null) {
+            for (String failedKey : failedCameras) {
+                startupTracker.recordCameraFailure(failedKey, "codec_start_failed", false);
+                if (anyActive) {
+                    cleanupFailedCameraRecorder(failedKey);
+                }
+            }
+        }
+
+        if (anyActive && !activeCameras.isEmpty()) {
             lastNotifiedSegmentIndex = -1;
             isRecording = true;
-            AppLog.d(TAG, activeCount + " camera(s) started codec recording successfully");
+            AppLog.d(TAG, activeCount + " camera(s) started codec recording successfully: " + activeCameras);
+            if (!failedCameras.isEmpty()) {
+                AppLog.w(TAG, failedCameras.size() + " camera(s) failed to start codec recording: " + failedCameras);
+                if (recordingStatusCallback != null) {
+                    final Set<String> activeCopy = new java.util.LinkedHashSet<>(activeCameras);
+                    final Set<String> failedCopy = new java.util.LinkedHashSet<>(failedCameras);
+                    mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
+                }
+            }
         } else {
             failRecordingStartupWithUserMessage(
                     "Failed to start codec recording on all cameras",
@@ -1895,6 +2136,19 @@ public class MultiCameraManager {
         }
         AppLog.d(TAG, "Re-preparing codec recording for cameras: " + cameraKeys);
 
+        List<String> expectedBeforeReopen = currentRecordingKeys;
+        if (expectedBeforeReopen != null) {
+            for (String expectedKey : expectedBeforeReopen) {
+                if (!cameraKeys.contains(expectedKey)) {
+                    startupTracker.recordCameraFailure(expectedKey, "codec_reopen_unavailable", false);
+                    SingleCamera droppedCam = cameras.get(expectedKey);
+                    if (droppedCam != null) {
+                        droppedCam.clearRecordSurface();
+                    }
+                }
+            }
+        }
+
         // 清理之前的录制器（只保留指定摄像头的）
         for (Map.Entry<String, CodecVideoRecorder> entry : new ArrayList<>(codecRecorders.entrySet())) {
             if (!cameraKeys.contains(entry.getKey())) {
@@ -1932,6 +2186,7 @@ public class MultiCameraManager {
             int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
             int fps = appConfig.getActualFrameRate(25);
             int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, fps);
+            long segDurationMs = currentSegmentDurationMs > 0 ? currentSegmentDurationMs : appConfig.getSegmentDurationMs();
 
             // 创建软编码录制器
             CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
@@ -1941,9 +2196,10 @@ public class MultiCameraManager {
             );
 
             configureCodecRecorderCommon(
-                    key, camera, codecRecorder, appConfig.getSegmentDurationMs(),
+                    key, camera, codecRecorder, segDurationMs,
                     bitrate, fps, previewSize.getWidth(), previewSize.getHeight(),
                     encodeWidth, encodeHeight, appConfig, adjConfig);
+            codecRecorder.setCallback(createCodecRecordCallback(key));
 
             // 准备录制
             String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
@@ -1968,6 +2224,9 @@ public class MultiCameraManager {
             }
             codecRecorders.clear();
             isRecording = false;
+            failRecordingStartupWithUserMessage(
+                    "Failed to re-prepare codec recording",
+                    "录像启动失败，请重试");
             return;
         }
 
@@ -2021,6 +2280,8 @@ public class MultiCameraManager {
 
     public void stopRecording(boolean skipRelayTransfer, Runnable onStopped) {
         startupWatchdog.cancel();
+        startupTracker.reset(java.util.Collections.emptyList());
+        currentRecordingKeys = java.util.Collections.emptyList();
         synchronized (this) {
             if (onStopped != null) recordingStoppedCallbacks.add(onStopped);
             if (stoppingRecording) return;
@@ -2493,6 +2754,8 @@ public class MultiCameraManager {
      */
     public void release() {
         startupWatchdog.cancel();
+        startupTracker.reset(java.util.Collections.emptyList());
+        currentRecordingKeys = java.util.Collections.emptyList();
         AppLog.d(TAG, "Releasing MultiCameraManager resources");
         
         try {
@@ -2600,6 +2863,7 @@ public class MultiCameraManager {
             @Override public void onRecordError(String id,String error) { handleRecorderError("Composite", id, error); }
             @Override public void onPrepareSegmentSwitch(String id,int index) {}
             @Override public void onSegmentSwitch(String id,int index,String path) {
+                if (path != null) StorageCleanupManager.notifySegmentCompleted(path, currentSegmentDurationMs);
                 if (useRelayWrite && finalSaveDir!=null && path!=null) scheduleRelayTransfer(path);
                 if (segmentSwitchCallback!=null && index>lastNotifiedSegmentIndex) {
                     lastNotifiedSegmentIndex=index; segmentSwitchCallback.onSegmentSwitch(index);
@@ -2610,11 +2874,7 @@ public class MultiCameraManager {
             }
             @Override public void onRecordingRebuildRequested(String id,String reason) { AppLog.w(TAG,"Composite recovery: "+reason); }
             @Override public void onFirstDataWritten(String id) {
-                startupWatchdog.cancel();
-                if (!hasNotifiedFirstDataWritten && firstDataWrittenCallback!=null) {
-                    hasNotifiedFirstDataWritten=true;
-                    mainHandler.post(() -> firstDataWrittenCallback.onFirstDataWritten());
-                }
+                handleFirstDataWrittenForKey("combined");
             }
         };
     }

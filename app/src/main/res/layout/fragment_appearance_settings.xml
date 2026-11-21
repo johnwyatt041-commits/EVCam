@@ -265,6 +265,30 @@
                                 android:ellipsize="end"
                                 android:text="模式 D · 转向" />
                         </LinearLayout>
+
+                        <LinearLayout
+                            android:layout_width="match_parent"
+                            android:layout_height="wrap_content"
+                            android:layout_marginTop="8dp"
+                            android:orientation="horizontal">
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_default_mode_e"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:layout_width="0dp"
+                                android:layout_weight="1"
+                                android:paddingStart="8dp"
+                                android:paddingEnd="8dp"
+                                android:layout_marginEnd="8dp"
+                                android:ellipsize="end"
+                                android:text="左右 E · 双侧" />
+
+                            <View
+                                android:layout_width="0dp"
+                                android:layout_height="1dp"
+                                android:layout_weight="1"
+                                android:visibility="invisible" />
+                        </LinearLayout>
                     </LinearLayout>
 
                     <View

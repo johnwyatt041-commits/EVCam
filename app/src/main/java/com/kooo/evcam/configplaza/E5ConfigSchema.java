@@ -443,7 +443,7 @@ public final class E5ConfigSchema {
         reg(appearance, "default_start_page", FieldType.STRING, AppConfig.START_PAGE_RECORDING,
                 enumSet(AppConfig.START_PAGE_RECORDING, AppConfig.START_PAGE_PLAYBACK, AppConfig.START_PAGE_SETTINGS));
         reg(appearance, "preview_mode", FieldType.STRING, AppConfig.PREVIEW_MODE_B,
-                enumSet(AppConfig.PREVIEW_MODE_A, AppConfig.PREVIEW_MODE_B, AppConfig.PREVIEW_MODE_C, AppConfig.PREVIEW_MODE_D));
+                enumSet(AppConfig.PREVIEW_MODE_A, AppConfig.PREVIEW_MODE_B, AppConfig.PREVIEW_MODE_C, AppConfig.PREVIEW_MODE_D, AppConfig.PREVIEW_MODE_E));
         reg(appearance, "preview_presentation", FieldType.STRING, PreviewPresentation.SIDEBAR.getKey(),
                 enumSet(PreviewPresentation.SIDEBAR.getKey(), PreviewPresentation.FULLSCREEN.getKey(), PreviewPresentation.WINDOW.getKey()));
         reg(appearance, "corner_nav_mode", FieldType.STRING, AppConfig.CORNER_NAV_AUTO,
@@ -481,6 +481,8 @@ public final class E5ConfigSchema {
         reg(camera, "mode_c_show_right", FieldType.BOOLEAN, true, null);
         reg(camera, "mode_d_panes", FieldType.FLOAT_ARRAY_16,
                 defaultPanesList(PreviewLayoutModel.PRESET_MODE_D_DUAL), paneRect16Validator());
+        reg(camera, "mode_e_panes", FieldType.FLOAT_ARRAY_16,
+                defaultPanesList(PreviewLayoutModel.PRESET_MODE_E_SIDES), paneRect16Validator());
         root.put(E5ConfigSection.CAMERA_MAPPING, camera);
 
         // 3. recording
@@ -564,6 +566,7 @@ public final class E5ConfigSchema {
         // 5. blind_spot_hud
         Map<String, FieldSpec> blindSpot = new LinkedHashMap<>();
         reg(blindSpot, "blind_spot_global_enabled", FieldType.BOOLEAN, false, null);
+        reg(blindSpot, "main_blind_spot_enabled", FieldType.BOOLEAN, true, null);
         reg(blindSpot, "turn_signal_linkage_enabled", FieldType.BOOLEAN, false, null);
         reg(blindSpot, "turn_signal_timeout", FieldType.INT, 10, intRange(0, 30));
         reg(blindSpot, "turn_signal_reuse_main_floating", FieldType.BOOLEAN, true, null);

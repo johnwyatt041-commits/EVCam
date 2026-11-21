@@ -46,6 +46,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
     private Button btnModeB;
     private Button btnModeC;
     private Button btnModeD;
+    private Button btnModeE;
 
     private Button btnTopDrive;
     private Button btnTopFront;
@@ -165,6 +166,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnModeB = view.findViewById(R.id.btn_surround_mode_b);
         btnModeC = view.findViewById(R.id.btn_surround_mode_c);
         btnModeD = view.findViewById(R.id.btn_surround_mode_d);
+        btnModeE = view.findViewById(R.id.btn_surround_mode_e);
 
         btnTopDrive = view.findViewById(R.id.btn_top_view_drive);
         btnTopFront = view.findViewById(R.id.btn_top_view_front);
@@ -216,6 +218,9 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
         btnModeC.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_C));
         if (btnModeD != null) {
             btnModeD.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_D));
+        }
+        if (btnModeE != null) {
+            btnModeE.setOnClickListener(v -> selectPreviewMode(AppConfig.PREVIEW_MODE_E));
         }
 
         btnTopDrive.setOnClickListener(v -> selectTopView(SurroundViewMode.DRIVE));
@@ -452,6 +457,7 @@ public class SurroundSettingsFragment extends Fragment implements UiThemeControl
             applyOptionButtonState(btnModeB, ctx, AppConfig.PREVIEW_MODE_B.equals(mode));
             applyOptionButtonState(btnModeC, ctx, AppConfig.PREVIEW_MODE_C.equals(mode));
             applyOptionButtonState(btnModeD, ctx, AppConfig.PREVIEW_MODE_D.equals(mode));
+            applyOptionButtonState(btnModeE, ctx, AppConfig.PREVIEW_MODE_E.equals(mode));
 
             SurroundViewMode top = appConfig.getSurroundTopView();
             SurroundViewMode bottom = appConfig.getSurroundBottomView();

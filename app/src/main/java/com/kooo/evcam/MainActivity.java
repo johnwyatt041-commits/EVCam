@@ -245,6 +245,8 @@ public class MainActivity extends AppCompatActivity implements
     private boolean isPreparingRecording = false;  // 是否正在准备录制（等待首次写入）
     private long lastStorageFailureToastMs = 0L;
     private static final long STORAGE_FAILURE_TOAST_COOLDOWN_MS = 60_000L;
+    private long lastPartialRecordingToastMs = 0L;
+    private static final long PARTIAL_RECORDING_TOAST_COOLDOWN_MS = 10_000L;
 
     // 远程查看服务相关（移到 Activity 级别）
 
@@ -256,6 +258,7 @@ public class MainActivity extends AppCompatActivity implements
     
     // 存储清理管理器
     private StorageCleanupManager storageCleanupManager;
+    private static boolean startupPendingScanTriggeredThisProcess = false;
     
     // 远程命令分发器（重构后的统一入口）
     private RemoteCommandDispatcher remoteCommandDispatcher;
@@ -387,6 +390,15 @@ public class MainActivity extends AppCompatActivity implements
         // 启动存储清理任务（如果用户设置了限制）
         storageCleanupManager = new StorageCleanupManager(this);
         storageCleanupManager.start();
+
+        if (!startupPendingScanTriggeredThisProcess) {
+            startupPendingScanTriggeredThisProcess = true;
+            new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed()) {
+                    PendingFileRecoveryManager.scanStartupAsync(this, this::handleStartupPendingScanReport);
+                }
+            }, 3000);
+        }
         
         // 启动文件传输服务（用于U盘中转写入模式）
         // File transfers start only when an actual relay task is queued.
@@ -3686,8 +3698,10 @@ public class MainActivity extends AppCompatActivity implements
     }
 
     private void handleRecordingStatusUpdate(java.util.Set<String> activeCameras, java.util.Set<String> failedCameras) {
-        AppLog.d(TAG, "录制状态回调: 成功=" + activeCameras.size() + ", 失败=" + failedCameras.size());
-        if (activeCameras.isEmpty()) {
+        int activeSize = activeCameras == null ? 0 : activeCameras.size();
+        int failedSize = failedCameras == null ? 0 : failedCameras.size();
+        AppLog.d(TAG, "录制状态回调: 成功=" + activeSize + ", 失败=" + failedSize);
+        if (activeCameras == null || activeCameras.isEmpty()) {
             runOnUiThread(() -> {
                 AppLog.e(TAG, "所有摄像头启动录制失败");
                 resetRecordingStateAndUi();
@@ -3698,7 +3712,37 @@ public class MainActivity extends AppCompatActivity implements
                 pendingRemoteDurationSeconds = 0;
                 Toast.makeText(this, "录制启动失败，请重试", Toast.LENGTH_SHORT).show();
             });
+        } else if (failedCameras != null && !failedCameras.isEmpty()) {
+            java.util.List<String> failedLabels = new java.util.ArrayList<>();
+            for (String key : failedCameras) {
+                failedLabels.add(formatCameraKeyLabel(key));
+            }
+            String labels = android.text.TextUtils.join("、", failedLabels);
+            AppLog.w(TAG, "部分摄像头未正常录像 (" + labels + ")，其余 " + activeSize + " 路继续录制");
+            long now = android.os.SystemClock.elapsedRealtime();
+            if (lastPartialRecordingToastMs == 0L
+                    || now - lastPartialRecordingToastMs >= PARTIAL_RECORDING_TOAST_COOLDOWN_MS) {
+                lastPartialRecordingToastMs = now;
+                runOnUiThread(() -> {
+                    if (!isFinishing() && !isDestroyed()) {
+                        Toast.makeText(
+                                this,
+                                "部分摄像头未正常录像（" + labels + "），其余 " + activeSize + " 路继续录制",
+                                Toast.LENGTH_LONG
+                        ).show();
+                    }
+                });
+            }
         }
+    }
+
+    private static String formatCameraKeyLabel(String key) {
+        if ("front".equals(key)) return "前";
+        if ("back".equals(key)) return "后";
+        if ("left".equals(key)) return "左";
+        if ("right".equals(key)) return "右";
+        if ("combined".equals(key)) return "合成";
+        return key != null ? key : "未知";
     }
 
     private void onRecordingStartupFailure(String message) {
@@ -3844,6 +3888,56 @@ public class MainActivity extends AppCompatActivity implements
                 .setPositiveButton("去授权", (dialog, which) -> openAllFilesAccessSettings())
                 .setNegativeButton("取消", null)
                 .show();
+    }
+
+    private void handleStartupPendingScanReport(PendingFileRecoveryManager.ScanReport report) {
+        if (report == null || isFinishing() || isDestroyed()) {
+            return;
+        }
+        if (!report.recoveredFiles.isEmpty() && report.unrecoverableOrphans.isEmpty()) {
+            Toast.makeText(
+                    this,
+                    "已自动恢复 " + report.recoveredFiles.size() + " 个异常中断的录像文件",
+                    Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
+        if (!report.unrecoverableOrphans.isEmpty() && isInterfaceInForeground()) {
+            StringBuilder message = new StringBuilder();
+            if (!report.recoveredFiles.isEmpty()) {
+                message.append("已自动恢复 ")
+                        .append(report.recoveredFiles.size())
+                        .append(" 个可播放的录像文件。\n\n");
+            }
+            message.append("检测到 ")
+                    .append(report.unrecoverableOrphans.size())
+                    .append(" 个因异常断电或写入中断遗留的损坏 .pending 文件（共占用 ")
+                    .append(StorageHelper.formatSize(report.unrecoverableBytes))
+                    .append("），无法恢复播放。是否立即清理以释放空间？");
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("发现异常遗留录像文件")
+                    .setMessage(message.toString())
+                    .setPositiveButton("立即清理", (dialog, which) -> {
+                        new Thread(() -> {
+                            PendingFileRecoveryManager.DeleteResult result =
+                                    PendingFileRecoveryManager.deleteOrphansSafely(
+                                            report.unrecoverableOrphans,
+                                            com.kooo.evcam.camera.ActiveRecordingRegistry.snapshot());
+                            runOnUiThread(() -> {
+                                if (!isFinishing() && !isDestroyed()) {
+                                    Toast.makeText(
+                                            this,
+                                            "已清理 " + result.deletedCount + " 个遗留文件，释放 "
+                                                    + StorageHelper.formatSize(result.freedBytes),
+                                            Toast.LENGTH_LONG
+                                    ).show();
+                                }
+                            });
+                        }, "CleanupOrphanPending").start();
+                    })
+                    .setNegativeButton("稍后处理", null)
+                    .show();
+        }
     }
 
     private void openAllFilesAccessSettings() {

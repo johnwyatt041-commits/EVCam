@@ -136,6 +136,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         m.put("mode_c_show_left", layoutPrefs.getBoolean("c_vis_left", true));
         m.put("mode_c_show_right", layoutPrefs.getBoolean("c_vis_right", true));
         m.put("mode_d_panes", readPaneList(PreviewMode.MODE_D));
+        m.put("mode_e_panes", readPaneList(PreviewMode.MODE_E));
         return m;
     }
 
@@ -178,12 +179,21 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
                 editor.putFloat("d_pane_" + i, dPanes.get(i));
             }
         }
+        List<Float> ePanes = (List<Float>) v.get("mode_e_panes");
+        if (ePanes != null && ePanes.size() == 16) {
+            editor.putBoolean("e_saved", true);
+            for (int i = 0; i < 16; i++) {
+                editor.putFloat("e_pane_" + i, ePanes.get(i));
+            }
+        }
         editor.apply();
     }
 
     private List<Float> readPaneList(PreviewMode mode) {
         int defaultPreset;
-        if (mode == PreviewMode.MODE_D) {
+        if (mode == PreviewMode.MODE_E) {
+            defaultPreset = PreviewLayoutModel.PRESET_MODE_E_SIDES;
+        } else if (mode == PreviewMode.MODE_D) {
             defaultPreset = PreviewLayoutModel.PRESET_MODE_D_DUAL;
         } else if (mode == PreviewMode.MODE_C) {
             defaultPreset = PreviewLayoutModel.PRESET_MODE_C_FRONT;
@@ -204,6 +214,8 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
             }
         } else if (mode == PreviewMode.MODE_D && layoutPrefs.getBoolean("d_saved", false)) {
             prefix = "d_pane_";
+        } else if (mode == PreviewMode.MODE_E && layoutPrefs.getBoolean("e_saved", false)) {
+            prefix = "e_pane_";
         }
         if (prefix != null) {
             float[] vals = new float[16];
@@ -376,6 +388,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
     private Map<String, Object> readBlindSpotHud() {
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("blind_spot_global_enabled", appConfig.isBlindSpotGlobalEnabled());
+        m.put("main_blind_spot_enabled", appConfig.isMainBlindSpotEnabled());
         m.put("turn_signal_linkage_enabled", appConfig.isTurnSignalLinkageEnabled());
         m.put("turn_signal_timeout", appConfig.getTurnSignalTimeout());
         m.put("turn_signal_reuse_main_floating", appConfig.isTurnSignalReuseMainFloating());
@@ -450,6 +463,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
 
     private void writeBlindSpotHud(@NonNull Map<String, Object> v) {
         appConfig.setBlindSpotGlobalEnabled(bool(v, "blind_spot_global_enabled", false));
+        appConfig.setMainBlindSpotEnabled(bool(v, "main_blind_spot_enabled", true));
         appConfig.setTurnSignalLinkageEnabled(bool(v, "turn_signal_linkage_enabled", false));
         appConfig.setTurnSignalTimeout(numInt(v, "turn_signal_timeout", 10));
         appConfig.setTurnSignalReuseMainFloating(bool(v, "turn_signal_reuse_main_floating", true));

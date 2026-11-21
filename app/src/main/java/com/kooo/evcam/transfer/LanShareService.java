@@ -368,10 +368,21 @@ public class LanShareService extends Service {
 
     @Nullable
     private String resolveTargetIp(@Nullable String preferredIp) {
+        List<LanNetworkSelector.NetworkEndpoint> endpoints = LanNetworkSelector.enumerateLocalEndpoints(this);
         if (preferredIp != null && !preferredIp.isEmpty()) {
-            return preferredIp;
+            for (LanNetworkSelector.NetworkEndpoint ep : endpoints) {
+                if (preferredIp.equals(ep.ip)) {
+                    return preferredIp;
+                }
+            }
+            if (!endpoints.isEmpty()) {
+                String fallbackIp = endpoints.get(0).ip;
+                AppLog.w(TAG, "Preferred LAN IP " + preferredIp + " is not in active endpoints; falling back to " + fallbackIp);
+                return fallbackIp;
+            }
+            AppLog.w(TAG, "Preferred LAN IP " + preferredIp + " is unavailable and no active LAN endpoints were detected");
+            return null;
         }
-        List<LanNetworkSelector.NetworkEndpoint> endpoints = LanNetworkSelector.enumerateLocalEndpoints();
         return endpoints.isEmpty() ? null : endpoints.get(0).ip;
     }
 
@@ -379,19 +390,34 @@ public class LanShareService extends Service {
     private FileTransferServer startServerWithPortFallback(FileTransferServer.ShareMode mode,
                                                              List<File> files,
                                                              String targetIp) {
-        // First bind strictly to the selected NIC IP across the preferred port range.
+        // 1. Bind strictly to the selected NIC IP across the preferred port range.
         for (int port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
             FileTransferServer candidate = tryStartServer(targetIp, targetIp, port, mode, files);
             if (candidate != null) {
                 return candidate;
             }
         }
-        // Fallback to ephemeral port on the selected NIC, then wildcard if kernel disallows host bind.
+        AppLog.w(TAG, "Strict bind on " + targetIp + ":" + PORT_RANGE_START + "-" + PORT_RANGE_END
+                + " failed; retrying wildcard bind across preferred port range");
+
+        // 2. Fallback to wildcard (0.0.0.0) across preferred port range while advertising targetIp.
+        for (int port = PORT_RANGE_START; port <= PORT_RANGE_END; port++) {
+            FileTransferServer wildcard = tryStartServer(null, targetIp, port, mode, files);
+            if (wildcard != null) {
+                return wildcard;
+            }
+        }
+
+        // 3. Fallback to ephemeral port on the selected NIC, then wildcard ephemeral port.
         FileTransferServer ephemeralBound = tryStartServer(targetIp, targetIp, 0, mode, files);
         if (ephemeralBound != null) {
             return ephemeralBound;
         }
-        return tryStartServer(null, targetIp, 0, mode, files);
+        FileTransferServer wildcardEphemeral = tryStartServer(null, targetIp, 0, mode, files);
+        if (wildcardEphemeral == null) {
+            AppLog.w(TAG, "All bind attempts failed for targetIp=" + targetIp);
+        }
+        return wildcardEphemeral;
     }
 
     @Nullable
@@ -412,11 +438,16 @@ public class LanShareService extends Service {
             if (server.isRunning() && server.getShareUrl() != null) {
                 return server;
             }
+            AppLog.w(TAG, "FileTransferServer did not stay running after start (bind="
+                    + (bindHost != null ? bindHost : "0.0.0.0") + ", port=" + port
+                    + ", url=" + server.getShareUrl() + ")");
             server.stop();
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            AppLog.w(TAG, "Bind failed (bind=" + (bindHost != null ? bindHost : "0.0.0.0")
+                    + ", port=" + port + "): " + e.getClass().getSimpleName() + ": " + e.getMessage());
             try {
                 server.stop();
-            } catch (Exception ignored2) {
+            } catch (Exception ignored) {
             }
         }
         return null;

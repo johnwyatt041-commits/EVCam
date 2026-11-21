@@ -159,6 +159,12 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String KEY_BLIND_SPOT_RAIN_NIGHT = "blind_spot_rain_night_enabled";
     private static final String KEY_BLIND_SPOT_PLACEMENT_PREFIX = "blind_spot_placement_";
     private static final String KEY_BLIND_SPOT_DISPLAY_TARGET = "blind_spot_editor_display_target"; // -1=主屏, >=0/PICK_ID=副屏或EVCC
+    private static final String KEY_MAIN_BLIND_SPOT_ENABLED = "main_blind_spot_enabled";
+    private static final String KEY_BLIND_SPOT_SCREEN_PREFIX = "blind_spot_screen_";
+
+    public static final String BLIND_SPOT_OUTPUT_MAIN_ONLY = "main_only";
+    public static final String BLIND_SPOT_OUTPUT_SECONDARY_ONLY = "secondary_only";
+    public static final String BLIND_SPOT_OUTPUT_BOTH = "both";
 
     // 主屏悬浮窗比例锁定
     private static final String KEY_MAIN_FLOATING_ASPECT_RATIO_LOCKED = "main_floating_aspect_ratio_locked";
@@ -3495,6 +3501,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public static final String PREVIEW_MODE_C = "mode_c";
     public static final String PREVIEW_MODE_A = "mode_a"; // T07：360 全景 + 分视角模式
     public static final String PREVIEW_MODE_D = "mode_d"; // Pack B：双视角（左前/后手动 + 右侧视角随转向灯/方向盘/手动）
+    public static final String PREVIEW_MODE_E = "mode_e"; // 左右双摄视图（左侧左摄 + 右侧右摄）
 
     public static final String MODE_D_SIDE_LINKAGE_STEERING = "steering";       // 随方向盘转角切换左/右视
     public static final String MODE_D_SIDE_LINKAGE_TURN_SIGNAL = "turn_signal"; // 随左右转向灯切换左/右视
@@ -3513,7 +3520,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     private static final String KEY_PREVIEW_SLOT_PAN_X_PREFIX = "preview_slot_pan_x_";
     private static final String KEY_PREVIEW_SLOT_PAN_Y_PREFIX = "preview_slot_pan_y_";
 
-    /** 规范化主预览模式；与模式 A/B/C/D 并列可选。 */
+    /** 规范化主预览模式；与模式 A/B/C/D/E 并列可选。 */
     public static String normalizePreviewMode(String mode) {
         if (PREVIEW_MODE_A.equals(mode)) {
             return PREVIEW_MODE_A;
@@ -3523,6 +3530,9 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         }
         if (PREVIEW_MODE_D.equals(mode)) {
             return PREVIEW_MODE_D;
+        }
+        if (PREVIEW_MODE_E.equals(mode)) {
+            return PREVIEW_MODE_E;
         }
         return PREVIEW_MODE_B;
     }
@@ -4740,7 +4750,12 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         String normSlot = BlindSpotPlacement.normalizeSlot(slot);
         BlindSpotPlacement.RectRatio safe = rect != null ? rect : BlindSpotPlacement.defaultForSlot(normSlot);
         saveBlindSpotPlacementRaw(normSlot, safe);
-        if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
+        if (isBlindSpotSyncAllFourPositions(BlindSpotPlacement.SCREEN_MAIN)
+                && BlindSpotPlacement.isStandardCameraSlot(normSlot)) {
+            for (String s : BlindSpotPlacement.STANDARD_FOUR_SLOTS) {
+                saveBlindSpotPlacementRaw(s, safe);
+            }
+        } else if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
             String opposite = BlindSpotPlacement.oppositeNormalSideSlot(normSlot);
             if (opposite != null) {
                 saveBlindSpotPlacementRaw(opposite, safe);
@@ -4752,7 +4767,12 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         String normSlot = BlindSpotPlacement.normalizeSlot(slot);
         BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSlot(normSlot);
         saveBlindSpotPlacementRaw(normSlot, def);
-        if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
+        if (isBlindSpotSyncAllFourPositions(BlindSpotPlacement.SCREEN_MAIN)
+                && BlindSpotPlacement.isStandardCameraSlot(normSlot)) {
+            for (String s : BlindSpotPlacement.STANDARD_FOUR_SLOTS) {
+                saveBlindSpotPlacementRaw(s, BlindSpotPlacement.defaultForSlot(s));
+            }
+        } else if (isBlindSpotUseSameSidePosition() && BlindSpotPlacement.isNormalSideSlot(normSlot)) {
             String opposite = BlindSpotPlacement.oppositeNormalSideSlot(normSlot);
             if (opposite != null) {
                 saveBlindSpotPlacementRaw(opposite, def);
@@ -4771,6 +4791,360 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         String resolvedSlot = BlindSpotPlacement.resolveSlotForCamera(
                 slotOrCameraPos, isRainNightBlindSpotEnabled());
         return getBlindSpotPlacement(resolvedSlot).toPixelBounds(displayWidthPx, displayHeightPx);
+    }
+
+    // ==================== 补盲输出模式（仅主屏 / 仅副屏 / 主副屏同时）与分屏独立配置 ====================
+
+    public boolean isMainBlindSpotEnabled() {
+        return prefs.getBoolean(KEY_MAIN_BLIND_SPOT_ENABLED, true);
+    }
+
+    public void setMainBlindSpotEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_MAIN_BLIND_SPOT_ENABLED, enabled).apply();
+    }
+
+    public String getBlindSpotOutputMode() {
+        if (!AppFeatures.SECONDARY_DISPLAY) {
+            return BLIND_SPOT_OUTPUT_MAIN_ONLY;
+        }
+        boolean main = isMainBlindSpotEnabled();
+        boolean secondary = isSecondaryDisplayEnabled();
+        if (main && secondary) {
+            return BLIND_SPOT_OUTPUT_BOTH;
+        }
+        if (secondary) {
+            return BLIND_SPOT_OUTPUT_SECONDARY_ONLY;
+        }
+        return BLIND_SPOT_OUTPUT_MAIN_ONLY;
+    }
+
+    public void setBlindSpotOutputMode(String mode) {
+        if (!AppFeatures.SECONDARY_DISPLAY || BLIND_SPOT_OUTPUT_MAIN_ONLY.equals(mode)) {
+            setMainBlindSpotEnabled(true);
+            setSecondaryDisplayEnabled(false);
+        } else if (BLIND_SPOT_OUTPUT_SECONDARY_ONLY.equals(mode)) {
+            setMainBlindSpotEnabled(false);
+            setSecondaryDisplayEnabled(true);
+        } else if (BLIND_SPOT_OUTPUT_BOTH.equals(mode)) {
+            setMainBlindSpotEnabled(true);
+            setSecondaryDisplayEnabled(true);
+        } else {
+            setMainBlindSpotEnabled(true);
+            setSecondaryDisplayEnabled(false);
+        }
+    }
+
+    private static String normalizeBlindSpotScreenKey(String screenKey) {
+        if (BlindSpotPlacement.isMainScreenKey(screenKey)) {
+            return BlindSpotPlacement.SCREEN_MAIN;
+        }
+        return screenKey.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
+    private String screenPlacementKey(String normScreenKey, String normSlot, String field) {
+        return KEY_BLIND_SPOT_SCREEN_PREFIX + normScreenKey + "_" + normSlot + "_" + field;
+    }
+
+    private String screenCameraKey(String normScreenKey, String normCameraPos, String suffix) {
+        return KEY_BLIND_SPOT_SCREEN_PREFIX + normScreenKey + "_" + normCameraPos + "_" + suffix;
+    }
+
+    public boolean isBlindSpotSyncAllFourPositions(String screenKey) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        boolean defaultSync = !BlindSpotPlacement.isMainScreenKey(normScreen);
+        return prefs.getBoolean(KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_sync_all_four", defaultSync);
+    }
+
+    public void setBlindSpotSyncAllFourPositions(
+            String screenKey,
+            boolean enabled,
+            String sourceSlot,
+            int displayW,
+            int displayH) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_sync_all_four", enabled).apply();
+        if (enabled) {
+            String resolvedSource = BlindSpotPlacement.isStandardCameraSlot(sourceSlot)
+                    ? BlindSpotPlacement.normalizeSlot(sourceSlot)
+                    : BlindSpotPlacement.SLOT_LEFT;
+            BlindSpotPlacement.RectRatio rect = getBlindSpotScreenPlacement(
+                    normScreen, resolvedSource, displayW, displayH);
+            writeFourStandardPlacements(normScreen, rect, displayW, displayH);
+        }
+    }
+
+    private void saveSecondaryScreenPlacementRaw(
+            String normScreen,
+            String normSlot,
+            BlindSpotPlacement.RectRatio rect) {
+        BlindSpotPlacement.RectRatio safe = rect != null ? rect : BlindSpotPlacement.defaultForSecondary();
+        prefs.edit()
+                .putFloat(screenPlacementKey(normScreen, normSlot, "x"), safe.x)
+                .putFloat(screenPlacementKey(normScreen, normSlot, "y"), safe.y)
+                .putFloat(screenPlacementKey(normScreen, normSlot, "w"), safe.width)
+                .putFloat(screenPlacementKey(normScreen, normSlot, "h"), safe.height)
+                .apply();
+    }
+
+    private void writeFourStandardPlacements(
+            String normScreen,
+            BlindSpotPlacement.RectRatio rect,
+            int displayW,
+            int displayH) {
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            for (String slot : BlindSpotPlacement.STANDARD_FOUR_SLOTS) {
+                saveBlindSpotPlacementRaw(slot, rect);
+            }
+            return;
+        }
+        for (String slot : BlindSpotPlacement.STANDARD_FOUR_SLOTS) {
+            saveSecondaryScreenPlacementRaw(normScreen, slot, rect);
+        }
+        syncLegacySecondaryBoundsIfActive(normScreen, rect, displayW, displayH);
+    }
+
+    private void syncLegacySecondaryBoundsIfActive(
+            String normScreen,
+            BlindSpotPlacement.RectRatio rect,
+            int displayW,
+            int displayH) {
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return;
+        }
+        String activeKey = BlindSpotPlacement.screenKeyForDisplay(getSecondaryDisplayId());
+        if (normScreen.equals(activeKey)) {
+            int orient = getBlindSpotScreenOrientation(normScreen);
+            int[] logical = BlindSpotPlacement.visualToLogicalPixels(rect, displayW, displayH, orient);
+            setSecondaryDisplayBounds(logical[0], logical[1], logical[2], logical[3]);
+        }
+    }
+
+    /** 读取指定屏幕与槽位的视觉坐标归一化矩形；副屏首次读取会自动从历史逻辑像素坐标无损迁移。 */
+    public BlindSpotPlacement.RectRatio getBlindSpotScreenPlacement(
+            String screenKey,
+            String slot,
+            int displayW,
+            int displayH) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return getBlindSpotPlacement(normSlot);
+        }
+        String xKey = screenPlacementKey(normScreen, normSlot, "x");
+        if (prefs.contains(xKey)) {
+            BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSecondary();
+            float x = prefs.getFloat(xKey, def.x);
+            float y = prefs.getFloat(screenPlacementKey(normScreen, normSlot, "y"), def.y);
+            float w = prefs.getFloat(screenPlacementKey(normScreen, normSlot, "w"), def.width);
+            float h = prefs.getFloat(screenPlacementKey(normScreen, normSlot, "h"), def.height);
+            return new BlindSpotPlacement.RectRatio(x, y, w, h);
+        }
+        int safeW = displayW > 0 ? displayW : 1920;
+        int safeH = displayH > 0 ? displayH : 720;
+        return BlindSpotPlacement.logicalToVisualRect(
+                getSecondaryDisplayX(),
+                getSecondaryDisplayY(),
+                getSecondaryDisplayWidth(),
+                getSecondaryDisplayHeight(),
+                safeW,
+                safeH,
+                getBlindSpotScreenOrientation(normScreen)
+        );
+    }
+
+    /** 保存指定屏幕与槽位的视觉坐标；勾选「四路同步」时自动同步前/后/左/右四路。 */
+    public void setBlindSpotScreenPlacement(
+            String screenKey,
+            String slot,
+            BlindSpotPlacement.RectRatio rect,
+            int displayW,
+            int displayH) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            setBlindSpotPlacement(normSlot, rect);
+            return;
+        }
+        BlindSpotPlacement.RectRatio safe = rect != null ? rect : BlindSpotPlacement.defaultForSecondary();
+        if (isBlindSpotSyncAllFourPositions(normScreen) && BlindSpotPlacement.isStandardCameraSlot(normSlot)) {
+            writeFourStandardPlacements(normScreen, safe, displayW, displayH);
+        } else {
+            saveSecondaryScreenPlacementRaw(normScreen, normSlot, safe);
+            syncLegacySecondaryBoundsIfActive(normScreen, safe, displayW, displayH);
+        }
+    }
+
+    public void resetBlindSpotScreenPlacement(
+            String screenKey,
+            String slot,
+            int displayW,
+            int displayH) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normSlot = BlindSpotPlacement.normalizeSlot(slot);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            resetBlindSpotPlacement(normSlot);
+            return;
+        }
+        BlindSpotPlacement.RectRatio def = BlindSpotPlacement.defaultForSecondary();
+        if (isBlindSpotSyncAllFourPositions(normScreen) && BlindSpotPlacement.isStandardCameraSlot(normSlot)) {
+            writeFourStandardPlacements(normScreen, def, displayW, displayH);
+        } else {
+            saveSecondaryScreenPlacementRaw(normScreen, normSlot, def);
+            syncLegacySecondaryBoundsIfActive(normScreen, def, displayW, displayH);
+        }
+    }
+
+    public int getBlindSpotScreenOrientation(String screenKey) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return 0;
+        }
+        String key = KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_orientation";
+        if (prefs.contains(key)) {
+            return BlindSpotPlacement.normalizeScreenOrientation(prefs.getInt(key, 0));
+        }
+        if (BlindSpotPlacement.SCREEN_EVCC.equals(normScreen)) {
+            if (getSecondaryDisplayId() == EvccDashcastDisplayResolver.PICK_ID
+                    && prefs.contains(KEY_SECONDARY_DISPLAY_ORIENTATION)) {
+                return BlindSpotPlacement.normalizeScreenOrientation(getSecondaryDisplayOrientation());
+            }
+            return 0;
+        }
+        return BlindSpotPlacement.normalizeScreenOrientation(getSecondaryDisplayOrientation());
+    }
+
+    public void setBlindSpotScreenOrientation(String screenKey, int orientation) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return;
+        }
+        int safeOrient = BlindSpotPlacement.normalizeScreenOrientation(orientation);
+        prefs.edit().putInt(KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_orientation", safeOrient).apply();
+        if (normScreen.equals(BlindSpotPlacement.screenKeyForDisplay(getSecondaryDisplayId()))) {
+            setSecondaryDisplayOrientation(safeOrient);
+        }
+    }
+
+    public int getBlindSpotScreenAlpha(String screenKey) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return 100;
+        }
+        String key = KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_alpha";
+        if (prefs.contains(key)) {
+            return Math.max(0, Math.min(100, prefs.getInt(key, 100)));
+        }
+        return getSecondaryDisplayAlpha();
+    }
+
+    public void setBlindSpotScreenAlpha(String screenKey, int alpha) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return;
+        }
+        int clamped = Math.max(0, Math.min(100, alpha));
+        prefs.edit().putInt(KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_alpha", clamped).apply();
+        if (normScreen.equals(BlindSpotPlacement.screenKeyForDisplay(getSecondaryDisplayId()))) {
+            setSecondaryDisplayAlpha(clamped);
+        }
+    }
+
+    public boolean isBlindSpotScreenBorderEnabled(String screenKey) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return false;
+        }
+        String key = KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_border";
+        if (prefs.contains(key)) {
+            return prefs.getBoolean(key, false);
+        }
+        return isSecondaryDisplayBorderEnabled();
+    }
+
+    public void setBlindSpotScreenBorderEnabled(String screenKey, boolean enabled) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        if (BlindSpotPlacement.isMainScreenKey(normScreen)) {
+            return;
+        }
+        prefs.edit().putBoolean(KEY_BLIND_SPOT_SCREEN_PREFIX + normScreen + "_border", enabled).apply();
+        if (normScreen.equals(BlindSpotPlacement.screenKeyForDisplay(getSecondaryDisplayId()))) {
+            setSecondaryDisplayBorderEnabled(enabled);
+        }
+    }
+
+    public int getBlindSpotScreenCameraRotation(String screenKey, String cameraPos) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        String key = screenCameraKey(normScreen, normCam, "rotation");
+        if (prefs.contains(key)) {
+            return BlindSpotCorrectionMath.normalizeAngle(prefs.getInt(key, 0));
+        }
+        int baseRot = BlindSpotPlacement.isMainScreenKey(normScreen)
+                ? getTurnSignalFloatingRotation()
+                : getSecondaryDisplayRotation();
+        int corrRot = isBlindSpotCorrectionEnabled() ? getBlindSpotCorrectionRotation(normCam) : 0;
+        return BlindSpotCorrectionMath.normalizeAngle(baseRot + corrRot);
+    }
+
+    public void setBlindSpotScreenCameraRotation(String screenKey, String cameraPos, int degrees) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        int safe = BlindSpotCorrectionMath.normalizeAngle(degrees);
+        prefs.edit().putInt(screenCameraKey(normScreen, normCam, "rotation"), safe).apply();
+    }
+
+    public boolean hasBlindSpotScreenCameraEdgeCrop(String screenKey, String cameraPos) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        return prefs.contains(screenCameraKey(normScreen, normCam, "crop_left"))
+                || prefs.contains(screenCameraKey(normScreen, normCam, "crop_top"))
+                || prefs.contains(screenCameraKey(normScreen, normCam, "crop_right"))
+                || prefs.contains(screenCameraKey(normScreen, normCam, "crop_bottom"));
+    }
+
+    public BlindSpotCorrectionMath.EdgeCrop getBlindSpotScreenCameraEdgeCrop(String screenKey, String cameraPos) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        if (hasBlindSpotScreenCameraEdgeCrop(normScreen, normCam)) {
+            float l = prefs.getFloat(screenCameraKey(normScreen, normCam, "crop_left"), 0f);
+            float t = prefs.getFloat(screenCameraKey(normScreen, normCam, "crop_top"), 0f);
+            float r = prefs.getFloat(screenCameraKey(normScreen, normCam, "crop_right"), 0f);
+            float b = prefs.getFloat(screenCameraKey(normScreen, normCam, "crop_bottom"), 0f);
+            return new BlindSpotCorrectionMath.EdgeCrop(l, t, r, b);
+        }
+        if (isBlindSpotCorrectionEnabled()) {
+            return getBlindSpotCorrectionEdgeCrop(normCam);
+        }
+        return new BlindSpotCorrectionMath.EdgeCrop(0f, 0f, 0f, 0f);
+    }
+
+    public void setBlindSpotScreenCameraEdgeCrop(
+            String screenKey,
+            String cameraPos,
+            BlindSpotCorrectionMath.EdgeCrop crop) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        BlindSpotCorrectionMath.EdgeCrop safe = crop != null
+                ? crop
+                : new BlindSpotCorrectionMath.EdgeCrop(0f, 0f, 0f, 0f);
+        prefs.edit()
+                .putFloat(screenCameraKey(normScreen, normCam, "crop_left"), safe.left)
+                .putFloat(screenCameraKey(normScreen, normCam, "crop_top"), safe.top)
+                .putFloat(screenCameraKey(normScreen, normCam, "crop_right"), safe.right)
+                .putFloat(screenCameraKey(normScreen, normCam, "crop_bottom"), safe.bottom)
+                .apply();
+    }
+
+    public void resetBlindSpotScreenCameraTransform(String screenKey, String cameraPos) {
+        String normScreen = normalizeBlindSpotScreenKey(screenKey);
+        String normCam = BlindSpotPlacement.slotToCameraPos(cameraPos);
+        setBlindSpotScreenCameraRotation(normScreen, normCam, 0);
+        setBlindSpotScreenCameraEdgeCrop(normScreen, normCam,
+                new BlindSpotCorrectionMath.EdgeCrop(0f, 0f, 0f, 0f));
+        MirrorTarget target = BlindSpotPlacement.isMainScreenKey(normScreen)
+                ? MirrorTarget.BLIND_SPOT
+                : MirrorTarget.SECONDARY_HUD;
+        resetMirrorForTarget(target, normCam);
     }
 
     public float getBlindSpotCorrectionCropLeft(String cameraPos) {

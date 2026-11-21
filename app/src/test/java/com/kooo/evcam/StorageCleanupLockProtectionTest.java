@@ -64,4 +64,43 @@ public class StorageCleanupLockProtectionTest {
         assertTrue(remaining.contains(lockedSidecar.getName()));
         assertTrue(remaining.contains(activePending.getName()));
     }
+
+    @Test
+    public void deleteOldestUnprotectedFilesReclaimsOrphanPendingWhileProtectingRegisteredAndRecentPending() throws Exception {
+        File dir = temp.newFolder("EVCam_Video_Pending");
+        File orphanPending = new File(dir, "20261110_070000_front.mp4.pending");
+        File activePending = new File(dir, "20261116_100000_back.mp4.pending");
+        File recentUnregisteredPending = new File(dir, "20261116_100100_left.mp4.pending");
+
+        Files.write(orphanPending.toPath(), new byte[1000]);
+        Files.write(activePending.toPath(), new byte[1000]);
+        Files.write(recentUnregisteredPending.toPath(), new byte[1000]);
+
+        long nowMs = 1_000_000_000L;
+        orphanPending.setLastModified(nowMs - VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS - 10_000L);
+        activePending.setLastModified(nowMs - VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS - 60_000L);
+        recentUnregisteredPending.setLastModified(nowMs - 5_000L);
+
+        Set<String> activePaths = java.util.Collections.singleton(
+                com.kooo.evcam.camera.ActiveRecordingRegistry.normalizePath(activePending));
+        File[] files = dir.listFiles(File::isFile);
+        assertNotNull(files);
+
+        StorageCleanupManager.DeleteStats stats = StorageCleanupManager.deleteOldestUnprotectedFiles(
+                files,
+                3000L,
+                1500L,
+                "清理遗留pending",
+                activePaths,
+                nowMs,
+                VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS
+        );
+
+        assertFalse("orphan pending outside active registry & grace window should be reclaimed", orphanPending.exists());
+        assertTrue("registered active pending must remain protected even if old", activePending.exists());
+        assertTrue("fresh pending within grace window must remain protected", recentUnregisteredPending.exists());
+        assertEquals(1, stats.deletedCount);
+        assertEquals(1000L, stats.deletedSize);
+        assertEquals(2, stats.skippedLockedCount);
+    }
 }

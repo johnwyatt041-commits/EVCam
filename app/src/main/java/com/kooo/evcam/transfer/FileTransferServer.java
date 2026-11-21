@@ -172,7 +172,7 @@ public class FileTransferServer extends NanoHTTPD {
         watchdog.reset();
         currentPort = getListeningPort();
         if (currentIp == null || currentIp.isEmpty()) {
-            List<LanNetworkSelector.NetworkEndpoint> endpoints = LanNetworkSelector.enumerateLocalEndpoints();
+            List<LanNetworkSelector.NetworkEndpoint> endpoints = LanNetworkSelector.enumerateLocalEndpoints(context);
             if (!endpoints.isEmpty()) {
                 currentIp = endpoints.get(0).ip;
             }

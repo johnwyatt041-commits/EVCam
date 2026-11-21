@@ -1,10 +1,16 @@
 package com.kooo.evcam.transfer;
 
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.ContextWrapper;
+import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.provider.Settings;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -35,6 +41,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 /**
  * QR code & URL controller dialog backed by {@link LanShareService}.
@@ -54,6 +62,7 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
     private TextView libraryModeNotice;
     private Button btnCopyUrl;
     private Spinner ipSpinner;
+    private Button btnHotspotSettings;
     private ListView fileListView;
     private Button btnRefreshIp;
     private Button btnKeepBackground;
@@ -62,12 +71,26 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
     private final FileTransferServer.ShareMode shareMode;
     private final List<File> filesToTransfer;
     private final List<LanNetworkSelector.NetworkEndpoint> availableEndpoints = new ArrayList<>();
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final ExecutorService scanExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "lan-nic-scan");
+        t.setDaemon(true);
+        return t;
+    });
+
     @Nullable
     private FileListAdapter fileListAdapter;
     @Nullable
     private String selectedIp;
     @Nullable
     private String lastRenderedQrUrl;
+    @Nullable
+    private String lastScanDiagnostic;
+    private int scanGeneration = 0;
+    private boolean isScanning = false;
+    private boolean awaitingServiceStart = false;
+    private boolean listenerRegistered = false;
+    private boolean initialStartCompleted = false;
     private boolean suppressSpinnerSelection = false;
     private volatile boolean isDestroying = false;
 
@@ -91,7 +114,19 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
     }
 
     private boolean isDestructionStarted() {
-        return isDestroying || !isShowing();
+        return isDestroying || !isShowing() || isHostActivityDestroyed(getContext());
+    }
+
+    private static boolean isHostActivityDestroyed(@Nullable Context context) {
+        Context current = context;
+        while (current instanceof ContextWrapper) {
+            if (current instanceof Activity) {
+                Activity activity = (Activity) current;
+                return activity.isFinishing() || activity.isDestroyed();
+            }
+            current = ((ContextWrapper) current).getBaseContext();
+        }
+        return false;
     }
 
     @Override
@@ -110,10 +145,38 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         initViews();
         setupListeners();
         initModeContent();
-        scanIpAddresses(null);
 
-        LanShareService.addStateListener(this);
-        ensureServiceStarted();
+        LanShareService.LanShareState existing = LanShareService.getCurrentState();
+        String initialPreferIp = existing.running ? existing.boundIp : null;
+        scanIpAddressesAsync(initialPreferIp, true, false, true);
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        registerStateListener();
+        if (!initialStartCompleted) {
+            initialStartCompleted = true;
+            return;
+        }
+        LanShareService.LanShareState state = LanShareService.getCurrentState();
+        if (!isScanning && ((!state.running && !state.starting) || selectedIp == null)) {
+            scanIpAddressesAsync(selectedIp, true, false, false);
+        }
+    }
+
+    private void registerStateListener() {
+        if (!listenerRegistered) {
+            listenerRegistered = true;
+            LanShareService.addStateListener(this);
+        }
+    }
+
+    private void unregisterStateListener() {
+        if (listenerRegistered) {
+            listenerRegistered = false;
+            LanShareService.removeStateListener(this);
+        }
     }
 
     private void initViews() {
@@ -127,6 +190,7 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         libraryModeNotice = findViewById(R.id.library_mode_notice);
         btnCopyUrl = findViewById(R.id.btn_copy_url);
         ipSpinner = findViewById(R.id.ip_spinner);
+        btnHotspotSettings = findViewById(R.id.btn_hotspot_settings);
         fileListView = findViewById(R.id.file_list_view);
         btnRefreshIp = findViewById(R.id.btn_refresh_ip);
         btnKeepBackground = findViewById(R.id.btn_keep_background);
@@ -155,19 +219,9 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
     }
 
     private void setupListeners() {
-        btnRefreshIp.setOnClickListener(v -> {
-            String prev = selectedIp;
-            scanIpAddresses(prev);
-            if (selectedIp != null) {
-                LanShareService.LanShareState state = LanShareService.getCurrentState();
-                if (state.running && !selectedIp.equals(state.boundIp)) {
-                    LanShareService.switchIp(getContext(), selectedIp);
-                } else if (!state.running && !state.starting) {
-                    ensureServiceStarted();
-                }
-            }
-            Toast.makeText(getContext(), "已刷新网卡列表", Toast.LENGTH_SHORT).show();
-        });
+        btnHotspotSettings.setOnClickListener(v -> openHotspotSettings());
+
+        btnRefreshIp.setOnClickListener(v -> scanIpAddressesAsync(selectedIp, true, true, false));
 
         btnKeepBackground.setOnClickListener(v -> {
             Toast.makeText(getContext(), "已转入后台继续分享（60 秒无访问自动关闭）", Toast.LENGTH_SHORT).show();
@@ -175,6 +229,7 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         });
 
         btnStopServer.setOnClickListener(v -> {
+            awaitingServiceStart = false;
             LanShareService.stopShare(getContext());
             dismiss();
         });
@@ -202,6 +257,7 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
                 }
                 selectedIp = chosenIp;
                 AppLog.i(TAG, "Switch LAN IP to " + chosenIp);
+                awaitingServiceStart = true;
                 LanShareService.switchIp(getContext(), chosenIp);
             }
 
@@ -211,9 +267,67 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         });
     }
 
-    private void scanIpAddresses(@Nullable String preferIp) {
+    private void openHotspotSettings() {
+        Context context = getContext();
+        Intent[] candidates = new Intent[] {
+                new Intent("android.settings.WIFI_TETHER_SETTINGS"),
+                new Intent("com.android.settings.TETHER_SETTINGS"),
+                new Intent(Settings.ACTION_WIRELESS_SETTINGS),
+                new Intent(Intent.ACTION_MAIN).setClassName(
+                        "com.android.settings", "com.android.settings.Settings$TetherSettingsActivity"),
+                new Intent(Settings.ACTION_WIFI_SETTINGS)
+        };
+        for (Intent intent : candidates) {
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            try {
+                context.startActivity(intent);
+                return;
+            } catch (Exception e) {
+                AppLog.d(TAG, "Settings intent failed (" + intent.getAction() + "): " + e.getMessage());
+            }
+        }
+        Toast.makeText(context, "无法直达热点设置，请手动前往系统设置开启热点或 Wi-Fi", Toast.LENGTH_LONG).show();
+    }
+
+    private void scanIpAddressesAsync(@Nullable String preferIp,
+                                      boolean startOrSwitchService,
+                                      boolean showRefreshToast,
+                                      boolean forceEnsureStart) {
+        final int generation = ++scanGeneration;
+        isScanning = true;
+        if (!LanShareService.getCurrentState().running) {
+            qrLoading.setVisibility(View.VISIBLE);
+            serverStatus.setText("正在检测局域网网卡...");
+            transferStatus.setText("等待检测...");
+        }
+
+        final Context appContext = getContext().getApplicationContext();
+        try {
+            scanExecutor.execute(() -> {
+                LanNetworkSelector.ScanResult result = LanNetworkSelector.scanLocalEndpoints(appContext);
+                mainHandler.post(() -> applyScanResult(
+                        generation, result, preferIp, startOrSwitchService, showRefreshToast, forceEnsureStart));
+            });
+        } catch (Exception e) {
+            isScanning = false;
+            AppLog.w(TAG, "Failed scheduling LAN NIC scan: " + e.getMessage());
+        }
+    }
+
+    private void applyScanResult(int generation,
+                                 LanNetworkSelector.ScanResult result,
+                                 @Nullable String preferIp,
+                                 boolean startOrSwitchService,
+                                 boolean showRefreshToast,
+                                 boolean forceEnsureStart) {
+        if (generation != scanGeneration || isDestroying || isHostActivityDestroyed(getContext())) {
+            return;
+        }
+        isScanning = false;
+        lastScanDiagnostic = result.diagnosticSummary;
+
         availableEndpoints.clear();
-        availableEndpoints.addAll(LanNetworkSelector.enumerateLocalEndpoints());
+        availableEndpoints.addAll(result.endpoints);
 
         List<String> labels = new ArrayList<>();
         int selectedIndex = 0;
@@ -241,13 +355,58 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         } finally {
             suppressSpinnerSelection = false;
         }
+
+        LanShareService.LanShareState state = LanShareService.getCurrentState();
+        if (selectedIp == null) {
+            awaitingServiceStart = false;
+            if (!state.running && !state.starting) {
+                showNoNicUiState();
+            }
+            if (showRefreshToast) {
+                Toast.makeText(getContext(), "仍未检测到可用网卡", Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+
+        if (showRefreshToast) {
+            Toast.makeText(getContext(),
+                    "已刷新网卡列表（共 " + availableEndpoints.size() + " 个）",
+                    Toast.LENGTH_SHORT).show();
+        }
+
+        if (startOrSwitchService) {
+            if (forceEnsureStart || (!state.running && !state.starting)) {
+                ensureServiceStarted();
+            } else if (state.running && !selectedIp.equals(state.boundIp)) {
+                awaitingServiceStart = true;
+                LanShareService.switchIp(getContext(), selectedIp);
+            }
+        }
+    }
+
+    private void showNoNicUiState() {
+        qrLoading.setVisibility(View.GONE);
+        qrCodeImage.setImageDrawable(null);
+        lastRenderedQrUrl = null;
+        urlText.setText("http://...");
+        StringBuilder msg = new StringBuilder("未检测到可用的局域网或热点网络，请开启车机热点/Wi-Fi 后点击“刷新网卡”");
+        if (lastScanDiagnostic != null && !lastScanDiagnostic.isEmpty()) {
+            msg.append("\n已检测网卡：").append(lastScanDiagnostic);
+        }
+        serverStatus.setText(msg.toString());
+        transferStatus.setText("请确认网络后点击“刷新网卡”");
     }
 
     private void ensureServiceStarted() {
         if (selectedIp == null) {
-            qrLoading.setVisibility(View.GONE);
-            serverStatus.setText("未检测到可用的局域网或热点网络，请开启车机热点/Wi-Fi 后点击刷新网卡");
+            awaitingServiceStart = false;
+            showNoNicUiState();
             return;
+        }
+        awaitingServiceStart = true;
+        qrLoading.setVisibility(View.VISIBLE);
+        if (!LanShareService.getCurrentState().running) {
+            serverStatus.setText("正在启动局域网分享服务...");
         }
         if (shareMode == FileTransferServer.ShareMode.LIBRARY) {
             LanShareService.startLibraryShare(getContext(), selectedIp);
@@ -261,6 +420,9 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         if (isDestructionStarted()) {
             return;
         }
+        if (state.starting || state.running || state.errorMessage != null) {
+            awaitingServiceStart = false;
+        }
         if (state.starting) {
             qrLoading.setVisibility(View.VISIBLE);
             serverStatus.setText("正在启动局域网分享服务...");
@@ -270,6 +432,8 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
 
         if (state.errorMessage != null && !state.running) {
             qrLoading.setVisibility(View.GONE);
+            qrCodeImage.setImageDrawable(null);
+            lastRenderedQrUrl = null;
             serverStatus.setText("服务异常: " + state.errorMessage);
             transferStatus.setText("请确认网络后点击“刷新网卡”");
             urlText.setText("http://...");
@@ -277,7 +441,23 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
         }
 
         if (!state.running) {
-            serverStatus.setText("局域网分享未运行");
+            if (isScanning) {
+                qrLoading.setVisibility(View.VISIBLE);
+                serverStatus.setText("正在检测局域网网卡...");
+                transferStatus.setText("等待检测...");
+            } else if (awaitingServiceStart) {
+                qrLoading.setVisibility(View.VISIBLE);
+                serverStatus.setText("正在启动局域网分享服务...");
+                transferStatus.setText("等待连接...");
+            } else if (selectedIp == null) {
+                showNoNicUiState();
+            } else {
+                qrLoading.setVisibility(View.GONE);
+                qrCodeImage.setImageDrawable(null);
+                lastRenderedQrUrl = null;
+                urlText.setText("http://...");
+                serverStatus.setText("局域网分享未运行");
+            }
             return;
         }
 
@@ -330,13 +510,15 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
     @Override
     public void dismiss() {
         isDestroying = true;
-        LanShareService.removeStateListener(this);
+        scanGeneration++;
+        unregisterStateListener();
+        scanExecutor.shutdownNow();
         super.dismiss();
     }
 
     @Override
     protected void onStop() {
-        LanShareService.removeStateListener(this);
+        unregisterStateListener();
         super.onStop();
     }
 
@@ -346,6 +528,7 @@ public class QrTransferDialog extends ComponentDialog implements LanShareService
                 .setMessage("离开弹窗后手机仍可在后台继续浏览或下载（60 秒无人访问自动关闭）；若需立即断开，请选“停止分享”。")
                 .setPositiveButton("后台继续", (d, w) -> dismiss())
                 .setNegativeButton("停止分享", (d, w) -> {
+                    awaitingServiceStart = false;
                     LanShareService.stopShare(getContext());
                     dismiss();
                 })

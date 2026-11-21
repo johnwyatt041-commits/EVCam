@@ -220,6 +220,12 @@
                     android:text="模式 D" />
 
                 <Button
+                    android:id="@+id/ui_mode_e"
+                    style="@style/Widget.EVCam.TopBarButton"
+                    android:layout_marginEnd="@dimen/ui_top_bar_button_gap"
+                    android:text="左右 E" />
+
+                <Button
                     android:id="@+id/ui_fullscreen_toggle"
                     style="@style/Widget.EVCam.TopBarButton"
                     android:layout_marginEnd="@dimen/ui_top_bar_button_gap"

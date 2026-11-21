@@ -207,6 +207,11 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals("模式 D（双视转向联动）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_D));
         assertEquals(AppConfig.PREVIEW_MODE_D, AppConfig.normalizePreviewMode(AppConfig.PREVIEW_MODE_D));
         assertEquals(AppConfig.PREVIEW_MODE_D, PreviewMode.fromKey(AppConfig.PREVIEW_MODE_D).key);
+        assertEquals("左右 E（左/右双摄并排）", AppearanceSettingsFragment.formatPreviewModeLabel(AppConfig.PREVIEW_MODE_E));
+        assertEquals(AppConfig.PREVIEW_MODE_E, AppConfig.normalizePreviewMode(AppConfig.PREVIEW_MODE_E));
+        assertEquals(AppConfig.PREVIEW_MODE_E, PreviewMode.fromKey(AppConfig.PREVIEW_MODE_E).key);
+        config.setPreviewMode(AppConfig.PREVIEW_MODE_E);
+        assertEquals(AppConfig.PREVIEW_MODE_E, config.getPreviewMode());
         assertEquals("仅沉浸全屏显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_AUTO));
         assertEquals("始终显示", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_ALWAYS));
         assertEquals("隐藏", AppearanceSettingsFragment.formatCornerNavLabel(AppConfig.CORNER_NAV_HIDDEN));
@@ -314,6 +319,15 @@ public class SettingsCatalogAndAppearanceTest {
         assertEquals(-0.5f, config.getPreviewSlotPanX(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
         assertEquals(0.5f, config.getPreviewSlotPanY(AppConfig.PREVIEW_MODE_C, "left"), 0.0001f);
         // Independent from other slots / modes
+        assertTrue(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_D, "left"));
+        assertEquals(1.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_D, "left"), 0.0001f);
+        config.setPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_E, "left", false);
+        config.setPreviewSlotZoom(AppConfig.PREVIEW_MODE_E, "left", 1.8f);
+        config.setPreviewSlotPan(AppConfig.PREVIEW_MODE_E, "left", 0.25f, -0.25f);
+        assertFalse(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_E, "left"));
+        assertEquals(1.8f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_E, "left"), 0.0001f);
+        assertEquals(0.25f, config.getPreviewSlotPanX(AppConfig.PREVIEW_MODE_E, "left"), 0.0001f);
+        assertEquals(-0.25f, config.getPreviewSlotPanY(AppConfig.PREVIEW_MODE_E, "left"), 0.0001f);
         assertTrue(config.isPreviewSlotFillContainer(AppConfig.PREVIEW_MODE_D, "left"));
         assertEquals(1.0f, config.getPreviewSlotZoom(AppConfig.PREVIEW_MODE_D, "left"), 0.0001f);
 

@@ -180,4 +180,24 @@ public class PreviewModeControllerTest {
         assertEquals(0xCC101620, AppConfig.applyColorAlphaPercent(0xFF101620, 80));
         assertEquals(0x99101722, AppConfig.applyColorAlphaPercent(0xBF101722, 80));
     }
+
+    @Test
+    public void modeEOnlyShowsSidesAndDoesNotActivateSurroundOrModeDSensors() {
+        assertEquals(PreviewMode.MODE_E, PreviewModeController.normalizeSupportedMode(PreviewMode.MODE_E));
+        assertFalse(PreviewModeController.shouldActivateSurroundGl(PreviewMode.MODE_E, true, true));
+        assertFalse(PreviewModeController.shouldShowModeAPreviewDisabledGuide(PreviewMode.MODE_E, false));
+        assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_E, true));
+        assertFalse(PreviewModeController.shouldSubscribeSteeringForModeD(
+                PreviewMode.MODE_E, true, true, AppConfig.MODE_D_SIDE_LINKAGE_STEERING));
+        assertFalse(PreviewModeController.shouldSubscribeTurnSignalForModeD(
+                PreviewMode.MODE_E, true, true, AppConfig.MODE_D_SIDE_LINKAGE_TURN_SIGNAL));
+
+        boolean[] modeEMask = {true, false, false, true}; // LEFT, !FRONT, !BACK, RIGHT
+        Map<String, Boolean> map = PreviewModeController.toCameraVisibilityMap(modeEMask);
+        assertEquals(Boolean.TRUE, map.get("left"));
+        assertEquals(Boolean.FALSE, map.get("front"));
+        assertEquals(Boolean.FALSE, map.get("back"));
+        assertEquals(Boolean.TRUE, map.get("right"));
+        assertEquals(Arrays.asList("front", "back"), PreviewModeController.hiddenKeysFromMask(modeEMask));
+    }
 }

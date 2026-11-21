@@ -126,7 +126,13 @@
                             <androidx.appcompat.widget.AppCompatButton
                                 android:id="@+id/btn_surround_mode_d"
                                 style="@style/Widget.EVCam.OptionPill"
+                                android:layout_marginEnd="8dp"
                                 android:text="双视转向 (模式 D)" />
+
+                            <androidx.appcompat.widget.AppCompatButton
+                                android:id="@+id/btn_surround_mode_e"
+                                style="@style/Widget.EVCam.OptionPill"
+                                android:text="左右双摄 (模式 E)" />
                         </LinearLayout>
                     </HorizontalScrollView>
 
@@ -134,7 +140,7 @@
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
                         android:layout_marginTop="8dp"
-                        android:text="仅在模式 A 前台激活时按需创建 360 GL 上下文，切回 B/C 或退后台即销毁。"
+                        android:text="仅在模式 A 前台激活时按需创建 360 GL 上下文，切回 B/C/D/E 或退后台即销毁。"
                         android:textColor="@color/text_hint"
                         android:textSize="12sp" />
 

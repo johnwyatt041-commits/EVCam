@@ -79,6 +79,18 @@ public final class BlindSpotCoordinator {
             boolean secondaryDisplayEnabled,
             boolean hasPreCreatedLeft,
             boolean hasPreCreatedRight) {
+        return planActivate(direction, true, secondaryDisplayEnabled, hasPreCreatedLeft, hasPreCreatedRight);
+    }
+
+    /**
+     * 计算当触发某一侧转向/补盲时各通道（仅主屏 / 仅副屏 / 主副屏同时、ESP32 推流）的执行计划。
+     */
+    public synchronized DispatchPlan planActivate(
+            String direction,
+            boolean mainDisplayEnabled,
+            boolean secondaryDisplayEnabled,
+            boolean hasPreCreatedLeft,
+            boolean hasPreCreatedRight) {
         if (!"left".equals(direction) && !"right".equals(direction)) {
             return new DispatchPlan(direction, WindowSlot.STANDARD_MAIN,
                     false, false, false, false, null, false);
@@ -89,20 +101,23 @@ public final class BlindSpotCoordinator {
         activeDirection = direction;
 
         BlindSpotSuppressionController.Decision decision = suppressionController.evaluate();
-        if (decision.suppressMainScreen) {
+        boolean suppressedMainOnly = mainDisplayEnabled && decision.suppressMainScreen;
+        if (suppressedMainOnly) {
             suppressionController.recordSuppressedTurn(direction);
+        } else if (!mainDisplayEnabled) {
+            suppressionController.clearTurnIfMatching(null);
         }
 
         WindowSlot slot = resolveWindowSlot(direction, hasPreCreatedLeft, hasPreCreatedRight);
         return new DispatchPlan(
                 direction,
                 slot,
-                !decision.suppressMainScreen,
+                mainDisplayEnabled && !decision.suppressMainScreen,
                 secondaryDisplayEnabled && !decision.suppressSecondaryHud,
                 !decision.suppressNetworkStreamHud,
                 switching,
                 switching ? opposite : null,
-                decision.suppressMainScreen
+                suppressedMainOnly
         );
     }
 

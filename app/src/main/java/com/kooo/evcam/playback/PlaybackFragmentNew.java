@@ -598,7 +598,8 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
         dateSections.clear();
         File saveDir = StorageHelper.getVideoDir(getContext());
         PlaybackTimelineBuilder.VideoScanResult scan = PlaybackTimelineBuilder.scanVideoDirectory(
-                saveDir, filterMode, System.currentTimeMillis());
+                saveDir, filterMode, System.currentTimeMillis(),
+                com.kooo.evcam.camera.ActiveRecordingRegistry.snapshot());
 
         dateSections.addAll(scan.dateSections);
         adapter.setActiveRecordingBanner(scan.activeRecording);

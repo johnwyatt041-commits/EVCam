@@ -9,6 +9,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.opengl.GLSurfaceView;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.AttributeSet;
 import android.util.TypedValue;
@@ -27,6 +28,7 @@ import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.R;
 import com.kooo.evcam.camera.MultiCameraManager;
+import com.kooo.evcam.camera.SingleCamera;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.SurroundLayoutSpec;
 import com.kooo.evcam.surround.SurroundLayoutCalculator.ViewportBox;
 import com.kooo.evcam.ui.UiScaleController;
@@ -49,6 +51,8 @@ public final class SurroundModeAView extends FrameLayout {
 
     private static final String TAG = "SurroundModeAView";
     private static final long TEARDOWN_SURFACE_DELAY_MS = 100L;
+    private static final long WATCHDOG_INTERVAL_MS = 2_000L;
+    private static final String[] CAMERA_KEYS = {"front", "back", "left", "right"};
 
     private static final int BASE_GROUP_FILL = 0xFF101620;
     private static final int BASE_GROUP_STROKE = 0x39FFFFFF;
@@ -68,6 +72,8 @@ public final class SurroundModeAView extends FrameLayout {
 
     private final AppConfig appConfig;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final SurroundCameraWatchdog cameraWatchdog = new SurroundCameraWatchdog();
+    private final Runnable cameraWatchdogRunnable = this::runCameraWatchdogTick;
     private final float density;
     private final float surroundPillTextPx;
     private final int gapPx;
@@ -318,12 +324,13 @@ public final class SurroundModeAView extends FrameLayout {
                     cachedRightSt = stRight;
                     surfacesReady = true;
                     if (boundCameraManager != null) {
-                        boundCameraManager.setSurroundPreviewSurfaces(
+                        boundCameraManager.bindSurroundPreviewForModeA(
                                 front, stFront,
                                 back, stBack,
                                 left, stLeft,
                                 right, stRight
                         );
+                        startCameraWatchdog();
                     }
                     if (hostCallbacks != null) {
                         hostCallbacks.onSurroundSurfacesReady();
@@ -347,13 +354,14 @@ public final class SurroundModeAView extends FrameLayout {
         if (!active || cameraManager == null) {
             return;
         }
-        if (surfacesReady && cachedFrontSurface != null && cachedFrontSurface.isValid()) {
-            cameraManager.setSurroundPreviewSurfaces(
+        if (surfacesReady && hasAnyValidCachedSurroundSurface()) {
+            cameraManager.bindSurroundPreviewForModeA(
                     cachedFrontSurface, cachedFrontSt,
                     cachedBackSurface, cachedBackSt,
                     cachedLeftSurface, cachedLeftSt,
                     cachedRightSurface, cachedRightSt
             );
+            startCameraWatchdog();
         }
         if (glSurfaceView != null) {
             glSurfaceView.queueEvent(() -> {
@@ -372,9 +380,14 @@ public final class SurroundModeAView extends FrameLayout {
     /** 退出模式 A、打开全屏他页或退后台时立即解绑相机 Surface，延迟销毁 GL 上下文后执行收尾回调。 */
     public void deactivateModeA(@Nullable MultiCameraManager cameraManager,
                                 @Nullable Runnable afterTeardown) {
+        stopCameraWatchdog();
         MultiCameraManager targetManager = cameraManager != null ? cameraManager : this.boundCameraManager;
+        final Surface prevFront = cachedFrontSurface;
+        final Surface prevBack = cachedBackSurface;
+        final Surface prevLeft = cachedLeftSurface;
+        final Surface prevRight = cachedRightSurface;
         if (targetManager != null) {
-            targetManager.clearSurroundPreviewSurfaces();
+            targetManager.clearSurroundPreviewSurfacesIfMatching(prevFront, prevBack, prevLeft, prevRight);
         }
         cachedFrontSurface = null;
         cachedBackSurface = null;
@@ -418,6 +431,78 @@ public final class SurroundModeAView extends FrameLayout {
             }, TEARDOWN_SURFACE_DELAY_MS);
         } else if (afterTeardown != null) {
             afterTeardown.run();
+        }
+    }
+
+    private boolean hasAnyValidCachedSurroundSurface() {
+        return (cachedFrontSurface != null && cachedFrontSurface.isValid())
+                || (cachedBackSurface != null && cachedBackSurface.isValid())
+                || (cachedLeftSurface != null && cachedLeftSurface.isValid())
+                || (cachedRightSurface != null && cachedRightSurface.isValid());
+    }
+
+    private void startCameraWatchdog() {
+        mainHandler.removeCallbacks(cameraWatchdogRunnable);
+        cameraWatchdog.reset(SystemClock.uptimeMillis());
+        if (active && surfacesReady && boundCameraManager != null) {
+            mainHandler.postDelayed(cameraWatchdogRunnable, WATCHDOG_INTERVAL_MS);
+        }
+    }
+
+    private void stopCameraWatchdog() {
+        mainHandler.removeCallbacks(cameraWatchdogRunnable);
+    }
+
+    private void runCameraWatchdogTick() {
+        if (!active || !surfacesReady) {
+            return;
+        }
+        MultiCameraManager manager = this.boundCameraManager;
+        SurroundGlRenderer renderer = this.glRenderer;
+        if (manager == null || renderer == null) {
+            mainHandler.postDelayed(cameraWatchdogRunnable, WATCHDOG_INTERVAL_MS);
+            return;
+        }
+
+        final long nowUptime = SystemClock.uptimeMillis();
+        final long nowWall = System.currentTimeMillis();
+        final Surface[] surfaces = {cachedFrontSurface, cachedBackSurface, cachedLeftSurface, cachedRightSurface};
+        final SurfaceTexture[] sts = {cachedFrontSt, cachedBackSt, cachedLeftSt, cachedRightSt};
+
+        for (int slot = 0; slot < CAMERA_KEYS.length; slot++) {
+            String key = CAMERA_KEYS[slot];
+            SingleCamera camera = manager.getCamera(key);
+            Surface surface = surfaces[slot];
+            if (camera == null || surface == null || !surface.isValid()) {
+                continue;
+            }
+            long lastCaptureWall = camera.getLastFrameTimestampMs();
+            long captureAgeMs = lastCaptureWall > 0L ? Math.max(0L, nowWall - lastCaptureWall) : -1L;
+            SurroundCameraWatchdog.CameraState state = new SurroundCameraWatchdog.CameraState(
+                    surface.isValid(),
+                    camera.isConnected(),
+                    camera.isOpeningOrReconnecting(),
+                    camera.hasActiveCaptureSession(),
+                    camera.hasActiveRecordSurface(),
+                    renderer.getLastOesFrameUptimeMs(slot),
+                    captureAgeMs
+            );
+            SurroundCameraWatchdog.RecoveryAction action = cameraWatchdog.evaluate(slot, nowUptime, state);
+            if (action == SurroundCameraWatchdog.RecoveryAction.REBIND_AND_RECREATE_SESSION) {
+                AppLog.w(TAG, "Mode A watchdog: OES stall on camera " + key
+                        + ", rebinding surround surface and recreating session");
+                manager.bindSingleSurroundSurfaceForModeA(key, surface, sts[slot]);
+                camera.recreateSession(true);
+                renderer.requestRenderSafe();
+            } else if (action == SurroundCameraWatchdog.RecoveryAction.FORCE_REOPEN) {
+                AppLog.w(TAG, "Mode A watchdog: OES/camera stall on camera " + key
+                        + ", triggering forceReopen()");
+                camera.forceReopen();
+            }
+        }
+
+        if (active && surfacesReady) {
+            mainHandler.postDelayed(cameraWatchdogRunnable, WATCHDOG_INTERVAL_MS);
         }
     }
 
@@ -479,6 +564,7 @@ public final class SurroundModeAView extends FrameLayout {
 
     @Override
     protected void onDetachedFromWindow() {
+        stopCameraWatchdog();
         releaseSteeringAngleSubscription();
         SurroundGlRenderer current = this.glRenderer;
         if (current != null) {

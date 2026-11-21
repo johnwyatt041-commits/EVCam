@@ -34,6 +34,7 @@ import java.util.SortedMap;
 import java.util.TreeMap;
 
 import com.kooo.evcam.blindspot.BlindSpotCoordinator;
+import com.kooo.evcam.blindspot.BlindSpotDisplayUtils;
 import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.camera.MultiCameraManager;
@@ -54,6 +55,7 @@ public class BlindSpotService extends Service {
     private TextureView secondaryTextureView;
     private Surface secondaryCachedSurface;
     private View secondaryBorderView;
+    private View secondaryArrowView;
     private SingleCamera secondaryCamera;
     private String secondaryDesiredCameraPos = null; // 目标副屏摄像头位置
 
@@ -63,6 +65,9 @@ public class BlindSpotService extends Service {
     private boolean isMainTempShown = false; // 是否为主屏临时显示
     private boolean isSecondaryAdjustMode = false;
     private int secondaryAttachedDisplayId = -1;
+    private int secondaryAttachedRawDisplayId = -1;
+    private int secondaryAdjustDisplayId = -1;
+    private String secondaryAdjustSlot = BlindSpotPlacement.SLOT_RIGHT;
     
     
     // 预创建的补盲窗口池（用于快速显示）
@@ -84,6 +89,8 @@ public class BlindSpotService extends Service {
     private Runnable secondaryRetryRunnable;
     private int secondaryRetryCount = 0;
     private String previewCameraPos = null;
+    private int previewTargetDisplayId = AppConfig.BLIND_SPOT_DISPLAY_MAIN;
+    private String previewPlacementSlot = null;
 
     private AppConfig appConfig;
     private DisplayManager displayManager;
@@ -192,8 +199,8 @@ public class BlindSpotService extends Service {
      * 在服务启动时后台创建窗口，避免转向灯触发时再创建导致的延迟
      */
     private void preCreateBlindSpotWindows() {
-        if (!appConfig.isTurnSignalLinkageEnabled()) {
-            AppLog.d(TAG, "转向灯联动和长视模式都未启用，跳过预创建窗口");
+        if (!appConfig.isTurnSignalLinkageEnabled() || !appConfig.isMainBlindSpotEnabled()) {
+            AppLog.d(TAG, "转向灯联动或主屏补盲未启用，跳过预创建主屏窗口");
             return;
         }
         
@@ -202,12 +209,15 @@ public class BlindSpotService extends Service {
             try {
                 Thread.sleep(2000); // 延迟2秒，等待服务完全启动
                 
-                if (!canShowMainOverlay()) {
-                    AppLog.d(TAG, "无悬浮窗权限，跳过预创建窗口");
+                if (!canShowMainOverlay() || !appConfig.isMainBlindSpotEnabled()) {
+                    AppLog.d(TAG, "无悬浮窗权限或主屏补盲已关闭，跳过预创建窗口");
                     return;
                 }
                 
                 mainHandler.post(() -> {
+                    if (!appConfig.isMainBlindSpotEnabled()) {
+                        return;
+                    }
                     try {
                         // 预创建左窗口
                         if (preCreatedLeftWindow == null) {
@@ -439,6 +449,28 @@ public class BlindSpotService extends Service {
         }
     }
 
+    private void dismissTurnSignalMainWindowsOnly() {
+        if (isMainTempShown && mainFloatingWindowView != null) {
+            mainFloatingWindowView.dismiss();
+            mainFloatingWindowView = null;
+            isMainTempShown = false;
+        } else if (mainFloatingWindowView != null) {
+            mainFloatingWindowView.hideTurnSignalArrow();
+            mainFloatingWindowView.setBlindSpotActiveSlot(null);
+            if (!appConfig.isMainFloatingEnabled()) {
+                mainFloatingWindowView.dismiss();
+                mainFloatingWindowView = null;
+            } else {
+                mainFloatingWindowView.updateCamera(appConfig.getMainFloatingCamera());
+            }
+        }
+        if (dedicatedBlindSpotWindow != null) {
+            dedicatedBlindSpotWindow.hideTurnSignalArrow();
+            dedicatedBlindSpotWindow.dismiss();
+            dedicatedBlindSpotWindow = null;
+        }
+    }
+
     private void showMainBlindSpotWindowForSignal(String cameraPos, BlindSpotCoordinator.WindowSlot slot) {
         if (!canShowMainOverlay()) {
             return;
@@ -499,6 +531,10 @@ public class BlindSpotService extends Service {
 
     private void reconcileSuppressionTransition(String reason) {
         syncSuppressionConfig();
+        if (!appConfig.isMainBlindSpotEnabled()) {
+            dismissTurnSignalMainWindowsOnly();
+            return;
+        }
         if (blindSpotCoordinator.getSuppressionController().isMainScreenSuppressed()) {
             if (currentSignalCamera != null) {
                 blindSpotCoordinator.getSuppressionController().recordSuppressedTurn(currentSignalCamera);
@@ -579,6 +615,7 @@ public class BlindSpotService extends Service {
 
         BlindSpotCoordinator.DispatchPlan plan = blindSpotCoordinator.planActivate(
                 cameraPos,
+                appConfig.isMainBlindSpotEnabled(),
                 appConfig.isSecondaryDisplayEnabled(),
                 preCreatedLeftWindow != null,
                 preCreatedRightWindow != null
@@ -591,13 +628,23 @@ public class BlindSpotService extends Service {
         boolean reuseMain = appConfig.isTurnSignalReuseMainFloating();
         if (plan.showMainWindow) {
             showMainBlindSpotWindowForSignal(cameraPos, plan.mainWindowSlot);
+        } else if (!appConfig.isMainBlindSpotEnabled()) {
+            dismissTurnSignalMainWindowsOnly();
+            AppLog.d(TAG, "主屏补盲已关闭（仅副屏模式），跳过主屏窗口: " + cameraPos);
         } else {
             dismissTransientMainBlindSpotWindows();
             AppLog.d(TAG, "360/AVM 抑制生效，仅暂停主屏窗口，副屏与 ESP32 推流继续联动: " + cameraPos);
         }
 
-        if (plan.showSecondaryHud && secondaryFloatingView == null) {
-            showSecondaryDisplay();
+        if (plan.showSecondaryHud) {
+            int targetRawId = resolveActiveSecondaryRawDisplayId();
+            if (secondaryFloatingView != null && secondaryAttachedRawDisplayId != -1
+                    && secondaryAttachedRawDisplayId != targetRawId) {
+                removeSecondaryView();
+            }
+            if (secondaryFloatingView == null) {
+                showSecondaryDisplay();
+            }
         }
 
         // --- 2. 启动前台服务与相机管理器 ---
@@ -651,7 +698,11 @@ public class BlindSpotService extends Service {
 
     private void startSecondaryCameraPreviewDirectly(String cameraPos) {
         secondaryDesiredCameraPos = cameraPos;
-        BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, cameraPos, appConfig.getSecondaryDisplayRotation());
+        if (secondaryFloatingView != null) {
+            updateSecondaryDisplayLayout();
+        } else {
+            applySecondaryTransform(cameraPos);
+        }
         MultiCameraManager cameraManager = com.kooo.evcam.camera.CameraManagerHolder.getInstance().getCameraManager();
         if (cameraManager == null) {
             scheduleSecondaryRetry(cameraPos);
@@ -700,6 +751,7 @@ public class BlindSpotService extends Service {
                                 secondaryCachedSurface = new Surface(st);
                                 cam.setSecondaryDisplaySurface(secondaryCachedSurface, st);
                                 AppLog.d(TAG, "副屏通过 onCameraOpened 回调立即绑定 Surface: " + cameraPos);
+                                mainHandler.post(() -> applySecondaryTransform(cameraPos));
                             }
                         }
                     });
@@ -739,6 +791,7 @@ public class BlindSpotService extends Service {
                         android.graphics.SurfaceTexture delaySt = (secondaryTextureView != null && secondaryTextureView.isAvailable()) ? secondaryTextureView.getSurfaceTexture() : null;
                         delayedCamera.setSecondaryDisplaySurface(delayedSurface, delaySt);
                         delayedCamera.recreateSession(false);
+                        applySecondaryTransform(cameraPos);
                     }
                 }, 300);
             } else {
@@ -753,7 +806,7 @@ public class BlindSpotService extends Service {
                 secondaryCamera.setSecondaryDisplaySurface(secondaryCachedSurface, secSt);
                 secondaryCamera.recreateSession(true);
             }
-            BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, cameraPos, appConfig.getSecondaryDisplayRotation());
+            applySecondaryTransform(cameraPos);
         } else {
             AppLog.d(TAG, "副屏 TextureView 尚未就绪，暂不绑定 Surface: " + cameraPos);
             scheduleSecondaryRetry(cameraPos);
@@ -914,13 +967,18 @@ public class BlindSpotService extends Service {
                 String cameraPos = intent.getStringExtra("camera_pos");
                 if (cameraPos == null) cameraPos = "right";
                 String placementSlot = intent.getStringExtra("placement_slot");
+                int targetDisplayId = intent.getIntExtra("target_display_id", AppConfig.BLIND_SPOT_DISPLAY_MAIN);
                 previewCameraPos = cameraPos;
-                showPreviewWindow(cameraPos, placementSlot);
+                previewTargetDisplayId = targetDisplayId;
+                previewPlacementSlot = placementSlot;
+                showPreviewWindow(cameraPos, placementSlot, targetDisplayId);
                 updateWindows();
                 return START_STICKY;
             }
             if ("stop_preview_blind_spot".equals(action)) {
                 previewCameraPos = null;
+                previewPlacementSlot = null;
+                previewTargetDisplayId = AppConfig.BLIND_SPOT_DISPLAY_MAIN;
                 if (previewBlindSpotWindow != null) {
                     previewBlindSpotWindow.dismiss();
                     previewBlindSpotWindow = null;
@@ -930,11 +988,17 @@ public class BlindSpotService extends Service {
             }
             if ("enter_secondary_display_adjust".equals(action)) {
                 isSecondaryAdjustMode = true;
+                secondaryAdjustDisplayId = intent.getIntExtra("target_display_id", -1);
+                String adjustSlot = intent.getStringExtra("placement_slot");
+                if (adjustSlot != null) {
+                    secondaryAdjustSlot = BlindSpotPlacement.normalizeSlot(adjustSlot);
+                }
                 updateWindows();
                 return START_STICKY;
             }
             if ("exit_secondary_display_adjust".equals(action)) {
                 isSecondaryAdjustMode = false;
+                secondaryAdjustDisplayId = -1;
                 updateWindows();
                 return START_STICKY;
             }
@@ -958,34 +1022,37 @@ public class BlindSpotService extends Service {
         return START_STICKY;
     }
 
-    private void showPreviewWindow(String cameraPos, String placementSlot) {
-        if (!canShowMainOverlay()) return;
+    private void showPreviewWindow(String cameraPos, String placementSlot, int targetDisplayId) {
+        if (targetDisplayId == AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
+            if (!canShowMainOverlay()) return;
 
-        if (previewBlindSpotWindow == null) {
-            previewBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
-            previewBlindSpotWindow.setCameraPos(cameraPos);
-            if (placementSlot != null) {
-                previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
+            if (previewBlindSpotWindow == null) {
+                previewBlindSpotWindow = new BlindSpotFloatingWindowView(this, false);
+                previewBlindSpotWindow.setCameraPos(cameraPos);
+                if (placementSlot != null) {
+                    previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
+                } else {
+                    previewBlindSpotWindow.enableAdjustPreviewMode();
+                }
+                previewBlindSpotWindow.show();
             } else {
-                previewBlindSpotWindow.enableAdjustPreviewMode();
+                previewBlindSpotWindow.setCameraPos(cameraPos);
+                if (placementSlot != null) {
+                    previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
+                } else {
+                    previewBlindSpotWindow.enableAdjustPreviewMode();
+                }
             }
-            previewBlindSpotWindow.show();
-        } else {
-            previewBlindSpotWindow.setCameraPos(cameraPos);
-            if (placementSlot != null) {
-                previewBlindSpotWindow.enablePositionPreviewMode(placementSlot);
-            } else {
-                previewBlindSpotWindow.enableAdjustPreviewMode();
-            }
+            previewBlindSpotWindow.setCamera(cameraPos);
+            return;
         }
-        previewBlindSpotWindow.setCamera(cameraPos);
 
-        if (appConfig.isSecondaryDisplayEnabled()) {
-            if (secondaryFloatingView == null) {
-                showSecondaryDisplay();
-            }
-            startSecondaryCameraPreviewDirectly(cameraPos);
+        if (previewBlindSpotWindow != null) {
+            previewBlindSpotWindow.dismiss();
+            previewBlindSpotWindow = null;
         }
+        CameraForegroundService.start(this, "补盲预览", "正在副屏预览补盲画面");
+        com.kooo.evcam.camera.CameraManagerHolder.getInstance().getOrInit(this);
     }
 
     private void showBlindSpotSetupWindow() {
@@ -1025,6 +1092,10 @@ public class BlindSpotService extends Service {
             return;
         }
 
+        if (!appConfig.isMainBlindSpotEnabled()) {
+            dismissTurnSignalMainWindowsOnly();
+        }
+
         updateSecondaryDisplay();
         updateMainFloatingWindow();
 
@@ -1032,6 +1103,7 @@ public class BlindSpotService extends Service {
         
         if (isSecondaryAdjustMode
                 || appConfig.isMainFloatingEnabled() // 加入主屏悬浮窗检查
+                || appConfig.isSecondaryDisplayEnabled()
                 || appConfig.isTurnSignalLinkageEnabled() // 加入转向灯联动检查
                 || appConfig.isAvmAvoidanceEnabled() // 全景影像避让
                 || currentSignalCamera != null // 加入转向灯联动检查
@@ -1039,11 +1111,11 @@ public class BlindSpotService extends Service {
             CameraForegroundService.start(this, "补盲运行中", "正在显示补盲画面");
         }
         
-        // 如果两个功能都关闭了，可以考虑停止服务
+        // 如果所有功能都关闭了，可以考虑停止服务
         if (!isSecondaryAdjustMode
                 && !appConfig.isMainFloatingEnabled()
+                && !appConfig.isSecondaryDisplayEnabled()
                 && !appConfig.isTurnSignalLinkageEnabled()
-
                 && !appConfig.isAvmAvoidanceEnabled() // 全景影像避让
                 && previewCameraPos == null) {
             AppLog.i(TAG, "🚪 所有功能都关闭，停止服务");
@@ -1061,23 +1133,108 @@ public class BlindSpotService extends Service {
         if (previewBlindSpotWindow != null) {
             previewBlindSpotWindow.updateBoundsFromPlacement();
         }
-        String secondaryCameraPos = currentSignalCamera != null ? currentSignalCamera : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
-        if (secondaryCameraPos != null) {
-            BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, secondaryCameraPos, appConfig.getSecondaryDisplayRotation());
-        } else {
-            BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, null, appConfig.getSecondaryDisplayRotation());
+        applySecondaryTransform(null);
+    }
+
+    private int resolveActiveSecondaryRawDisplayId() {
+        if (previewCameraPos != null && previewTargetDisplayId != AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
+            return previewTargetDisplayId;
         }
+        if (isSecondaryAdjustMode && secondaryAdjustDisplayId != -1) {
+            return secondaryAdjustDisplayId;
+        }
+        int configured = appConfig.getSecondaryDisplayId();
+        if (configured != Display.DEFAULT_DISPLAY) {
+            return configured;
+        }
+        if (displayManager != null) {
+            for (Display d : displayManager.getDisplays()) {
+                if (d.getDisplayId() != Display.DEFAULT_DISPLAY) {
+                    return d.getDisplayId();
+                }
+            }
+        }
+        if (EvccDashcastDisplayResolver.queryPrimary(this) != null) {
+            return EvccDashcastDisplayResolver.PICK_ID;
+        }
+        return Display.DEFAULT_DISPLAY;
+    }
+
+    private String resolveActiveSecondarySlot() {
+        if (previewCameraPos != null && previewTargetDisplayId != AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
+            if (previewPlacementSlot != null) {
+                return BlindSpotPlacement.normalizeSlot(previewPlacementSlot);
+            }
+            return BlindSpotPlacement.resolveSlotForCamera(
+                    previewCameraPos, appConfig.isRainNightBlindSpotEnabled());
+        }
+        if (isSecondaryAdjustMode && secondaryAdjustSlot != null) {
+            return BlindSpotPlacement.normalizeSlot(secondaryAdjustSlot);
+        }
+        String cam = currentSignalCamera != null
+                ? currentSignalCamera
+                : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
+        return BlindSpotPlacement.resolveSlotForCamera(
+                cam != null ? cam : BlindSpotPlacement.SLOT_RIGHT,
+                appConfig.isRainNightBlindSpotEnabled());
+    }
+
+    @Nullable
+    private String resolveActiveSecondaryCameraPos() {
+        if (previewCameraPos != null && previewTargetDisplayId != AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
+            return BlindSpotPlacement.slotToCameraPos(previewCameraPos);
+        }
+        if (currentSignalCamera != null) {
+            return BlindSpotPlacement.slotToCameraPos(currentSignalCamera);
+        }
+        if (secondaryDesiredCameraPos != null) {
+            return BlindSpotPlacement.slotToCameraPos(secondaryDesiredCameraPos);
+        }
+        if (isSecondaryAdjustMode && secondaryAdjustSlot != null) {
+            return BlindSpotPlacement.slotToCameraPos(secondaryAdjustSlot);
+        }
+        return null;
+    }
+
+    private void applySecondaryTransform(@Nullable String explicitCameraPos) {
+        if (secondaryTextureView == null) {
+            return;
+        }
+        int rawDisplayId = secondaryAttachedRawDisplayId != -1
+                ? secondaryAttachedRawDisplayId
+                : resolveActiveSecondaryRawDisplayId();
+        String screenKey = BlindSpotPlacement.screenKeyForDisplay(rawDisplayId);
+        int orientation = appConfig.getBlindSpotScreenOrientation(screenKey);
+        String cam = explicitCameraPos != null ? explicitCameraPos : resolveActiveSecondaryCameraPos();
+        BlindSpotCorrection.applyForScreen(
+                secondaryTextureView,
+                appConfig,
+                screenKey,
+                MirrorTarget.SECONDARY_HUD,
+                cam,
+                orientation);
     }
 
     private void updateSecondaryDisplay() {
-        boolean shouldShow = isSecondaryAdjustMode || (appConfig.isSecondaryDisplayEnabled() && (currentSignalCamera != null || previewCameraPos != null));
+        boolean isSecondaryPreviewActive = previewCameraPos != null
+                && previewTargetDisplayId != AppConfig.BLIND_SPOT_DISPLAY_MAIN;
+        boolean shouldShow = isSecondaryAdjustMode
+                || isSecondaryPreviewActive
+                || (appConfig.isBlindSpotGlobalEnabled()
+                        && appConfig.isSecondaryDisplayEnabled()
+                        && currentSignalCamera != null);
 
         if (!shouldShow) {
             removeSecondaryView();
             return;
         }
 
-        int rawDisplayId = appConfig.getSecondaryDisplayId();
+        int rawDisplayId = resolveActiveSecondaryRawDisplayId();
+        if (rawDisplayId == Display.DEFAULT_DISPLAY) {
+            if (secondaryFloatingView != null) removeSecondaryView();
+            AppLog.w(TAG, "副屏输出未指定有效副屏 Display ID 且未检测到外接副屏/EVCC，跳过副屏显示");
+            return;
+        }
         int resolvedDisplayId = EvccDashcastDisplayResolver.resolve(this, rawDisplayId);
         if (resolvedDisplayId < 0) {
             // EVCC 仪表投屏占位符但 EVCC 没起投屏 — 暂不显示，等 EVCC 起来后下次触发再试
@@ -1085,12 +1242,14 @@ public class BlindSpotService extends Service {
             AppLog.w(TAG, "副屏选了 EVCC 仪表投屏但当前不可用（EVCC 未启动投屏？），跳过");
             return;
         }
-        if (secondaryFloatingView != null && secondaryAttachedDisplayId != -1 && secondaryAttachedDisplayId != resolvedDisplayId) {
+        if (secondaryFloatingView != null
+                && ((secondaryAttachedDisplayId != -1 && secondaryAttachedDisplayId != resolvedDisplayId)
+                || (secondaryAttachedRawDisplayId != -1 && secondaryAttachedRawDisplayId != rawDisplayId))) {
             removeSecondaryView();
         }
 
         if (secondaryFloatingView == null) {
-            showSecondaryDisplay(resolvedDisplayId);
+            showSecondaryDisplay(resolvedDisplayId, rawDisplayId);
         } else {
             updateSecondaryDisplayLayout();
         }
@@ -1101,11 +1260,15 @@ public class BlindSpotService extends Service {
                 if (secondaryBorderView != null) {
                     secondaryBorderView.setVisibility(View.VISIBLE);
                 }
-            } else if (appConfig.isSecondaryDisplayEnabled() && (currentSignalCamera != null || previewCameraPos != null)) {
+            } else if (isSecondaryPreviewActive || (appConfig.isSecondaryDisplayEnabled() && currentSignalCamera != null)) {
+                String screenKey = BlindSpotPlacement.screenKeyForDisplay(rawDisplayId);
                 if (secondaryBorderView != null) {
-                    secondaryBorderView.setVisibility(appConfig.isSecondaryDisplayBorderEnabled() ? View.VISIBLE : View.GONE);
+                    secondaryBorderView.setVisibility(
+                            appConfig.isBlindSpotScreenBorderEnabled(screenKey) ? View.VISIBLE : View.GONE);
                 }
-                String cameraPos = currentSignalCamera != null ? currentSignalCamera : previewCameraPos;
+                String cameraPos = isSecondaryPreviewActive
+                        ? BlindSpotPlacement.slotToCameraPos(previewCameraPos)
+                        : currentSignalCamera;
                 if (cameraPos != null) {
                     startSecondaryCameraPreviewDirectly(cameraPos);
                 }
@@ -1116,66 +1279,79 @@ public class BlindSpotService extends Service {
     }
 
     /**
-     * 更新副屏悬浮窗的布局参数和旋转
+     * 更新副屏悬浮窗的布局参数和旋转（视觉坐标 -> WindowManager 逻辑坐标）
      */
     private void updateSecondaryDisplayLayout() {
         if (secondaryFloatingView == null || secondaryWindowManager == null) return;
 
-        int x = appConfig.getSecondaryDisplayX();
-        int y = appConfig.getSecondaryDisplayY();
-        int width = appConfig.getSecondaryDisplayWidth();
-        int height = appConfig.getSecondaryDisplayHeight();
-        int orientation = appConfig.getSecondaryDisplayOrientation();
-        int rotation = appConfig.getSecondaryDisplayRotation();
+        int rawDisplayId = secondaryAttachedRawDisplayId != -1
+                ? secondaryAttachedRawDisplayId
+                : resolveActiveSecondaryRawDisplayId();
+        int resolvedDisplayId = secondaryAttachedDisplayId != -1
+                ? secondaryAttachedDisplayId
+                : EvccDashcastDisplayResolver.resolve(this, rawDisplayId);
+        int[] dims = BlindSpotDisplayUtils.getDisplaySizePx(this, resolvedDisplayId);
+        String screenKey = BlindSpotPlacement.screenKeyForDisplay(rawDisplayId);
+        String slot = resolveActiveSecondarySlot();
+        int orientation = appConfig.getBlindSpotScreenOrientation(screenKey);
+        BlindSpotPlacement.RectRatio rect = appConfig.getBlindSpotScreenPlacement(
+                screenKey, slot, dims[0], dims[1]);
+        int[] logical = BlindSpotPlacement.visualToLogicalPixels(rect, dims[0], dims[1], orientation);
 
-        AppLog.d(TAG, "更新副屏布局: x=" + x + ", y=" + y + ", w=" + width + ", h=" + height + ", orientation=" + orientation);
+        int x = logical[0];
+        int y = logical[1];
+        int width = logical[2];
+        int height = logical[3];
 
-        // 如果方向是 90 或 270 度，交换宽高
-        int finalWidth = width;
-        int finalHeight = height;
-        if (orientation == 90 || orientation == 270) {
-            finalWidth = height;
-            finalHeight = width;
-        }
+        AppLog.d(TAG, "更新副屏布局: screen=" + screenKey + ", slot=" + slot
+                + ", lx=" + x + ", ly=" + y + ", lw=" + width + ", lh=" + height
+                + ", orientation=" + orientation);
 
         WindowManager.LayoutParams params = (WindowManager.LayoutParams) secondaryFloatingView.getLayoutParams();
         params.x = x;
         params.y = y;
-        params.width = finalWidth > 0 ? finalWidth : WindowManager.LayoutParams.WRAP_CONTENT;
-        params.height = finalHeight > 0 ? finalHeight : WindowManager.LayoutParams.WRAP_CONTENT;
+        params.width = width > 0 ? width : WindowManager.LayoutParams.WRAP_CONTENT;
+        params.height = height > 0 ? height : WindowManager.LayoutParams.WRAP_CONTENT;
 
         secondaryWindowManager.updateViewLayout(secondaryFloatingView, params);
-        secondaryFloatingView.setRotation(orientation);
+        secondaryFloatingView.setRotation(0f);
+        if (secondaryArrowView != null) {
+            secondaryArrowView.setRotation(orientation);
+        }
 
         // 应用透明度
-        float alpha = appConfig.getSecondaryDisplayAlpha() / 100f;
+        float alpha = appConfig.getBlindSpotScreenAlpha(screenKey) / 100f;
         secondaryFloatingView.setAlpha(alpha);
 
-        String cameraPos = currentSignalCamera != null ? currentSignalCamera : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
-        BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, cameraPos, rotation);
+        applySecondaryTransform(null);
         
         // 设置边框
         if (secondaryBorderView != null) {
             if (isSecondaryAdjustMode) {
                 secondaryBorderView.setVisibility(View.VISIBLE);
             } else {
-                secondaryBorderView.setVisibility(appConfig.isSecondaryDisplayBorderEnabled() ? View.VISIBLE : View.GONE);
+                secondaryBorderView.setVisibility(
+                        appConfig.isBlindSpotScreenBorderEnabled(screenKey) ? View.VISIBLE : View.GONE);
             }
         }
     }
 
     /** 无参版本：从配置读取 raw displayId 后做 EVCC 仪表投屏占位符解析。 */
     private void showSecondaryDisplay() {
-        int rawDisplayId = appConfig.getSecondaryDisplayId();
+        int rawDisplayId = resolveActiveSecondaryRawDisplayId();
+        if (rawDisplayId == Display.DEFAULT_DISPLAY) {
+            AppLog.w(TAG, "未指定有效副屏 Display ID，跳过显示");
+            return;
+        }
         int resolved = EvccDashcastDisplayResolver.resolve(this, rawDisplayId);
         if (resolved < 0) {
             AppLog.w(TAG, "副屏选了 EVCC 仪表投屏但当前不可用，跳过显示");
             return;
         }
-        showSecondaryDisplay(resolved);
+        showSecondaryDisplay(resolved, rawDisplayId);
     }
 
-    private void showSecondaryDisplay(int displayId) {
+    private void showSecondaryDisplay(int displayId, int rawDisplayId) {
         if (secondaryFloatingView != null) return; // 已经显示了
 
         Display display = displayManager.getDisplay(displayId);
@@ -1184,6 +1360,7 @@ public class BlindSpotService extends Service {
             return;
         }
         secondaryAttachedDisplayId = displayId;
+        secondaryAttachedRawDisplayId = rawDisplayId;
 
         // 创建对应显示器的 Context
         Context displayContext;
@@ -1203,55 +1380,55 @@ public class BlindSpotService extends Service {
         secondaryFloatingView = LayoutInflater.from(displayContext).inflate(R.layout.presentation_secondary_display, null);
         secondaryTextureView = secondaryFloatingView.findViewById(R.id.secondary_texture_view);
         secondaryBorderView = secondaryFloatingView.findViewById(R.id.secondary_border);
+        secondaryArrowView = secondaryFloatingView.findViewById(R.id.turn_signal_arrow_view);
+
+        String screenKey = BlindSpotPlacement.screenKeyForDisplay(rawDisplayId);
+        String slot = resolveActiveSecondarySlot();
+        int[] dims = BlindSpotDisplayUtils.getDisplaySizePx(this, displayId);
+        int orientation = appConfig.getBlindSpotScreenOrientation(screenKey);
+        BlindSpotPlacement.RectRatio rect = appConfig.getBlindSpotScreenPlacement(
+                screenKey, slot, dims[0], dims[1]);
+        int[] logical = BlindSpotPlacement.visualToLogicalPixels(rect, dims[0], dims[1], orientation);
 
         // 设置边框
         secondaryBorderView.setVisibility(isSecondaryAdjustMode ? View.VISIBLE :
-                (appConfig.isSecondaryDisplayBorderEnabled() ? View.VISIBLE : View.GONE));
+                (appConfig.isBlindSpotScreenBorderEnabled(screenKey) ? View.VISIBLE : View.GONE));
 
         // 设置悬浮窗参数（副屏 EVCC 严格使用 DisplayContext + TYPE_APPLICATION_OVERLAY，不升级为 2032）
-        int x = appConfig.getSecondaryDisplayX();
-        int y = appConfig.getSecondaryDisplayY();
-        int width = appConfig.getSecondaryDisplayWidth();
-        int height = appConfig.getSecondaryDisplayHeight();
-        int orientation = appConfig.getSecondaryDisplayOrientation();
-        int rotation = appConfig.getSecondaryDisplayRotation();
+        int x = logical[0];
+        int y = logical[1];
+        int width = logical[2];
+        int height = logical[3];
 
-        AppLog.d(TAG, "显示副屏: x=" + x + ", y=" + y + ", w=" + width + ", h=" + height + ", orientation=" + orientation + ", rotation=" + rotation);
-
-        // 如果方向是 90 或 270 度，交换宽高
-        int finalWidth = width;
-        int finalHeight = height;
-        if (orientation == 90 || orientation == 270) {
-            finalWidth = height;
-            finalHeight = width;
-        }
+        AppLog.d(TAG, "显示副屏: screen=" + screenKey + ", slot=" + slot
+                + ", lx=" + x + ", ly=" + y + ", lw=" + width + ", lh=" + height + ", orientation=" + orientation);
 
         WindowManager.LayoutParams params = OverlayWindowParamsFactory.createSecondaryDisplayParams(
-                finalWidth > 0 ? finalWidth : WindowManager.LayoutParams.WRAP_CONTENT,
-                finalHeight > 0 ? finalHeight : WindowManager.LayoutParams.WRAP_CONTENT,
+                width > 0 ? width : WindowManager.LayoutParams.WRAP_CONTENT,
+                height > 0 ? height : WindowManager.LayoutParams.WRAP_CONTENT,
                 x,
                 y
         );
 
-        // 设置屏幕方向 (旋转整个容器)
-        // 注意：某些车机系统对 WindowManager 根视图的 setRotation 支持有限
-        // 我们尝试同时设置旋转和内部视图的变换
-        secondaryFloatingView.setRotation(orientation);
+        // 统一使用矩阵变换旋转 TextureView 内容（根视图保持 0°，避免倒置/侧装裁剪与坐标反向）
+        secondaryFloatingView.setRotation(0f);
+        if (secondaryArrowView != null) {
+            secondaryArrowView.setRotation(orientation);
+        }
 
-        // 设置内容旋转 (将 orientation 和 rotation 结合处理)
-        // 最终旋转角度 = 摄像头内容旋转 + 屏幕方向补偿
-        String cameraPos = currentSignalCamera != null ? currentSignalCamera : (previewCameraPos != null ? previewCameraPos : secondaryDesiredCameraPos);
-        BlindSpotCorrection.apply(secondaryTextureView, appConfig, MirrorTarget.SECONDARY_HUD, cameraPos, rotation);
+        applySecondaryTransform(null);
 
         secondaryTextureView.setSurfaceTextureListener(new TextureView.SurfaceTextureListener() {
             @Override
             public void onSurfaceTextureAvailable(android.graphics.SurfaceTexture surface, int w, int h) {
+                boolean isSecondaryPreviewActive = previewCameraPos != null
+                        && previewTargetDisplayId != AppConfig.BLIND_SPOT_DISPLAY_MAIN;
                 String cameraPos = null;
-                if (appConfig.isSecondaryDisplayEnabled()) {
+                if (isSecondaryPreviewActive) {
+                    cameraPos = BlindSpotPlacement.slotToCameraPos(previewCameraPos);
+                } else if (appConfig.isSecondaryDisplayEnabled()) {
                     if (secondaryDesiredCameraPos != null) {
                         cameraPos = secondaryDesiredCameraPos;
-                    } else if (previewCameraPos != null) {
-                        cameraPos = previewCameraPos;
                     } else if (currentSignalCamera != null) {
                         cameraPos = currentSignalCamera;
                     }
@@ -1265,7 +1442,9 @@ public class BlindSpotService extends Service {
             }
 
             @Override
-            public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface, int w, int h) {}
+            public void onSurfaceTextureSizeChanged(android.graphics.SurfaceTexture surface, int w, int h) {
+                applySecondaryTransform(null);
+            }
 
             @Override
             public boolean onSurfaceTextureDestroyed(android.graphics.SurfaceTexture surface) {
@@ -1292,7 +1471,7 @@ public class BlindSpotService extends Service {
         });
 
         // 应用透明度
-        float alpha = appConfig.getSecondaryDisplayAlpha() / 100f;
+        float alpha = appConfig.getBlindSpotScreenAlpha(screenKey) / 100f;
         secondaryFloatingView.setAlpha(alpha);
 
         try {
@@ -1347,6 +1526,7 @@ public class BlindSpotService extends Service {
         stopSecondaryCameraPreview();
         secondaryDesiredCameraPos = null;
         secondaryAttachedDisplayId = -1;
+        secondaryAttachedRawDisplayId = -1;
         if (secondaryWindowManager != null && secondaryFloatingView != null) {
             try {
                 secondaryWindowManager.removeView(secondaryFloatingView);
@@ -1356,6 +1536,7 @@ public class BlindSpotService extends Service {
             secondaryFloatingView = null;
             secondaryTextureView = null;
             secondaryBorderView = null;
+            secondaryArrowView = null;
             secondaryWindowManager = null;
         }
         if (secondaryCachedSurface != null) {

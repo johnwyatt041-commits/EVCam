@@ -97,8 +97,8 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
 
         turnSignalArrowView = findViewById(R.id.turn_signal_arrow_view);
 
-        // 统一使用转向灯补盲的旋转设置，与转向灯触发时保持一致
-        currentRotation = appConfig.getTurnSignalFloatingRotation();
+        // 初始化主屏当前摄像头旋转角
+        currentRotation = appConfig.getBlindSpotScreenCameraRotation(BlindSpotPlacement.SCREEN_MAIN, cameraPos);
         applyTransformNow();
 
         if (isSetupMode) {
@@ -113,16 +113,20 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
                 }
                 int[] screenSize = BlindSpotDisplayUtils.getMainScreenSizePx(getContext());
                 String slot = resolveActivePlacementSlot();
-                appConfig.setBlindSpotPlacement(
+                appConfig.setBlindSpotScreenPlacement(
+                        BlindSpotPlacement.SCREEN_MAIN,
                         slot,
-                        BlindSpotPlacement.fromPixels(params.x, params.y, saveW, saveH, screenSize[0], screenSize[1])
+                        BlindSpotPlacement.fromPixels(params.x, params.y, saveW, saveH, screenSize[0], screenSize[1]),
+                        screenSize[0],
+                        screenSize[1]
                 );
                 appConfig.setTurnSignalFloatingBounds(params.x, params.y, saveW, saveH);
-                appConfig.setTurnSignalFloatingRotation(currentRotation);
+                appConfig.setBlindSpotScreenCameraRotation(BlindSpotPlacement.SCREEN_MAIN, cameraPos, currentRotation);
                 dismiss();
             });
             rotateButton.setOnClickListener(v -> {
                 currentRotation = (currentRotation + 90) % 360;
+                appConfig.setBlindSpotScreenCameraRotation(BlindSpotPlacement.SCREEN_MAIN, cameraPos, currentRotation);
                 applyTransformNow();
             });
         }
@@ -341,7 +345,7 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
      */
     public void setCameraPos(String cameraPos) {
         this.cameraPos = cameraPos;
-        currentRotation = appConfig.getTurnSignalFloatingRotation();
+        currentRotation = appConfig.getBlindSpotScreenCameraRotation(BlindSpotPlacement.SCREEN_MAIN, cameraPos);
         AppLog.d(TAG, "setCameraPos: camera=" + cameraPos + ", rotation=" + currentRotation);
         updateBoundsFromPlacement();
     }
@@ -497,8 +501,13 @@ public class BlindSpotFloatingWindowView extends FrameLayout {
             }
         }
 
-        BlindSpotCorrection.apply(textureView, appConfig,
-                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT, cameraPos, currentRotation, isCurrentlySwapped);
+        BlindSpotCorrection.applyForScreen(
+                textureView,
+                appConfig,
+                BlindSpotPlacement.SCREEN_MAIN,
+                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT,
+                cameraPos,
+                0);
     }
 
     /**

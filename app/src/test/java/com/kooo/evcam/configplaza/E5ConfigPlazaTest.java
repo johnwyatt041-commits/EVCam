@@ -259,6 +259,50 @@ public class E5ConfigPlazaTest {
         assertFalse(res.success);
     }
 
+    @Test
+    public void acceptsModeEPreviewAndValidatesModeEPanes() throws Exception {
+        JsonObject base = loadBalancedPresetJson();
+        base.getAsJsonObject("sections")
+                .getAsJsonObject("appearance")
+                .getAsJsonObject("values")
+                .addProperty("preview_mode", AppConfig.PREVIEW_MODE_E);
+
+        JsonArray validModeEPanes = new JsonArray();
+        // LEFT [0, 0, 0.45, 1], FRONT [0, 0, 0.45, 1], BACK [0.45, 0, 0.55, 1], RIGHT [0.45, 0, 0.55, 1]
+        float[] rects = {
+                0f, 0f, 0.45f, 1f,
+                0f, 0f, 0.45f, 1f,
+                0.45f, 0f, 0.55f, 1f,
+                0.45f, 0f, 0.55f, 1f
+        };
+        for (float v : rects) {
+            validModeEPanes.add(v);
+        }
+        base.getAsJsonObject("sections")
+                .getAsJsonObject("camera_mapping")
+                .getAsJsonObject("values")
+                .add("mode_e_panes", validModeEPanes);
+
+        E5ConfigSchema.ValidationResult okRes = E5ConfigSchema.validateJsonObject(base);
+        assertTrue(okRes.errorMessage, okRes.valid && okRes.snapshot != null);
+        assertEquals(AppConfig.PREVIEW_MODE_E,
+                okRes.snapshot.getSection(E5ConfigSection.APPEARANCE).values.get("preview_mode"));
+
+        JsonObject badModeE = base.deepCopy();
+        JsonArray badPanes = new JsonArray();
+        for (int i = 0; i < 4; i++) {
+            badPanes.add(0f);
+            badPanes.add(0f);
+            badPanes.add(0.10f); // < 0.18 MIN_SIZE
+            badPanes.add(1f);
+        }
+        badModeE.getAsJsonObject("sections")
+                .getAsJsonObject("camera_mapping")
+                .getAsJsonObject("values")
+                .add("mode_e_panes", badPanes);
+        assertFalse(E5ConfigSchema.validateJsonObject(badModeE).valid);
+    }
+
     private static File locatePresetAssetsDir() {
         File candidate1 = new File("src/main/assets/config-plaza/e5-presets");
         if (candidate1.isDirectory()) {

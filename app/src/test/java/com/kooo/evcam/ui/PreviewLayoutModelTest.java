@@ -185,4 +185,46 @@ public class PreviewLayoutModelTest {
         model.resizePaneWithCollision(PreviewLayoutModel.LEFT, 0.9f, 1f, active);
         assertFalse(PreviewLayoutModel.hasAnyOverlap(panes, active));
     }
+
+    @Test public void modeEDefaultIsFiftyFiftySidesHidingFrontBackAndResolvesOverlap() {
+        PreviewLayoutModel model = new PreviewLayoutModel(PreviewLayoutModel.PRESET_MODE_E_SIDES);
+        PreviewLayoutModel.EffectiveLayout eff = model.computeEffectiveModeE();
+        assertTrue(eff.visible[PreviewLayoutModel.LEFT]);
+        assertTrue(eff.visible[PreviewLayoutModel.RIGHT]);
+        assertFalse(eff.visible[PreviewLayoutModel.FRONT]);
+        assertFalse(eff.visible[PreviewLayoutModel.BACK]);
+        assertEquals(0f, eff.panes[PreviewLayoutModel.LEFT].x, EPSILON);
+        assertEquals(0f, eff.panes[PreviewLayoutModel.LEFT].y, EPSILON);
+        assertEquals(0.5f, eff.panes[PreviewLayoutModel.LEFT].width, EPSILON);
+        assertEquals(1f, eff.panes[PreviewLayoutModel.LEFT].height, EPSILON);
+        assertEquals(0.5f, eff.panes[PreviewLayoutModel.RIGHT].x, EPSILON);
+        assertEquals(0f, eff.panes[PreviewLayoutModel.RIGHT].y, EPSILON);
+        assertEquals(0.5f, eff.panes[PreviewLayoutModel.RIGHT].width, EPSILON);
+        assertEquals(1f, eff.panes[PreviewLayoutModel.RIGHT].height, EPSILON);
+
+        // Custom split widths without overlap are preserved verbatim.
+        model.resize(PreviewLayoutModel.LEFT, 0.35f, 1f);
+        model.move(PreviewLayoutModel.RIGHT, 0.35f, 0f);
+        model.resize(PreviewLayoutModel.RIGHT, 0.65f, 1f);
+        PreviewLayoutModel.EffectiveLayout custom = model.computeEffectiveModeE();
+        assertEquals(0.35f, custom.panes[PreviewLayoutModel.LEFT].width, EPSILON);
+        assertEquals(0.35f, custom.panes[PreviewLayoutModel.RIGHT].x, EPSILON);
+        assertEquals(0.65f, custom.panes[PreviewLayoutModel.RIGHT].width, EPSILON);
+
+        // Snapshot/restore round-trip works for MODE_E preset.
+        PreviewLayoutModel loaded = new PreviewLayoutModel();
+        assertTrue(loaded.restore(model.snapshot()));
+        assertArrayEquals(model.snapshot(), loaded.snapshot(), EPSILON);
+
+        // Overlapping LEFT & RIGHT panes auto-reflow without overlap while preserving order.
+        model.move(PreviewLayoutModel.LEFT, 0.60f, 0f);
+        model.resize(PreviewLayoutModel.LEFT, 0.40f, 1f);
+        model.move(PreviewLayoutModel.RIGHT, 0.10f, 0f);
+        model.resize(PreviewLayoutModel.RIGHT, 0.60f, 1f);
+        PreviewLayoutModel.EffectiveLayout resolved = model.computeEffectiveModeE();
+        boolean[] mask = {true, false, false, true};
+        assertFalse(PreviewLayoutModel.hasAnyOverlap(resolved.panes, mask));
+        assertTrue(resolved.panes[PreviewLayoutModel.RIGHT].x < resolved.panes[PreviewLayoutModel.LEFT].x);
+        assertEquals(0.40f, resolved.panes[PreviewLayoutModel.LEFT].width, EPSILON);
+    }
 }

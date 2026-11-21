@@ -276,4 +276,173 @@ public class VehicleRuleEngineTest {
         assertEquals(1, slowed.size());
         assertEquals(RuleAction.ENABLE_GUIDANCE, slowed.get(0).action);
     }
+
+    @Test
+    public void suppressedExpiredDelayedStartClearsPendingDueTimerAndReFiresWhenSuppressionClears() {
+        VehicleTriggerRule doorExit = new VehicleTriggerRule(
+                "r_door_exit",
+                "开门退出",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.DOOR_FL, RuleComparison.EQUALS, 1),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.EXIT_APP
+        );
+        VehicleTriggerRule delayedStart = new VehicleTriggerRule(
+                "r_delayed_start",
+                "挂 D 档延迟 3 秒录制",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_DRIVE),
+                null,
+                ConditionLogic.AND,
+                3,
+                RuleAction.START
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(doorExit, delayedStart));
+
+        // 1000ms：开着主驾门挂 D 档，立即触发 EXIT_APP，START 进入 3 秒倒计时
+        List<VehicleRuleEngine.TriggerEvent> initial = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 0, 1, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(1, initial.size());
+        assertEquals(RuleAction.EXIT_APP, initial.get(0).action);
+        assertEquals(3000L, engine.getNextDelayDueMs(1000L));
+
+        // 4000ms：门仍未关，delayedStart 已到期但被 EXIT_APP 压制
+        assertTrue(engine.tickAll(4000L).isEmpty());
+        // 关键：不能再返回 0，必须返回 -1，避免 20ms 忙等循环
+        assertEquals(-1L, engine.getNextDelayDueMs(4000L));
+
+        // 车速等无关变化或持续 tick 期间依然保持 -1，直到门关闭
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 1, 1, 0, 0, 0, 0, 0), 4500L).isEmpty());
+        assertEquals(-1L, engine.getNextDelayDueMs(4500L));
+
+        // 关门后门锁解除压制，由于已满 3 秒立即恢复触发 START
+        List<VehicleRuleEngine.TriggerEvent> recovered = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 5, 0, 0, 0, 0, 0, 0), 5000L);
+        assertEquals(1, recovered.size());
+        assertEquals(RuleAction.START, recovered.get(0).action);
+        assertEquals(-1L, engine.getNextDelayDueMs(5000L));
+    }
+
+    @Test
+    public void higherPriorityDelayedRuleSuppressesLowerPriorityDelayedRuleWithoutBusyLoop() {
+        VehicleTriggerRule delayedStop3s = new VehicleTriggerRule(
+                "r_stop_3s",
+                "停车3秒停录",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                3,
+                RuleAction.STOP
+        );
+        VehicleTriggerRule delayedRelease5s = new VehicleTriggerRule(
+                "r_release_5s",
+                "停车5秒释放",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                5,
+                RuleAction.STOP_RELEASE
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(delayedStop3s, delayedRelease5s));
+
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 1000L).isEmpty());
+        assertEquals(3000L, engine.getNextDelayDueMs(1000L));
+
+        // 4000ms：STOP 到期先触发，此时还剩 STOP_RELEASE 在 6000ms 到期（2000ms 后）
+        List<VehicleRuleEngine.TriggerEvent> at4s = engine.tickAll(4000L);
+        assertEquals(1, at4s.size());
+        assertEquals(RuleAction.STOP, at4s.get(0).action);
+        assertEquals(2000L, engine.getNextDelayDueMs(4000L));
+
+        // 6000ms：STOP_RELEASE 胜出并把 STOP 的 fired 清除；STOP 虽未 fired 且已到期，但已被压制，不得再唤醒 20ms 轮询
+        List<VehicleRuleEngine.TriggerEvent> at6s = engine.tickAll(6000L);
+        assertEquals(1, at6s.size());
+        assertEquals(RuleAction.STOP_RELEASE, at6s.get(0).action);
+        assertEquals(-1L, engine.getNextDelayDueMs(6000L));
+    }
+
+    @Test
+    public void equalPriorityExpiredDelayedRulesDoNotSpinDelayScheduler() {
+        VehicleTriggerRule stopA = new VehicleTriggerRule(
+                "r_stop_a",
+                "规则A",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                2,
+                RuleAction.STOP
+        );
+        VehicleTriggerRule stopB = new VehicleTriggerRule(
+                "r_stop_b",
+                "规则B",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.SPEED, RuleComparison.EQUALS, 0),
+                null,
+                ConditionLogic.AND,
+                2,
+                RuleAction.STOP
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(stopA, stopB));
+
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 1000L).isEmpty());
+        assertEquals(2000L, engine.getNextDelayDueMs(1000L));
+
+        List<VehicleRuleEngine.TriggerEvent> at3s = engine.tickAll(3000L);
+        assertEquals(1, at3s.size());
+        assertEquals(RuleAction.STOP, at3s.get(0).action);
+        assertEquals(-1L, engine.getNextDelayDueMs(3000L));
+    }
+
+    @Test
+    public void guidanceGroupSuppressedExpiredDelayClearsTimerUntilUnblocked() {
+        VehicleTriggerRule delayedEnable = new VehicleTriggerRule(
+                "r_guide_enable_2s",
+                "低速2秒开引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.SPEED, RuleComparison.LESS_THAN, 30),
+                null,
+                ConditionLogic.AND,
+                2,
+                RuleAction.ENABLE_GUIDANCE
+        );
+        VehicleTriggerRule highGearDisable = new VehicleTriggerRule(
+                "r_guide_disable_park",
+                "P档关引导线",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                0,
+                RuleAction.DISABLE_GUIDANCE
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(delayedEnable, highGearDisable));
+
+        List<VehicleRuleEngine.TriggerEvent> first = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(1, first.size());
+        assertEquals(RuleAction.DISABLE_GUIDANCE, first.get(0).action);
+        assertEquals(2000L, engine.getNextDelayDueMs(1000L));
+
+        assertTrue(engine.tickAll(3000L).isEmpty());
+        assertEquals(-1L, engine.getNextDelayDueMs(3000L));
+
+        // 切出 P 档后，被压制的 ENABLE_GUIDANCE 立即生效
+        List<VehicleRuleEngine.TriggerEvent> drive = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 10, 0, 0, 0, 0, 0, 0), 3500L);
+        assertEquals(1, drive.size());
+        assertEquals(RuleAction.ENABLE_GUIDANCE, drive.get(0).action);
+        assertEquals(-1L, engine.getNextDelayDueMs(3500L));
+    }
 }

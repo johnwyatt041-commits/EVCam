@@ -53,6 +53,7 @@ public class AppearanceSettingsFragment extends Fragment
     private Button btnDefaultModeB;
     private Button btnDefaultModeC;
     private Button btnDefaultModeD;
+    private Button btnDefaultModeE;
     private Button btnPresentationSidebar;
     private Button btnPresentationFullscreen;
     private Button btnPresentationWindow;
@@ -100,6 +101,7 @@ public class AppearanceSettingsFragment extends Fragment
         btnDefaultModeB = view.findViewById(R.id.btn_default_mode_b);
         btnDefaultModeC = view.findViewById(R.id.btn_default_mode_c);
         btnDefaultModeD = view.findViewById(R.id.btn_default_mode_d);
+        btnDefaultModeE = view.findViewById(R.id.btn_default_mode_e);
         btnPresentationSidebar = view.findViewById(R.id.btn_presentation_sidebar);
         btnPresentationFullscreen = view.findViewById(R.id.btn_presentation_fullscreen);
         btnPresentationWindow = view.findViewById(R.id.btn_presentation_window);
@@ -146,6 +148,9 @@ public class AppearanceSettingsFragment extends Fragment
         }
         if (btnDefaultModeD != null) {
             btnDefaultModeD.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_D));
+        }
+        if (btnDefaultModeE != null) {
+            btnDefaultModeE.setOnClickListener(v -> selectDefaultPreviewMode(AppConfig.PREVIEW_MODE_E));
         }
         if (btnPresentationSidebar != null) {
             btnPresentationSidebar.setOnClickListener(v -> selectPreviewPresentation(PreviewPresentation.SIDEBAR));
@@ -415,6 +420,7 @@ public class AppearanceSettingsFragment extends Fragment
         applyOptionButtonState(btnDefaultModeB, context, AppConfig.PREVIEW_MODE_B.equals(previewMode));
         applyOptionButtonState(btnDefaultModeC, context, AppConfig.PREVIEW_MODE_C.equals(previewMode));
         applyOptionButtonState(btnDefaultModeD, context, AppConfig.PREVIEW_MODE_D.equals(previewMode));
+        applyOptionButtonState(btnDefaultModeE, context, AppConfig.PREVIEW_MODE_E.equals(previewMode));
 
         if (viewShortcutsSwitch != null && appConfig != null) {
             suppressShortcutListener = true;
@@ -466,6 +472,9 @@ public class AppearanceSettingsFragment extends Fragment
         }
         if (AppConfig.PREVIEW_MODE_D.equals(previewMode)) {
             return "模式 D（双视转向联动）";
+        }
+        if (AppConfig.PREVIEW_MODE_E.equals(previewMode)) {
+            return "左右 E（左/右双摄并排）";
         }
         return "分栏 B（三列分屏）";
     }

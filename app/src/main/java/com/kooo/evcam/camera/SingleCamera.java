@@ -140,8 +140,36 @@ public class SingleCamera {
     private boolean isPendingReconfiguration = false; // 新增：标记是否有待处理的配置请求
     private boolean isSessionClosing = false; // 新增：标记 Session 是否正在关闭中
     private int configFailRetryCount = 0; // session 配置失败重试计数
+    private int configExhaustedReopenCount = 0; // session 重试耗尽后 forceReopen 次数上限保护
     private static final int MAX_CONFIG_FAIL_RETRIES = 3; // 最大重试次数
     private final Object sessionLock = new Object(); // 新增：用于同步 Session 操作
+
+    private void resetSessionFlagsLocked() {
+        synchronized (sessionLock) {
+            isConfiguring = false;
+            isSessionClosing = false;
+            isPendingReconfiguration = false;
+        }
+    }
+
+    private void cleanupSessionStateBeforeDeviceReset() {
+        stopHealthMonitor();
+        if (backgroundHandler != null) {
+            backgroundHandler.removeCallbacks(recreateSessionRunnable);
+            backgroundHandler.removeCallbacks(sessionCloseFallbackRunnable);
+        }
+        if (captureSession != null) {
+            try {
+                captureSession.close();
+            } catch (Exception e) {
+                AppLog.d(TAG, "Camera " + cameraId + " ignored exception during session close: " + e.getMessage());
+            }
+            captureSession = null;
+        }
+        activePreviewConfig = null;
+        currentRequestBuilder = null;
+        resetSessionFlagsLocked();
+    }
 
     // 相机打开后的一次性回调（用于副屏等待相机就绪后立即绑定 Surface）
     private final java.util.List<Runnable> onCameraOpenedCallbacks = new java.util.ArrayList<>();
@@ -205,6 +233,40 @@ public class SingleCamera {
     void triggerOnOpenedForTest(CameraDevice device) {
         long gen = currentOpenGeneration();
         buildStateCallback(gen).onOpened(device);
+    }
+
+    void triggerOnDisconnectedForTest(CameraDevice device) {
+        long gen = currentOpenGeneration();
+        buildStateCallback(gen).onDisconnected(device);
+    }
+
+    void setSessionFlagsForTest(boolean configuring, boolean closing) {
+        synchronized (sessionLock) {
+            this.isConfiguring = configuring;
+            this.isSessionClosing = closing;
+        }
+    }
+
+    void triggerSessionCloseFallbackForTest() {
+        createCameraPreviewSessionIfClosePending();
+    }
+
+    boolean isConfiguringOrClosingForTest() {
+        synchronized (sessionLock) {
+            return isConfiguring || isSessionClosing;
+        }
+    }
+
+    public boolean hasActiveCaptureSession() {
+        return captureSession != null;
+    }
+
+    public boolean hasActiveRecordSurface() {
+        return isValidSurface(recordSurface);
+    }
+
+    public boolean isOpeningOrReconnecting() {
+        return isOpening || isReconnecting;
     }
 
     public void setCallback(CameraCallback callback) {
@@ -569,6 +631,12 @@ public class SingleCamera {
      * 解绑时先停推帧再动态移除，确保退出模式 A 零残留且不触发 Surface abandoned。
      */
     public void setSurroundPreviewSurface(Surface surface, android.graphics.SurfaceTexture surfaceTexture) {
+        setSurroundPreviewSurface(surface, surfaceTexture, false);
+    }
+
+    public void setSurroundPreviewSurface(Surface surface,
+                                          android.graphics.SurfaceTexture surfaceTexture,
+                                          boolean disableMainPreview) {
         final Surface oldSurface = this.surroundPreviewSurface;
         boolean changed = (oldSurface != null) != (surface != null)
                 || (oldSurface != null && !oldSurface.equals(surface));
@@ -580,6 +648,12 @@ public class SingleCamera {
                 AppLog.w(TAG, "Camera " + cameraId + " surround preview surface invalid");
                 return;
             }
+            boolean disabledMainNow = false;
+            if (disableMainPreview && mainPreviewEnabled) {
+                mainPreviewEnabled = false;
+                mainPreviewChanged = true;
+                disabledMainNow = true;
+            }
             if (surfaceTexture != null && previewSize != null) {
                 try {
                     surfaceTexture.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
@@ -589,15 +663,18 @@ public class SingleCamera {
             if (!isConnected()) {
                 openCamera();
             }
-            if (!changed && isConnected() && captureSession != null && activePreviewConfig != null) {
+            if (!changed && !disabledMainNow && !mainPreviewChanged
+                    && isConnected() && captureSession != null && activePreviewConfig != null) {
                 java.util.List<Surface> currentSurfaces = activePreviewConfig.getSurfaces();
                 if (currentSurfaces != null && currentSurfaces.contains(surface)) {
                     AppLog.d(TAG, "Camera " + cameraId + " surround preview surface unchanged and active, skip re-add");
                     return;
                 }
             }
-            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface);
-            if (backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
+            AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface
+                    + (disabledMainNow ? " (mainPreview disabled atomically)" : ""));
+            if (!disabledMainNow && !mainPreviewChanged
+                    && backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
                 backgroundHandler.removeCallbacks(recreateSessionRunnable);
                 backgroundHandler.post(() -> {
                     if (surroundPreviewSurface == surface && surface.isValid()) {
@@ -1448,6 +1525,7 @@ public class SingleCamera {
                         return;
                     }
                     isOpening = false;
+                    cleanupSessionStateBeforeDeviceReset();
                     try {
                         camera.close();
                     } catch (Exception e) {
@@ -1486,6 +1564,7 @@ public class SingleCamera {
                         return;
                     }
                     isOpening = false;
+                    cleanupSessionStateBeforeDeviceReset();
                     try {
                         camera.close();
                     } catch (Exception e) {
@@ -1613,9 +1692,10 @@ public class SingleCamera {
                     }
                 }
 
-                // 通过 onClosed 回调触发重建；设置 300ms 安全兜底
+                // 通过 onClosed 回调触发重建；设置 400ms 安全兜底（移除旧回调防重复排队）
                 if (backgroundHandler != null) {
-                    backgroundHandler.postDelayed(sessionCloseFallbackRunnable, 300);
+                    backgroundHandler.removeCallbacks(sessionCloseFallbackRunnable);
+                    backgroundHandler.postDelayed(sessionCloseFallbackRunnable, 400);
                 }
                 synchronized (sessionLock) {
                     isConfiguring = false;
@@ -1873,6 +1953,10 @@ public class SingleCamera {
 
             if (outputConfigs.isEmpty()) {
                 AppLog.w(TAG, "Camera " + cameraId + " No valid surfaces for session, skipping configuration");
+                synchronized (sessionLock) {
+                    isConfiguring = false;
+                    isSessionClosing = false;
+                }
                 if (captureSession != null) {
                     try {
                         captureSession.close();
@@ -1880,6 +1964,8 @@ public class SingleCamera {
                     }
                     captureSession = null;
                 }
+                activePreviewConfig = null;
+                currentRequestBuilder = null;
                 return;
             }
 
@@ -1911,6 +1997,7 @@ public class SingleCamera {
                     }
                     AppLog.d(TAG, "Camera " + cameraId + " Session configured!");
                     configFailRetryCount = 0; // 成功，重置重试计数
+                    configExhaustedReopenCount = 0;
                     
                     boolean pending;
                     synchronized (sessionLock) {
@@ -1961,8 +2048,18 @@ public class SingleCamera {
                         if (callback != null) callback.onCameraConfigured(cameraId);
                     } catch (CameraAccessException e) {
                         AppLog.e(TAG, "Failed to start preview", e);
+                        captureSession = null;
+                        activePreviewConfig = null;
+                        if (cameraDevice != null && hasActiveOutputs()) {
+                            recreateSession(true);
+                        }
                     } catch (IllegalStateException e) {
                         AppLog.w(TAG, "Session closed: " + e.getMessage());
+                        captureSession = null;
+                        activePreviewConfig = null;
+                        if (cameraDevice != null && hasActiveOutputs()) {
+                            recreateSession(true);
+                        }
                     } catch (IllegalArgumentException e) {
                         AppLog.e(TAG, "Capture request rejected for camera " + cameraId, e);
                         if (callback != null) callback.onCameraError(cameraId,-3);
@@ -2028,8 +2125,8 @@ public class SingleCamera {
                                 }, 200);
                             }
                         } else {
-                            // 重试耗尽，丢弃副屏 Surface 后尝试只用主 Surface
-                            AppLog.e(TAG, "Camera " + cameraId + " config retries exhausted (" + configFailRetryCount + "), dropping secondary display surface");
+                            // 重试耗尽，丢弃副屏 Surface 后尝试只用主 Surface；无副屏时触发延迟 forceReopen 恢复 HAL
+                            AppLog.e(TAG, "Camera " + cameraId + " config retries exhausted (" + configFailRetryCount + "), handling fallback");
                             configFailRetryCount = 0;
                             if (secondaryDisplaySurface != null) {
                                 secondaryDisplaySurface = null;
@@ -2038,6 +2135,14 @@ public class SingleCamera {
                                         if (cameraDevice != null) createCameraPreviewSession();
                                     }, 100);
                                 }
+                            } else if (hasActiveOutputs() && configExhaustedReopenCount < 3 && backgroundHandler != null) {
+                                configExhaustedReopenCount++;
+                                AppLog.w(TAG, "Camera " + cameraId + " config retries exhausted with active outputs, scheduling forceReopen (" + configExhaustedReopenCount + "/3)");
+                                backgroundHandler.postDelayed(() -> {
+                                    if (hasActiveOutputs() && (cameraDevice != null || shouldReconnect)) {
+                                        forceReopen();
+                                    }
+                                }, 800);
                             }
                         }
                         if (callback != null) {
@@ -2141,17 +2246,21 @@ public class SingleCamera {
     }
 
     /**
-     * 安全兜底：如果 CLOSED 回调未触发，300ms 后检查并重建
+     * 安全兜底：如果 CLOSED 回调超时未到达，清除卡死的关闭标志并尝试重建
      */
     private void createCameraPreviewSessionIfClosePending() {
+        boolean timedOutClosing;
         synchronized (sessionLock) {
-            if (isSessionClosing) {
-                // 回调还没来，继续等
-                return;
+            timedOutClosing = isSessionClosing;
+            if (timedOutClosing) {
+                isSessionClosing = false;
+                isConfiguring = false;
             }
         }
-        // CLOSED 回调已经来过但没触发重建（理论上不该到这），或回调丢失，兜底重建
-        if (cameraDevice != null && captureSession == null) {
+        if (timedOutClosing) {
+            AppLog.w(TAG, "Camera " + cameraId + " session onClosed timed out, forcing session rebuild");
+        }
+        if (cameraDevice != null && captureSession == null && hasActiveOutputs()) {
             AppLog.d(TAG, "Camera " + cameraId + " session close fallback triggered");
             createCameraPreviewSession();
         }
@@ -2330,9 +2439,12 @@ public class SingleCamera {
             // 1. 添加到共享 OutputConfiguration
             activePreviewConfig.addSurface(surface);
 
-            // 2. 通知 Session 配置变更
-            captureSession.finalizeOutputConfigurations(
-                    java.util.Collections.singletonList(activePreviewConfig));
+            // 2. 通知已配置的 Session 动态更新 OutputConfiguration (API 28+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                captureSession.updateOutputConfiguration(activePreviewConfig);
+            } else {
+                throw new UnsupportedOperationException("updateOutputConfiguration requires API 28+");
+            }
 
             // 3. 将新 Surface 加入 CaptureRequest 目标
             currentRequestBuilder.addTarget(surface);
@@ -2369,9 +2481,12 @@ public class SingleCamera {
             // 2. 从共享 OutputConfiguration 移除
             activePreviewConfig.removeSurface(surface);
 
-            // 3. 通知 Session 配置变更
-            captureSession.finalizeOutputConfigurations(
-                    java.util.Collections.singletonList(activePreviewConfig));
+            // 3. 通知已配置的 Session 动态更新 OutputConfiguration (API 28+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                captureSession.updateOutputConfiguration(activePreviewConfig);
+            } else {
+                throw new UnsupportedOperationException("updateOutputConfiguration requires API 28+");
+            }
 
             // 4. 恢复 repeating request（仅包含剩余 Surface）
             captureSession.setRepeatingRequest(
@@ -3197,6 +3312,7 @@ public class SingleCamera {
             
             // 重置状态
             reconnectAttempts = 0;
+            configFailRetryCount = 0;
             shouldReconnect = true;
             isReconnecting = false;
             isOpening = true;
@@ -3206,18 +3322,10 @@ public class SingleCamera {
                 activeOpenGeneration = openGen;
             }
             
+            cleanupSessionStateBeforeDeviceReset();
+
             // 关闭现有连接
             if (cameraDevice != null) {
-                try {
-                    if (captureSession != null) {
-                        captureSession.close();
-                        captureSession = null;
-                    }
-                } catch (Exception e) {
-                    // 忽略关闭异常
-                    AppLog.d(TAG, "Camera " + cameraId + " ignored exception during session close: " + e.getMessage());
-                }
-                
                 try {
                     cameraDevice.close();
                     cameraDevice = null;

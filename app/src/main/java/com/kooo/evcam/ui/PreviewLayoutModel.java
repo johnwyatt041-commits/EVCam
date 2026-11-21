@@ -19,6 +19,7 @@ public final class PreviewLayoutModel {
     public static final int PRESET_MODE_C_FRONT = 4;
     public static final int PRESET_MODE_C_BACK = 5;
     public static final int PRESET_MODE_D_DUAL = 6;
+    public static final int PRESET_MODE_E_SIDES = 7;
 
     public static final float MODE_C_DEFAULT_MAIN_WIDTH = 0.64f;
     public static final float MODE_C_DEFAULT_SIDE_WIDTH = 0.18f;
@@ -94,6 +95,11 @@ public final class PreviewLayoutModel {
             panes[BACK].set(0f, 0f, .50f, 1f);
             panes[LEFT].set(.50f, 0f, .50f, 1f);
             panes[RIGHT].set(.50f, 0f, .50f, 1f);
+        } else if (preset == PRESET_MODE_E_SIDES) {
+            panes[LEFT].set(0f, 0f, .50f, 1f);
+            panes[RIGHT].set(.50f, 0f, .50f, 1f);
+            panes[FRONT].set(0f, 0f, .50f, 1f);
+            panes[BACK].set(.50f, 0f, .50f, 1f);
         } else {
             panes[LEFT].set(0f, 0f, .3f, 1f);
             panes[RIGHT].set(.7f, 0f, .3f, 1f);
@@ -660,6 +666,43 @@ public final class PreviewLayoutModel {
                 out.panes[activeMain].width, out.panes[activeMain].height);
         out.panes[inactiveSide].set(out.panes[activeSide].x, out.panes[activeSide].y,
                 out.panes[activeSide].width, out.panes[activeSide].height);
+        return out;
+    }
+
+    /**
+     * 计算模式 E（左侧左摄像头 + 右侧右摄像头）的有效排版。
+     * 强制隐藏前摄与后摄以便释放对应预览流，并保证左/右活跃画框互不重叠。
+     */
+    public EffectiveLayout computeEffectiveModeE() {
+        EffectiveLayout out = new EffectiveLayout();
+        out.visible[LEFT] = true;
+        out.visible[RIGHT] = true;
+        out.visible[FRONT] = false;
+        out.visible[BACK] = false;
+
+        Pane leftRect = panes[LEFT];
+        Pane rightRect = panes[RIGHT];
+        out.panes[LEFT].set(leftRect.x, leftRect.y, leftRect.width, leftRect.height);
+        out.panes[RIGHT].set(rightRect.x, rightRect.y, rightRect.width, rightRect.height);
+
+        boolean[] mask = new boolean[PANE_COUNT];
+        mask[LEFT] = true;
+        mask[RIGHT] = true;
+        if (hasAnyOverlap(out.panes, mask)) {
+            float lw = clamp(leftRect.width, MIN_SIZE, 1f - MIN_SIZE);
+            boolean leftOnRight = leftRect.x > rightRect.x;
+            if (leftOnRight) {
+                out.panes[RIGHT].set(0f, 0f, 1f - lw, 1f);
+                out.panes[LEFT].set(1f - lw, 0f, lw, 1f);
+            } else {
+                out.panes[LEFT].set(0f, 0f, lw, 1f);
+                out.panes[RIGHT].set(lw, 0f, 1f - lw, 1f);
+            }
+        }
+        out.panes[FRONT].set(out.panes[LEFT].x, out.panes[LEFT].y,
+                out.panes[LEFT].width, out.panes[LEFT].height);
+        out.panes[BACK].set(out.panes[RIGHT].x, out.panes[RIGHT].y,
+                out.panes[RIGHT].width, out.panes[RIGHT].height);
         return out;
     }
 

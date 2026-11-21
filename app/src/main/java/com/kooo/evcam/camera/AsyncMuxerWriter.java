@@ -180,22 +180,37 @@ final class AsyncMuxerWriter {
         MediaMuxer muxer;
         int track;
         boolean started;
-        FileSink(String path) { target = new File(path); pending = new File(path + ".pending"); }
+        FileSink(String path) {
+            target = new File(path);
+            pending = new File(path + ".pending");
+            ActiveRecordingRegistry.register(pending);
+        }
         @Override public void start(MediaFormat format) throws IOException {
-            if (target.exists() || pending.exists()) throw new IOException("Refusing to overwrite video: " + target);
-            muxer = new MediaMuxer(pending.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
-            track = muxer.addTrack(format);
-            muxer.start();
-            started = true;
+            try {
+                if (target.exists() || pending.exists()) throw new IOException("Refusing to overwrite video: " + target);
+                muxer = new MediaMuxer(pending.getAbsolutePath(), MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4);
+                track = muxer.addTrack(format);
+                muxer.start();
+                started = true;
+            } catch (IOException | RuntimeException e) {
+                if (!started) {
+                    ActiveRecordingRegistry.unregister(pending);
+                }
+                throw e;
+            }
         }
         @Override public void write(ByteBuffer data, MediaCodec.BufferInfo info) {
             if (!started) throw new IllegalStateException("Muxer has not started");
             muxer.writeSampleData(track, data, info);
         }
         @Override public void finish(boolean publish) throws IOException {
-            try { if (started) muxer.stop(); }
-            finally { if (muxer != null) muxer.release(); }
-            if (publish && started && !pending.renameTo(target)) throw new IOException("Cannot publish completed video: " + target);
+            try {
+                try { if (started) muxer.stop(); }
+                finally { if (muxer != null) muxer.release(); }
+                if (publish && started && !pending.renameTo(target)) throw new IOException("Cannot publish completed video: " + target);
+            } finally {
+                ActiveRecordingRegistry.unregister(pending);
+            }
         }
     }
 }

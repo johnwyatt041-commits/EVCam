@@ -34,6 +34,7 @@ public final class VehicleRuleEngine {
         boolean matching;
         long matchStartMs;
         boolean fired;
+        boolean suppressed;
     }
 
     private List<VehicleTriggerRule> rules = Collections.emptyList();
@@ -82,6 +83,7 @@ public final class VehicleRuleEngine {
             if (!rule.enabled) {
                 runtime.matching = false;
                 runtime.fired = false;
+                runtime.suppressed = false;
                 continue;
             }
 
@@ -89,6 +91,7 @@ public final class VehicleRuleEngine {
             if (!matched) {
                 runtime.matching = false;
                 runtime.fired = false;
+                runtime.suppressed = false;
                 continue;
             }
 
@@ -97,6 +100,7 @@ public final class VehicleRuleEngine {
                 runtime.matchStartMs = nowMs;
                 runtime.fired = false;
             }
+            runtime.suppressed = false;
 
             long requiredMs = rule.delaySeconds * 1000L;
             if (nowMs - runtime.matchStartMs >= requiredMs) {
@@ -144,8 +148,9 @@ public final class VehicleRuleEngine {
             if (group == ActionGroup.RECORDING && hasStopOrExitEligible && candidate.action == RuleAction.START) {
                 RuleRuntime startRuntime = runtimes.get(candidate.id);
                 if (startRuntime != null) {
-                    // 被压制期间清除 fired，待退出条件消失若仍在 D 挡可恢复边沿重评
+                    // 被压制期间清除 fired，并标记 suppressed 避免已到期的延迟规则反复唤醒 20ms 轮询
                     startRuntime.fired = false;
+                    startRuntime.suppressed = true;
                 }
                 continue;
             }
@@ -156,12 +161,19 @@ public final class VehicleRuleEngine {
         if (winner == null) {
             return null;
         }
-        // 同域内高优先级胜出时，重置被压制的低优先级规则 fired 标记，确保高优先级条件解除后可恢复边沿重评
+        RuleRuntime winnerRuntime = runtimes.get(winner.id);
+        if (winnerRuntime != null) {
+            winnerRuntime.suppressed = false;
+        }
+        // 同域内胜出时，标记其余到期候选为 suppressed 避免每 20ms 重复调度；高优先级胜出时重置低优先级 fired 标记以便后续重触发
         for (VehicleTriggerRule candidate : bucket) {
-            if (candidate != winner && candidate.action.priority < winner.action.priority) {
+            if (candidate != winner) {
                 RuleRuntime suppressed = runtimes.get(candidate.id);
                 if (suppressed != null) {
-                    suppressed.fired = false;
+                    suppressed.suppressed = true;
+                    if (candidate.action.priority < winner.action.priority) {
+                        suppressed.fired = false;
+                    }
                 }
             }
         }
@@ -218,7 +230,7 @@ public final class VehicleRuleEngine {
                 continue;
             }
             RuleRuntime runtime = runtimes.get(rule.id);
-            if (runtime == null || !runtime.matching || runtime.fired) {
+            if (runtime == null || !runtime.matching || runtime.fired || runtime.suppressed) {
                 continue;
             }
             long dueAt = runtime.matchStartMs + rule.delaySeconds * 1000L;

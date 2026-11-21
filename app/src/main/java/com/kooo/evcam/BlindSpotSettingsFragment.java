@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.hardware.display.DisplayManager;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.util.DisplayMetrics;
@@ -14,6 +16,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
@@ -26,9 +29,13 @@ import androidx.annotation.Nullable;
 import androidx.fragment.app.Fragment;
 
 import com.google.android.material.switchmaterial.SwitchMaterial;
+import com.kooo.evcam.blindspot.BlindSpotCorrectionMath;
+import com.kooo.evcam.blindspot.BlindSpotCropPreviewView;
 import com.kooo.evcam.blindspot.BlindSpotDisplayUtils;
 import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.blindspot.BlindSpotVisualEditorView;
+import com.kooo.evcam.blindspot.CameraMirrorPolicy;
+import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.ui.UiOptionPillHelper;
 import com.kooo.evcam.ui.UiThemeController;
 
@@ -38,10 +45,11 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * 补盲与 HUD 投屏设置界面（扁平化重构版）。
+ * 补盲与 HUD 投屏设置界面。
  *
- * <p>顶部统一展示补盲总开关与显示屏幕选择（主屏 / 副屏 / EVCC 仪表），
- * 紧跟触发方案、2560×1600 可视化拖拽与多分辨率数值微调、分方向画面矫正与 ESP32 MJPEG 投屏入口。</p>
+ * <p>顶部统一配置补盲总开关与输出屏幕模式（仅主屏 / 仅副屏 / 主副屏同时），
+ * 下方「画面位置与画面调整」卡片内按「选择屏幕 → 选择摄像头」统一调整每屏每路的位置大小（支持四路同步）、
+ * 旋转角度、四边裁切及物理/输出镜像，消除重复入口并自动按副屏方向校正拖动坐标系。</p>
  */
 public class BlindSpotSettingsFragment extends Fragment implements UiThemeController.ThemeAware {
 
@@ -50,22 +58,37 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     };
     private static final String[] MAIN_FLOATING_CAMERAS = {"front", "back", "left", "right"};
     private static final String[] MAIN_FLOATING_CAMERA_LABELS = {"前", "后", "左", "右"};
+    private static final long LIVE_UPDATE_THROTTLE_MS = 40L;
 
     private AppConfig appConfig;
+    private final Handler uiHandler = new Handler(Looper.getMainLooper());
+    private final Runnable throttledServiceUpdateRunnable = new Runnable() {
+        @Override
+        public void run() {
+            pendingServiceUpdateScheduled = false;
+            Context ctx = getContext();
+            if (ctx != null) {
+                BlindSpotService.update(ctx);
+            }
+        }
+    };
+    private boolean pendingServiceUpdateScheduled = false;
 
-    // Top Card: Master + Display Screen
+    // Top Card: Master + Output Mode
     private SwitchMaterial blindSpotGlobalSwitch;
     private TextView tvBlindSpotGlobalHint;
-    private Spinner displaySelectionSpinner;
-    private Button refreshDisplaysButton;
-    private TextView tvDisplayResolutionInfo;
+    private TextView tvOutputModeHint;
+    private Button btnOutputMainOnly;
+    private Button btnOutputSecondaryOnly;
+    private Button btnOutputBoth;
     private LinearLayout mainDisplayControlsLayout;
     private SwitchMaterial turnSignalReuseMainSwitch;
     private SwitchMaterial mainFloatingEnabledSwitch;
     private Spinner mainFloatingCameraSpinner;
     private LinearLayout secondaryDisplayControlsLayout;
-    private SwitchMaterial secondaryBlindSpotSwitch;
-    private SwitchMaterial secondaryBorderSwitch;
+    private Spinner secondaryOutputDisplaySpinner;
+    private Button refreshDisplaysButton;
+    private TextView tvSecondaryOutputInfo;
     private Button toggleSecondaryAdjustButton;
     private LinearLayout subFeaturesContainer;
 
@@ -84,18 +107,22 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     private TextView tvTurnSignalTimeout;
     private SwitchMaterial rainNightBlindSpotSwitch;
 
-    // Position & Size Card
+    // Unified Position & Camera Adjust Card
     private TextView tvPositionScopeBadge;
-    private View layoutSlotTabs;
+    private Spinner editorScreenSpinner;
+    private Button refreshEditorDisplaysButton;
+    private TextView tvDisplayResolutionInfo;
     private Button btnSlotFront;
     private Button btnSlotBack;
     private Button btnSlotLeft;
     private Button btnSlotRight;
     private Button btnSlotRainLeft;
     private Button btnSlotRainRight;
+    private TextView tvCameraScopeHint;
     private TextView tvVisualEditorHint;
     private Button btnToggleVisualEdit;
     private BlindSpotVisualEditorView visualEditorView;
+    private CheckBox cbSyncAllFourPositions;
     private View layoutSameSideRow;
     private SwitchMaterial sameSidePositionSwitch;
     private TextView tvNumericBoundsDesc;
@@ -111,27 +138,47 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     private TextView tvPosYPct;
     private TextView tvPosWPct;
     private TextView tvPosHPct;
-    private Button btnWinRot0;
-    private Button btnWinRot90;
-    private Button btnWinRot180;
-    private Button btnWinRot270;
+
+    // Per-screen per-camera rotation, crop & mirror
+    private TextView tvCameraRotationValue;
+    private BlindSpotCropPreviewView cropPreviewView;
+    private Button btnCamRot0;
+    private Button btnCamRot90;
+    private Button btnCamRot180;
+    private Button btnCamRot270;
+    private SeekBar seekbarCameraRotation;
+    private TextView tvCropSummary;
+    private SeekBar seekbarCropTop;
+    private SeekBar seekbarCropBottom;
+    private SeekBar seekbarCropLeft;
+    private SeekBar seekbarCropRight;
+    private TextView tvCropTopValue;
+    private TextView tvCropBottomValue;
+    private TextView tvCropLeftValue;
+    private TextView tvCropRightValue;
+    private Button btnPhysicalMirrorH;
+    private Button btnPhysicalMirrorV;
+    private Button btnOutputMirrorH;
+    private Button btnOutputMirrorV;
+    private TextView tvMirrorEffectiveState;
+
+    // Screen-specific extra options
     private LinearLayout mainExtraOptionsLayout;
     private SwitchMaterial mainFloatingAspectLockSwitch;
     private SwitchMaterial mainFloatingLongPressDragSwitch;
     private LinearLayout secondaryExtraOptionsLayout;
     private Spinner secondaryOrientationSpinner;
+    private SwitchMaterial secondaryBorderSwitch;
     private SeekBar seekbarSecondaryAlpha;
     private TextView tvSecondaryAlphaValue;
     private Button btnPreviewCurrentPosition;
     private Button btnResetCurrentPosition;
 
-    // Correction + MJPEG Card
-    private SwitchMaterial blindSpotCorrectionSwitch;
-    private Button adjustBlindSpotCorrectionButton;
-    private View dividerMjpegStream;
+    // MJPEG Card (Card 4)
+    private View cardMjpegStream;
     private Button adjustMjpegStreamButton;
 
-    // Avoidance + Debug Card
+    // Avoidance + Debug Card (Card 5)
     private SwitchMaterial blindSpotSuppressOn360Switch;
     private SwitchMaterial avmAvoidanceSwitch;
     private LinearLayout avmAvoidanceDetailLayout;
@@ -143,13 +190,17 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     private Button menuButton;
     private Button homeButton;
 
-    private final List<Integer> availableDisplayIds = new ArrayList<>();
-    private final List<String> availableDisplayLabels = new ArrayList<>();
-    private int selectedDisplayId = AppConfig.BLIND_SPOT_DISPLAY_MAIN;
+    private final List<Integer> editorDisplayIds = new ArrayList<>();
+    private final List<String> editorDisplayLabels = new ArrayList<>();
+    private final List<Integer> secondaryOutputDisplayIds = new ArrayList<>();
+    private final List<String> secondaryOutputDisplayLabels = new ArrayList<>();
+
+    private int editorDisplayId = AppConfig.BLIND_SPOT_DISPLAY_MAIN;
     private String activeSlot = BlindSpotPlacement.SLOT_RIGHT;
     private int activeTriggerPresetIndex = 0; // 0=vhal,1=l6l7,2=boyue_l,3=xinghan7,4=custom
     private boolean isUpdatingPositionUi = false;
-    private boolean isUpdatingDisplaySpinner = false;
+    private boolean isUpdatingTransformUi = false;
+    private boolean isUpdatingDisplaySpinners = false;
     private boolean isSecondaryAdjustMode = false;
     private boolean isPreviewActive = false;
 
@@ -180,16 +231,18 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     private void bindViews(View view) {
         blindSpotGlobalSwitch = view.findViewById(R.id.switch_blind_spot_global);
         tvBlindSpotGlobalHint = view.findViewById(R.id.tv_blind_spot_global_hint);
-        displaySelectionSpinner = view.findViewById(R.id.spinner_display_selection);
-        refreshDisplaysButton = view.findViewById(R.id.btn_refresh_displays);
-        tvDisplayResolutionInfo = view.findViewById(R.id.tv_display_resolution_info);
+        tvOutputModeHint = view.findViewById(R.id.tv_output_mode_hint);
+        btnOutputMainOnly = view.findViewById(R.id.btn_output_mode_main_only);
+        btnOutputSecondaryOnly = view.findViewById(R.id.btn_output_mode_secondary_only);
+        btnOutputBoth = view.findViewById(R.id.btn_output_mode_both);
         mainDisplayControlsLayout = view.findViewById(R.id.layout_main_display_controls);
         turnSignalReuseMainSwitch = view.findViewById(R.id.switch_turn_signal_reuse_main);
         mainFloatingEnabledSwitch = view.findViewById(R.id.switch_main_floating_enabled);
         mainFloatingCameraSpinner = view.findViewById(R.id.spinner_main_floating_camera);
         secondaryDisplayControlsLayout = view.findViewById(R.id.layout_secondary_display_controls);
-        secondaryBlindSpotSwitch = view.findViewById(R.id.switch_secondary_blind_spot_display);
-        secondaryBorderSwitch = view.findViewById(R.id.switch_secondary_border);
+        secondaryOutputDisplaySpinner = view.findViewById(R.id.spinner_secondary_output_display);
+        refreshDisplaysButton = view.findViewById(R.id.btn_refresh_displays);
+        tvSecondaryOutputInfo = view.findViewById(R.id.tv_secondary_output_info);
         toggleSecondaryAdjustButton = view.findViewById(R.id.btn_toggle_secondary_adjust_mode);
         subFeaturesContainer = view.findViewById(R.id.blind_spot_sub_features_container);
 
@@ -208,16 +261,20 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         rainNightBlindSpotSwitch = view.findViewById(R.id.switch_rain_night_blind_spot);
 
         tvPositionScopeBadge = view.findViewById(R.id.tv_position_scope_badge);
-        layoutSlotTabs = view.findViewById(R.id.layout_slot_tabs);
+        editorScreenSpinner = view.findViewById(R.id.spinner_editor_screen);
+        refreshEditorDisplaysButton = view.findViewById(R.id.btn_refresh_editor_displays);
+        tvDisplayResolutionInfo = view.findViewById(R.id.tv_display_resolution_info);
         btnSlotFront = view.findViewById(R.id.btn_slot_front);
         btnSlotBack = view.findViewById(R.id.btn_slot_back);
         btnSlotLeft = view.findViewById(R.id.btn_slot_left);
         btnSlotRight = view.findViewById(R.id.btn_slot_right);
         btnSlotRainLeft = view.findViewById(R.id.btn_slot_rain_left);
         btnSlotRainRight = view.findViewById(R.id.btn_slot_rain_right);
+        tvCameraScopeHint = view.findViewById(R.id.tv_camera_scope_hint);
         tvVisualEditorHint = view.findViewById(R.id.tv_visual_editor_hint);
         btnToggleVisualEdit = view.findViewById(R.id.btn_toggle_visual_edit);
         visualEditorView = view.findViewById(R.id.blind_spot_visual_editor);
+        cbSyncAllFourPositions = view.findViewById(R.id.cb_sync_all_four_positions);
         layoutSameSideRow = view.findViewById(R.id.layout_same_side_row);
         sameSidePositionSwitch = view.findViewById(R.id.switch_same_side_position);
         tvNumericBoundsDesc = view.findViewById(R.id.tv_numeric_bounds_desc);
@@ -233,30 +290,49 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         tvPosYPct = view.findViewById(R.id.tv_pos_y_pct);
         tvPosWPct = view.findViewById(R.id.tv_pos_w_pct);
         tvPosHPct = view.findViewById(R.id.tv_pos_h_pct);
-        btnWinRot0 = view.findViewById(R.id.btn_win_rot_0);
-        btnWinRot90 = view.findViewById(R.id.btn_win_rot_90);
-        btnWinRot180 = view.findViewById(R.id.btn_win_rot_180);
-        btnWinRot270 = view.findViewById(R.id.btn_win_rot_270);
+
+        tvCameraRotationValue = view.findViewById(R.id.tv_camera_rotation_value);
+        cropPreviewView = view.findViewById(R.id.blind_spot_crop_preview);
+        btnCamRot0 = view.findViewById(R.id.btn_cam_rot_0);
+        btnCamRot90 = view.findViewById(R.id.btn_cam_rot_90);
+        btnCamRot180 = view.findViewById(R.id.btn_cam_rot_180);
+        btnCamRot270 = view.findViewById(R.id.btn_cam_rot_270);
+        seekbarCameraRotation = view.findViewById(R.id.seekbar_camera_rotation);
+        tvCropSummary = view.findViewById(R.id.tv_crop_summary);
+        seekbarCropTop = view.findViewById(R.id.seekbar_crop_top);
+        seekbarCropBottom = view.findViewById(R.id.seekbar_crop_bottom);
+        seekbarCropLeft = view.findViewById(R.id.seekbar_crop_left);
+        seekbarCropRight = view.findViewById(R.id.seekbar_crop_right);
+        tvCropTopValue = view.findViewById(R.id.tv_crop_top_value);
+        tvCropBottomValue = view.findViewById(R.id.tv_crop_bottom_value);
+        tvCropLeftValue = view.findViewById(R.id.tv_crop_left_value);
+        tvCropRightValue = view.findViewById(R.id.tv_crop_right_value);
+        btnPhysicalMirrorH = view.findViewById(R.id.btn_physical_mirror_h);
+        btnPhysicalMirrorV = view.findViewById(R.id.btn_physical_mirror_v);
+        btnOutputMirrorH = view.findViewById(R.id.btn_output_mirror_h);
+        btnOutputMirrorV = view.findViewById(R.id.btn_output_mirror_v);
+        tvMirrorEffectiveState = view.findViewById(R.id.tv_mirror_effective_state);
+
         mainExtraOptionsLayout = view.findViewById(R.id.layout_main_extra_options);
         mainFloatingAspectLockSwitch = view.findViewById(R.id.switch_main_floating_aspect_ratio_lock);
         mainFloatingLongPressDragSwitch = view.findViewById(R.id.switch_main_floating_long_press_drag);
         secondaryExtraOptionsLayout = view.findViewById(R.id.layout_secondary_extra_options);
         secondaryOrientationSpinner = view.findViewById(R.id.spinner_secondary_orientation);
+        secondaryBorderSwitch = view.findViewById(R.id.switch_secondary_border);
         seekbarSecondaryAlpha = view.findViewById(R.id.seekbar_secondary_alpha);
         tvSecondaryAlphaValue = view.findViewById(R.id.tv_secondary_alpha_value);
         btnPreviewCurrentPosition = view.findViewById(R.id.btn_preview_current_position);
         btnResetCurrentPosition = view.findViewById(R.id.btn_reset_current_position);
 
-        blindSpotCorrectionSwitch = view.findViewById(R.id.switch_blind_spot_correction);
-        adjustBlindSpotCorrectionButton = view.findViewById(R.id.btn_adjust_blind_spot_correction);
-        dividerMjpegStream = view.findViewById(R.id.divider_mjpeg_stream);
+        cardMjpegStream = view.findViewById(R.id.card_mjpeg_stream);
         adjustMjpegStreamButton = view.findViewById(R.id.btn_adjust_mjpeg_stream);
-        boolean mjpegVisible = AppFeatures.NETWORK_STREAMING;
-        if (dividerMjpegStream != null) {
-            dividerMjpegStream.setVisibility(mjpegVisible ? View.VISIBLE : View.GONE);
+        if (cardMjpegStream != null) {
+            cardMjpegStream.setVisibility(AppFeatures.NETWORK_STREAMING ? View.VISIBLE : View.GONE);
         }
-        if (adjustMjpegStreamButton != null) {
-            adjustMjpegStreamButton.setVisibility(mjpegVisible ? View.VISIBLE : View.GONE);
+
+        if (!AppFeatures.SECONDARY_DISPLAY) {
+            if (btnOutputSecondaryOnly != null) btnOutputSecondaryOnly.setVisibility(View.GONE);
+            if (btnOutputBoth != null) btnOutputBoth.setVisibility(View.GONE);
         }
 
         blindSpotSuppressOn360Switch = view.findViewById(R.id.switch_blind_spot_suppress_on_360);
@@ -291,24 +367,31 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         camAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         mainFloatingCameraSpinner.setAdapter(camAdapter);
 
-        String[] orientations = {"0° (横屏)", "90° (竖屏)", "180° (反向横屏)", "270° (反向竖屏)"};
+        String[] orientations = {
+                "0° (正常横屏)",
+                "90° (顺时针 90°)",
+                "180° (倒置屏 · 自动校正方向)",
+                "270° (逆时针 90°)"
+        };
         ArrayAdapter<String> orientAdapter = new ArrayAdapter<>(
                 requireContext(), android.R.layout.simple_spinner_item, orientations);
         orientAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         secondaryOrientationSpinner.setAdapter(orientAdapter);
 
-        populateDisplaySelectionSpinner();
+        populateDisplaySpinners();
     }
 
-    private void populateDisplaySelectionSpinner() {
+    private void populateDisplaySpinners() {
         Context ctx = getContext();
         if (ctx == null) return;
-        availableDisplayIds.clear();
-        availableDisplayLabels.clear();
+        editorDisplayIds.clear();
+        editorDisplayLabels.clear();
+        secondaryOutputDisplayIds.clear();
+        secondaryOutputDisplayLabels.clear();
 
         int[] mainSize = BlindSpotDisplayUtils.getMainScreenSizePx(ctx);
-        availableDisplayIds.add(AppConfig.BLIND_SPOT_DISPLAY_MAIN);
-        availableDisplayLabels.add(String.format(Locale.US, "主屏（车机主屏幕 · %d×%d）", mainSize[0], mainSize[1]));
+        editorDisplayIds.add(AppConfig.BLIND_SPOT_DISPLAY_MAIN);
+        editorDisplayLabels.add(String.format(Locale.US, "主屏（车机主屏幕 · %d×%d）", mainSize[0], mainSize[1]));
 
         DisplayManager dm = (DisplayManager) ctx.getSystemService(Context.DISPLAY_SERVICE);
         if (dm != null) {
@@ -317,41 +400,61 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
                 if (d.getDisplayId() != Display.DEFAULT_DISPLAY) {
                     DisplayMetrics out = new DisplayMetrics();
                     d.getRealMetrics(out);
-                    availableDisplayIds.add(d.getDisplayId());
                     String name = d.getName();
                     String suffix = (name != null && !name.isEmpty()) ? (" - " + name) : "";
-                    availableDisplayLabels.add(String.format(
+                    String label = String.format(
                             Locale.US, "副屏 Display #%d (%d×%d)%s",
-                            d.getDisplayId(), out.widthPixels, out.heightPixels, suffix));
+                            d.getDisplayId(), out.widthPixels, out.heightPixels, suffix);
+                    editorDisplayIds.add(d.getDisplayId());
+                    editorDisplayLabels.add(label);
+                    secondaryOutputDisplayIds.add(d.getDisplayId());
+                    secondaryOutputDisplayLabels.add(label);
                 }
             }
         }
 
-        availableDisplayIds.add(EvccDashcastDisplayResolver.PICK_ID);
         EvccDashcastDisplayResolver.Info evccInfo = EvccDashcastDisplayResolver.queryPrimary(ctx);
-        if (evccInfo != null) {
-            availableDisplayLabels.add(String.format(
-                    Locale.US, "EVCC 仪表投屏（已连接 Display #%d · %d×%d）",
-                    evccInfo.displayId, evccInfo.widthPx, evccInfo.heightPx));
-        } else {
-            availableDisplayLabels.add("EVCC 仪表投屏（占位 · 投屏后自动适配）");
-        }
+        String evccLabel = evccInfo != null
+                ? String.format(Locale.US, "EVCC 仪表投屏（已连接 Display #%d · %d×%d）",
+                        evccInfo.displayId, evccInfo.widthPx, evccInfo.heightPx)
+                : "EVCC 仪表投屏（占位 · 投屏后自动适配）";
+        editorDisplayIds.add(EvccDashcastDisplayResolver.PICK_ID);
+        editorDisplayLabels.add(evccLabel);
+        secondaryOutputDisplayIds.add(EvccDashcastDisplayResolver.PICK_ID);
+        secondaryOutputDisplayLabels.add(evccLabel);
 
-        isUpdatingDisplaySpinner = true;
-        ArrayAdapter<String> adapter = new ArrayAdapter<>(
-                ctx, android.R.layout.simple_spinner_item, availableDisplayLabels);
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        displaySelectionSpinner.setAdapter(adapter);
+        isUpdatingDisplaySpinners = true;
+        try {
+            ArrayAdapter<String> editorAdapter = new ArrayAdapter<>(
+                    ctx, android.R.layout.simple_spinner_item, editorDisplayLabels);
+            editorAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            editorScreenSpinner.setAdapter(editorAdapter);
 
-        int savedTarget = appConfig.getBlindSpotEditorDisplayTarget();
-        int idx = availableDisplayIds.indexOf(savedTarget);
-        if (idx < 0 && savedTarget != AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
-            idx = availableDisplayIds.indexOf(appConfig.getSecondaryDisplayId());
+            int savedEditorTarget = appConfig.getBlindSpotEditorDisplayTarget();
+            int editorIdx = editorDisplayIds.indexOf(savedEditorTarget);
+            if (editorIdx < 0) editorIdx = 0;
+            editorScreenSpinner.setSelection(editorIdx, false);
+            editorDisplayId = editorDisplayIds.get(editorIdx);
+
+            ArrayAdapter<String> secOutAdapter = new ArrayAdapter<>(
+                    ctx, android.R.layout.simple_spinner_item, secondaryOutputDisplayLabels);
+            secOutAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+            secondaryOutputDisplaySpinner.setAdapter(secOutAdapter);
+
+            int savedSecId = appConfig.getSecondaryDisplayId();
+            int secIdx = secondaryOutputDisplayIds.indexOf(savedSecId);
+            if (secIdx < 0) {
+                secIdx = 0;
+                if (appConfig.isSecondaryDisplayEnabled() && !secondaryOutputDisplayIds.isEmpty()) {
+                    appConfig.setSecondaryDisplayId(secondaryOutputDisplayIds.get(0));
+                }
+            }
+            if (!secondaryOutputDisplayIds.isEmpty()) {
+                secondaryOutputDisplaySpinner.setSelection(secIdx, false);
+            }
+        } finally {
+            isUpdatingDisplaySpinners = false;
         }
-        if (idx < 0) idx = 0;
-        displaySelectionSpinner.setSelection(idx, false);
-        selectedDisplayId = availableDisplayIds.get(idx);
-        isUpdatingDisplaySpinner = false;
     }
 
     private void loadSettings() {
@@ -366,14 +469,6 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         mainFloatingAspectLockSwitch.setChecked(appConfig.isMainFloatingAspectRatioLocked());
         mainFloatingLongPressDragSwitch.setChecked(appConfig.isMainFloatingLongPressDragEnabled());
 
-        secondaryBlindSpotSwitch.setChecked(appConfig.isSecondaryDisplayEnabled());
-        secondaryBorderSwitch.setChecked(appConfig.isSecondaryDisplayBorderEnabled());
-        secondaryOrientationSpinner.setSelection(
-                Math.max(0, Math.min(3, appConfig.getSecondaryDisplayOrientation() / 90)), false);
-        int alpha = appConfig.getSecondaryDisplayAlpha();
-        seekbarSecondaryAlpha.setProgress(alpha);
-        tvSecondaryAlphaValue.setText(alpha + "%");
-
         turnSignalLinkageSwitch.setChecked(appConfig.isTurnSignalLinkageEnabled());
         int timeout = appConfig.getTurnSignalTimeout();
         turnSignalTimeoutSeekBar.setProgress(timeout);
@@ -385,7 +480,6 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         syncTriggerSchemeFromConfig();
 
         sameSidePositionSwitch.setChecked(appConfig.isBlindSpotUseSameSidePosition());
-        blindSpotCorrectionSwitch.setChecked(appConfig.isBlindSpotCorrectionEnabled());
         blindSpotSuppressOn360Switch.setChecked(appConfig.isBlindSpotSuppressOn360());
 
         boolean avmEnabled = appConfig.isAvmAvoidanceEnabled();
@@ -393,7 +487,8 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         avmAvoidanceDetailLayout.setVisibility(avmEnabled ? View.VISIBLE : View.GONE);
         avmAvoidanceActivityEditText.setText(appConfig.getAvmAvoidanceActivity());
 
-        updateDisplayTargetUi();
+        updateOutputModeUi();
+        updateEditorTargetUi();
         updateEditToggleUi();
         updateSlotTabsUi();
         styleStaticActionPills(requireContext());
@@ -404,8 +499,8 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         UiOptionPillHelper.apply(toggleSecondaryAdjustButton, ctx, isSecondaryAdjustMode, true);
         UiOptionPillHelper.apply(btnPreviewCurrentPosition, ctx, isPreviewActive, true);
         UiOptionPillHelper.apply(refreshDisplaysButton, ctx, false);
+        UiOptionPillHelper.apply(refreshEditorDisplaysButton, ctx, false);
         UiOptionPillHelper.apply(btnResetCurrentPosition, ctx, false);
-        UiOptionPillHelper.apply(adjustBlindSpotCorrectionButton, ctx, false);
         UiOptionPillHelper.apply(adjustMjpegStreamButton, ctx, false);
         UiOptionPillHelper.apply(logcatDebugButton, ctx, false);
         UiOptionPillHelper.apply(resetStandaloneWindowButton, ctx, false);
@@ -413,9 +508,63 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
 
     private void updateGlobalHintUi(boolean globalEnabled) {
         tvBlindSpotGlobalHint.setText(globalEnabled
-                ? "已开启：支持主屏弹窗与副屏 / EVCC 仪表投屏"
+                ? "已开启：按下方选定的显示位置（主屏 / 副屏 / 同时）触发补盲"
                 : "总开关已关闭（下方参数仍可提前配置与预览）");
         subFeaturesContainer.setAlpha(globalEnabled ? 1.0f : 0.72f);
+    }
+
+    private void updateOutputModeUi() {
+        Context ctx = getContext();
+        String mode = appConfig.getBlindSpotOutputMode();
+        boolean showMain = AppConfig.BLIND_SPOT_OUTPUT_MAIN_ONLY.equals(mode)
+                || AppConfig.BLIND_SPOT_OUTPUT_BOTH.equals(mode);
+        boolean showSec = AppConfig.BLIND_SPOT_OUTPUT_SECONDARY_ONLY.equals(mode)
+                || AppConfig.BLIND_SPOT_OUTPUT_BOTH.equals(mode);
+
+        mainDisplayControlsLayout.setVisibility(showMain ? View.VISIBLE : View.GONE);
+        secondaryDisplayControlsLayout.setVisibility(showSec ? View.VISIBLE : View.GONE);
+
+        if (AppConfig.BLIND_SPOT_OUTPUT_SECONDARY_ONLY.equals(mode)) {
+            tvOutputModeHint.setText("仅在副屏 / EVCC 显示（主屏不弹出）");
+        } else if (AppConfig.BLIND_SPOT_OUTPUT_BOTH.equals(mode)) {
+            tvOutputModeHint.setText("主屏与副屏同时显示");
+        } else {
+            tvOutputModeHint.setText("仅在主屏显示");
+        }
+
+        if (ctx != null) {
+            UiOptionPillHelper.apply(btnOutputMainOnly, ctx, AppConfig.BLIND_SPOT_OUTPUT_MAIN_ONLY.equals(mode), true);
+            UiOptionPillHelper.apply(btnOutputSecondaryOnly, ctx, AppConfig.BLIND_SPOT_OUTPUT_SECONDARY_ONLY.equals(mode), true);
+            UiOptionPillHelper.apply(btnOutputBoth, ctx, AppConfig.BLIND_SPOT_OUTPUT_BOTH.equals(mode), true);
+        }
+
+        updateSecondaryOutputInfo();
+    }
+
+    private void updateSecondaryOutputInfo() {
+        Context ctx = getContext();
+        if (ctx == null || tvSecondaryOutputInfo == null) return;
+        int secId = appConfig.getSecondaryDisplayId();
+        if (secId == Display.DEFAULT_DISPLAY) {
+            tvSecondaryOutputInfo.setText("尚未指定副屏，请选择外接副屏或 EVCC 仪表投屏");
+            return;
+        }
+        if (secId == EvccDashcastDisplayResolver.PICK_ID) {
+            EvccDashcastDisplayResolver.Info info = EvccDashcastDisplayResolver.queryPrimary(ctx);
+            if (info != null) {
+                tvSecondaryOutputInfo.setText(String.format(
+                        Locale.US, "EVCC 仪表投屏已连接（Display #%d · %d×%d）",
+                        info.displayId, info.widthPx, info.heightPx));
+            } else {
+                tvSecondaryOutputInfo.setText("EVCC 仪表投屏未启动；投屏运行后将自动匹配");
+            }
+            return;
+        }
+        int[] dims = BlindSpotDisplayUtils.getDisplaySizePx(ctx, secId);
+        int orient = appConfig.getBlindSpotScreenOrientation(BlindSpotPlacement.screenKeyForDisplay(secId));
+        tvSecondaryOutputInfo.setText(String.format(
+                Locale.US, "副屏 Display #%d · 物理分辨率 %d×%d · 屏幕方向 %d°",
+                secId, dims[0], dims[1], orient));
     }
 
     private void syncTriggerSchemeFromConfig() {
@@ -452,111 +601,213 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         logcatKeywordsLayout.setVisibility(isLogcatMode ? View.VISIBLE : View.GONE);
     }
 
-    private boolean isMainTargetSelected() {
-        return selectedDisplayId == AppConfig.BLIND_SPOT_DISPLAY_MAIN;
+    private boolean isMainEditorSelected() {
+        return editorDisplayId == AppConfig.BLIND_SPOT_DISPLAY_MAIN;
     }
 
-    private int[] resolveActiveScreenDimensions() {
+    @NonNull
+    private String getActiveScreenKey() {
+        return BlindSpotPlacement.screenKeyForDisplay(editorDisplayId);
+    }
+
+    @NonNull
+    private String getActiveCameraPos() {
+        return BlindSpotPlacement.slotToCameraPos(activeSlot);
+    }
+
+    @NonNull
+    private int[] resolveEditorRawScreenDimensions() {
         Context ctx = requireContext();
-        if (isMainTargetSelected()) {
+        if (isMainEditorSelected()) {
             return BlindSpotDisplayUtils.getMainScreenSizePx(ctx);
         }
-        if (selectedDisplayId == EvccDashcastDisplayResolver.PICK_ID) {
+        if (editorDisplayId == EvccDashcastDisplayResolver.PICK_ID) {
             EvccDashcastDisplayResolver.Info info = EvccDashcastDisplayResolver.queryPrimary(ctx);
             if (info != null && info.widthPx > 0 && info.heightPx > 0) {
                 return new int[]{info.widthPx, info.heightPx};
             }
             return new int[]{1920, 720};
         }
-        return BlindSpotDisplayUtils.getDisplaySizePx(ctx, selectedDisplayId);
+        return BlindSpotDisplayUtils.getDisplaySizePx(ctx, editorDisplayId);
     }
 
-    private void updateDisplayTargetUi() {
-        boolean isMain = isMainTargetSelected();
-        mainDisplayControlsLayout.setVisibility(isMain ? View.VISIBLE : View.GONE);
-        secondaryDisplayControlsLayout.setVisibility(isMain ? View.GONE : View.VISIBLE);
-        layoutSlotTabs.setVisibility(isMain ? View.VISIBLE : View.GONE);
-        layoutSameSideRow.setVisibility(isMain ? View.VISIBLE : View.GONE);
+    @NonNull
+    private int[] resolveEditorVisualDimensions() {
+        int[] raw = resolveEditorRawScreenDimensions();
+        int orient = isMainEditorSelected()
+                ? 0
+                : appConfig.getBlindSpotScreenOrientation(getActiveScreenKey());
+        return BlindSpotPlacement.visualScreenDimensions(raw[0], raw[1], orient);
+    }
+
+    private void updateEditorTargetUi() {
+        boolean isMain = isMainEditorSelected();
         mainExtraOptionsLayout.setVisibility(isMain ? View.VISIBLE : View.GONE);
         secondaryExtraOptionsLayout.setVisibility(isMain ? View.GONE : View.VISIBLE);
 
-        int[] dims = resolveActiveScreenDimensions();
+        String screenKey = getActiveScreenKey();
+        int[] rawDims = resolveEditorRawScreenDimensions();
+        int orient = isMain ? 0 : appConfig.getBlindSpotScreenOrientation(screenKey);
+        int[] visDims = BlindSpotPlacement.visualScreenDimensions(rawDims[0], rawDims[1], orient);
+
         if (isMain) {
             tvDisplayResolutionInfo.setText(String.format(
                     Locale.US,
-                    "当前主屏检测分辨率：%d×%d · 可视化画布按 2560×1600 (16:10) 等比同步",
-                    dims[0], dims[1]));
-            tvPositionScopeBadge.setText("2560×1600 (16:10)");
+                    "正在调整【主屏】(%d×%d)：此屏幕的各路位置、旋转、裁切与镜像均独立保存",
+                    rawDims[0], rawDims[1]));
+            tvPositionScopeBadge.setText(String.format(Locale.US, "主屏 %d×%d", visDims[0], visDims[1]));
             tvNumericBoundsDesc.setText(String.format(
                     Locale.US,
-                    "数值坐标按当前主屏 (%d×%d) 换算，与上方 2560×1600 拖拽框实时联动",
-                    dims[0], dims[1]));
-        } else if (selectedDisplayId == EvccDashcastDisplayResolver.PICK_ID) {
+                    "数值坐标按主屏可视尺寸 (%d×%d) 换算，与上方画布实时联动",
+                    visDims[0], visDims[1]));
+        } else if (editorDisplayId == EvccDashcastDisplayResolver.PICK_ID) {
             EvccDashcastDisplayResolver.Info info = EvccDashcastDisplayResolver.queryPrimary(requireContext());
             if (info != null) {
                 tvDisplayResolutionInfo.setText(String.format(
-                        Locale.US, "EVCC 仪表投屏已连接：Display #%d (%d×%d)", info.displayId, info.widthPx, info.heightPx));
+                        Locale.US,
+                        "正在调整【EVCC 仪表投屏】Display #%d (%d×%d · 方向 %d°)：参数与主屏及其他副屏独立",
+                        info.displayId, rawDims[0], rawDims[1], orient));
             } else {
-                tvDisplayResolutionInfo.setText("EVCC 仪表投屏当前未连接；此处按 1920×720 预设并将在连接后自动套用");
+                tvDisplayResolutionInfo.setText(String.format(
+                        Locale.US,
+                        "正在调整【EVCC 仪表投屏】（未连接，暂按 %d×%d 预设 · 方向 %d°）",
+                        rawDims[0], rawDims[1], orient));
             }
-            tvPositionScopeBadge.setText("EVCC 仪表位置微调");
+            tvPositionScopeBadge.setText(String.format(Locale.US, "EVCC %d×%d (%d°)", visDims[0], visDims[1], orient));
             tvNumericBoundsDesc.setText(String.format(
                     Locale.US,
-                    "副屏与主屏分辨率不同：请在下方直接调整精确像素坐标（上限 %d×%d）",
-                    dims[0], dims[1]));
+                    "视觉坐标系 (%d×%d)：右移增大 X、下移增大 Y，旋转朝向由系统自动映射",
+                    visDims[0], visDims[1]));
         } else {
             tvDisplayResolutionInfo.setText(String.format(
-                    Locale.US, "已选外接副屏 Display #%d · 检测分辨率：%d×%d", selectedDisplayId, dims[0], dims[1]));
-            tvPositionScopeBadge.setText(String.format(Locale.US, "副屏 #%d (%d×%d)", selectedDisplayId, dims[0], dims[1]));
+                    Locale.US,
+                    "正在调整【副屏 #%d】(%d×%d · 方向 %d°)：参数与主屏及其他副屏完全独立",
+                    editorDisplayId, rawDims[0], rawDims[1], orient));
+            tvPositionScopeBadge.setText(String.format(
+                    Locale.US, "副屏 #%d · %d×%d (%d°)", editorDisplayId, visDims[0], visDims[1], orient));
             tvNumericBoundsDesc.setText(String.format(
                     Locale.US,
-                    "副屏与主屏分辨率不同：请在下方直接调整精确像素坐标（上限 %d×%d）",
-                    dims[0], dims[1]));
+                    "视觉坐标系 (%d×%d)：往右拖/增大 X 即往右移、往下拖/增大 Y 即往下移（自动适配 %d° 屏幕方向）",
+                    visDims[0], visDims[1], orient));
         }
 
+        if (!isMain) {
+            isUpdatingPositionUi = true;
+            try {
+                secondaryOrientationSpinner.setSelection(
+                        Math.max(0, Math.min(3, orient / 90)), false);
+                secondaryBorderSwitch.setChecked(appConfig.isBlindSpotScreenBorderEnabled(screenKey));
+                int alpha = appConfig.getBlindSpotScreenAlpha(screenKey);
+                seekbarSecondaryAlpha.setProgress(alpha);
+                tvSecondaryAlphaValue.setText(alpha + "%");
+            } finally {
+                isUpdatingPositionUi = false;
+            }
+        }
+
+        updateCameraScopeHint();
+        updateSameSideRowVisibility();
         syncPositionControlsFromStorage();
-        updateRotationPillsUi();
+        syncCameraTransformControls();
+    }
+
+    private void updateCameraScopeHint() {
+        if (tvCameraScopeHint == null) return;
+        String screenLabel = getActiveScreenShortLabel();
+        String slotLabel = BlindSpotPlacement.getSlotDisplayName(activeSlot);
+        if (BlindSpotPlacement.SLOT_RAIN_LEFT.equals(activeSlot)
+                || BlindSpotPlacement.SLOT_RAIN_RIGHT.equals(activeSlot)) {
+            String camLabel = BlindSpotPlacement.SLOT_RAIN_LEFT.equals(activeSlot) ? "左" : "右";
+            tvCameraScopeHint.setText(String.format(
+                    Locale.US,
+                    "当前调整：【%s】· %s（位置独立保存；旋转、裁切与镜像跟随「%s路」配置）",
+                    screenLabel, slotLabel, camLabel));
+        } else {
+            tvCameraScopeHint.setText(String.format(
+                    Locale.US,
+                    "当前调整：【%s】· %s路摄像头（旋转/裁切/输出镜像按屏幕+摄像头独立生效）",
+                    screenLabel, slotLabel));
+        }
+    }
+
+    @NonNull
+    private String getActiveScreenShortLabel() {
+        if (isMainEditorSelected()) {
+            return "主屏";
+        }
+        if (editorDisplayId == EvccDashcastDisplayResolver.PICK_ID) {
+            return "EVCC 仪表";
+        }
+        return "副屏 #" + editorDisplayId;
+    }
+
+    private void updateSameSideRowVisibility() {
+        if (layoutSameSideRow == null) return;
+        boolean syncAllFour = appConfig.isBlindSpotSyncAllFourPositions(getActiveScreenKey());
+        boolean showSameSide = isMainEditorSelected() && !syncAllFour;
+        layoutSameSideRow.setVisibility(showSameSide ? View.VISIBLE : View.GONE);
     }
 
     private void syncPositionControlsFromStorage() {
         isUpdatingPositionUi = true;
         try {
-            int[] dims = resolveActiveScreenDimensions();
-            int maxW = Math.max(1, dims[0]);
-            int maxH = Math.max(1, dims[1]);
-            seekbarPosX.setMax(maxW);
-            seekbarPosY.setMax(maxH);
-            seekbarPosW.setMax(maxW);
-            seekbarPosH.setMax(maxH);
+            String screenKey = getActiveScreenKey();
+            int[] rawDims = resolveEditorRawScreenDimensions();
+            int[] visDims = resolveEditorVisualDimensions();
+            int visW = Math.max(1, visDims[0]);
+            int visH = Math.max(1, visDims[1]);
 
-            BlindSpotPlacement.RectRatio rect;
-            int pxX;
-            int pxY;
-            int pxW;
-            int pxH;
-            String canvasLabelSlot;
+            visualEditorView.setCanvasAspectRatio(visW, visH);
+            seekbarPosX.setMax(visW);
+            seekbarPosY.setMax(visH);
+            seekbarPosW.setMax(visW);
+            seekbarPosH.setMax(visH);
 
-            if (isMainTargetSelected()) {
-                rect = appConfig.getBlindSpotPlacement(activeSlot);
-                int[] px = rect.toPixelBounds(maxW, maxH);
-                pxX = px[0];
-                pxY = px[1];
-                pxW = px[2];
-                pxH = px[3];
-                canvasLabelSlot = activeSlot;
-            } else {
-                pxX = Math.max(0, Math.min(maxW, appConfig.getSecondaryDisplayX()));
-                pxY = Math.max(0, Math.min(maxH, appConfig.getSecondaryDisplayY()));
-                pxW = Math.max(1, Math.min(maxW, appConfig.getSecondaryDisplayWidth()));
-                pxH = Math.max(1, Math.min(maxH, appConfig.getSecondaryDisplayHeight()));
-                rect = BlindSpotPlacement.fromPixels(pxX, pxY, pxW, pxH, maxW, maxH);
-                canvasLabelSlot = BlindSpotPlacement.SLOT_FRONT;
-            }
+            boolean syncAllFour = appConfig.isBlindSpotSyncAllFourPositions(screenKey);
+            cbSyncAllFourPositions.setChecked(syncAllFour);
+            sameSidePositionSwitch.setChecked(appConfig.isBlindSpotUseSameSidePosition());
+            updateSameSideRowVisibility();
 
-            visualEditorView.setPlacement(canvasLabelSlot, rect);
-            applyPixelNumbersToFields(pxX, pxY, pxW, pxH, rect);
+            BlindSpotPlacement.RectRatio rect = appConfig.getBlindSpotScreenPlacement(
+                    screenKey, activeSlot, rawDims[0], rawDims[1]);
+            int[] px = rect.toPixelBounds(visW, visH);
+
+            visualEditorView.setPlacement(activeSlot, rect);
+            applyPixelNumbersToFields(px[0], px[1], px[2], px[3], rect);
         } finally {
             isUpdatingPositionUi = false;
+        }
+    }
+
+    private void syncCameraTransformControls() {
+        isUpdatingTransformUi = true;
+        try {
+            String screenKey = getActiveScreenKey();
+            String camPos = getActiveCameraPos();
+
+            int rotation = appConfig.getBlindSpotScreenCameraRotation(screenKey, camPos);
+            seekbarCameraRotation.setProgress(rotation);
+
+            BlindSpotCorrectionMath.EdgeCrop crop =
+                    appConfig.getBlindSpotScreenCameraEdgeCrop(screenKey, camPos);
+            int topPct = Math.round(crop.top * 100f);
+            int bottomPct = Math.round(crop.bottom * 100f);
+            int leftPct = Math.round(crop.left * 100f);
+            int rightPct = Math.round(crop.right * 100f);
+
+            seekbarCropTop.setProgress(topPct);
+            seekbarCropBottom.setProgress(bottomPct);
+            seekbarCropLeft.setProgress(leftPct);
+            seekbarCropRight.setProgress(rightPct);
+            tvCropTopValue.setText(topPct + "%");
+            tvCropBottomValue.setText(bottomPct + "%");
+            tvCropLeftValue.setText(leftPct + "%");
+            tvCropRightValue.setText(rightPct + "%");
+
+            updateRotationAndCropVisuals();
+            updateMirrorUi();
+        } finally {
+            isUpdatingTransformUi = false;
         }
     }
 
@@ -602,22 +853,70 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         boolean editing = visualEditorView.isEditingEnabled();
         btnToggleVisualEdit.setText(editing ? "完成编辑" : "进入编辑");
         tvVisualEditorHint.setText(editing
-                ? "拖动画面移动，拖右下角缩放"
+                ? "拖动画面移动，拖右下角缩放（所有屏幕方向均已按正面视觉校正）"
                 : "点击进入编辑后可直接调整画面");
         UiOptionPillHelper.apply(btnToggleVisualEdit, ctx, editing, true);
     }
 
-    private void updateRotationPillsUi() {
+    private void updateRotationAndCropVisuals() {
         Context ctx = getContext();
-        if (ctx == null) return;
-        int rot = isMainTargetSelected()
-                ? appConfig.getTurnSignalFloatingRotation()
-                : appConfig.getSecondaryDisplayRotation();
-        rot = ((rot % 360) + 360) % 360;
-        UiOptionPillHelper.apply(btnWinRot0, ctx, rot == 0);
-        UiOptionPillHelper.apply(btnWinRot90, ctx, rot == 90);
-        UiOptionPillHelper.apply(btnWinRot180, ctx, rot == 180);
-        UiOptionPillHelper.apply(btnWinRot270, ctx, rot == 270);
+        String screenKey = getActiveScreenKey();
+        String camPos = getActiveCameraPos();
+        int rotation = appConfig.getBlindSpotScreenCameraRotation(screenKey, camPos);
+        BlindSpotCorrectionMath.EdgeCrop crop =
+                appConfig.getBlindSpotScreenCameraEdgeCrop(screenKey, camPos);
+
+        tvCameraRotationValue.setText(rotation + "°");
+        tvCropSummary.setText(String.format(
+                Locale.US,
+                "保留 %d%% × %d%%",
+                Math.round(crop.visibleWidth() * 100f),
+                Math.round(crop.visibleHeight() * 100f)));
+        cropPreviewView.setPreviewState(
+                getActiveScreenShortLabel() + " · " + getCameraShortLabel(camPos),
+                rotation,
+                crop);
+
+        if (ctx != null) {
+            UiOptionPillHelper.apply(btnCamRot0, ctx, rotation == 0);
+            UiOptionPillHelper.apply(btnCamRot90, ctx, rotation == 90);
+            UiOptionPillHelper.apply(btnCamRot180, ctx, rotation == 180);
+            UiOptionPillHelper.apply(btnCamRot270, ctx, rotation == 270);
+        }
+    }
+
+    private void updateMirrorUi() {
+        Context ctx = getContext();
+        String camPos = getActiveCameraPos();
+        MirrorTarget mirrorTarget = isMainEditorSelected()
+                ? MirrorTarget.BLIND_SPOT
+                : MirrorTarget.SECONDARY_HUD;
+
+        boolean physH = appConfig.isPhysicalMirrorH(camPos);
+        boolean physV = appConfig.isPhysicalMirrorV(camPos);
+        boolean outH = appConfig.isOutputMirrorH(mirrorTarget, camPos);
+        boolean outV = appConfig.isOutputMirrorV(mirrorTarget, camPos);
+
+        if (ctx != null) {
+            UiOptionPillHelper.apply(btnPhysicalMirrorH, ctx, physH);
+            UiOptionPillHelper.apply(btnPhysicalMirrorV, ctx, physV);
+            UiOptionPillHelper.apply(btnOutputMirrorH, ctx, outH);
+            UiOptionPillHelper.apply(btnOutputMirrorV, ctx, outV);
+        }
+
+        CameraMirrorPolicy.ResolvedMirror resolved =
+                CameraMirrorPolicy.resolve(appConfig, mirrorTarget, camPos);
+        String targetLabel = isMainEditorSelected() ? "主屏补盲" : "副屏输出";
+        tvMirrorEffectiveState.setText(String.format(
+                Locale.US,
+                "物理(%s/%s) + %s(%s/%s) → 实际生效(水平:%s, 垂直:%s)",
+                physH ? "反" : "正",
+                physV ? "倒" : "正",
+                targetLabel,
+                outH ? "反" : "正",
+                outV ? "倒" : "正",
+                resolved.effectiveH ? "镜像" : "正常",
+                resolved.effectiveV ? "翻转" : "正常"));
     }
 
     private void initListeners(View view) {
@@ -639,26 +938,57 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
             BlindSpotService.update(requireContext());
         });
 
-        refreshDisplaysButton.setOnClickListener(v -> {
-            populateDisplaySelectionSpinner();
-            updateDisplayTargetUi();
-            Toast.makeText(requireContext(), "已刷新显示屏幕列表", Toast.LENGTH_SHORT).show();
-        });
+        btnOutputMainOnly.setOnClickListener(v -> selectOutputMode(AppConfig.BLIND_SPOT_OUTPUT_MAIN_ONLY));
+        btnOutputSecondaryOnly.setOnClickListener(v -> selectOutputMode(AppConfig.BLIND_SPOT_OUTPUT_SECONDARY_ONLY));
+        btnOutputBoth.setOnClickListener(v -> selectOutputMode(AppConfig.BLIND_SPOT_OUTPUT_BOTH));
 
-        displaySelectionSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+        View.OnClickListener refreshClickListener = v -> {
+            populateDisplaySpinners();
+            updateOutputModeUi();
+            updateEditorTargetUi();
+            Toast.makeText(requireContext(), "已刷新显示屏幕列表", Toast.LENGTH_SHORT).show();
+        };
+        refreshDisplaysButton.setOnClickListener(refreshClickListener);
+        refreshEditorDisplaysButton.setOnClickListener(refreshClickListener);
+
+        secondaryOutputDisplaySpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
-                if (isUpdatingDisplaySpinner || position < 0 || position >= availableDisplayIds.size()) {
+                if (isUpdatingDisplaySpinners
+                        || position < 0
+                        || position >= secondaryOutputDisplayIds.size()) {
                     return;
                 }
-                int chosenId = availableDisplayIds.get(position);
-                selectedDisplayId = chosenId;
-                appConfig.setBlindSpotEditorDisplayTarget(chosenId);
-                if (chosenId != AppConfig.BLIND_SPOT_DISPLAY_MAIN) {
+                int chosenId = secondaryOutputDisplayIds.get(position);
+                if (chosenId != appConfig.getSecondaryDisplayId()) {
                     appConfig.setSecondaryDisplayId(chosenId);
-                    BlindSpotService.update(requireContext());
+                    updateSecondaryOutputInfo();
+                    if (isSecondaryAdjustMode) {
+                        sendSecondaryAdjustAction(true);
+                    } else {
+                        BlindSpotService.update(requireContext());
+                    }
                 }
-                updateDisplayTargetUi();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+
+        editorScreenSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
+                if (isUpdatingDisplaySpinners || position < 0 || position >= editorDisplayIds.size()) {
+                    return;
+                }
+                int chosenId = editorDisplayIds.get(position);
+                editorDisplayId = chosenId;
+                appConfig.setBlindSpotEditorDisplayTarget(chosenId);
+                updateEditorTargetUi();
+                if (isPreviewActive) {
+                    startPreviewForEditorTarget();
+                }
             }
 
             @Override
@@ -696,19 +1026,9 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
             }
         });
 
-        secondaryBlindSpotSwitch.setOnCheckedChangeListener((btn, checked) -> {
-            appConfig.setSecondaryDisplayEnabled(checked);
-            BlindSpotService.update(requireContext());
-        });
-        secondaryBorderSwitch.setOnCheckedChangeListener((btn, checked) -> {
-            appConfig.setSecondaryDisplayBorderEnabled(checked);
-            BlindSpotService.update(requireContext());
-        });
         toggleSecondaryAdjustButton.setOnClickListener(v -> {
             isSecondaryAdjustMode = !isSecondaryAdjustMode;
-            sendBlindSpotServiceAction(isSecondaryAdjustMode
-                    ? "enter_secondary_display_adjust"
-                    : "exit_secondary_display_adjust");
+            sendSecondaryAdjustAction(isSecondaryAdjustMode);
             toggleSecondaryAdjustButton.setText(isSecondaryAdjustMode
                     ? "退出副屏边界调整模式"
                     : "在副屏显示边界框以辅助调整");
@@ -775,7 +1095,7 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
             BlindSpotService.update(requireContext());
         });
 
-        // 图 4 槽位 tabs & 编辑态
+        // 摄像头/槽位切换
         btnSlotFront.setOnClickListener(v -> selectVisualSlot(BlindSpotPlacement.SLOT_FRONT));
         btnSlotBack.setOnClickListener(v -> selectVisualSlot(BlindSpotPlacement.SLOT_BACK));
         btnSlotLeft.setOnClickListener(v -> selectVisualSlot(BlindSpotPlacement.SLOT_LEFT));
@@ -806,7 +1126,18 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
             }
         });
 
+        cbSyncAllFourPositions.setOnCheckedChangeListener((btn, checked) -> {
+            if (isUpdatingPositionUi) return;
+            int[] rawDims = resolveEditorRawScreenDimensions();
+            appConfig.setBlindSpotSyncAllFourPositions(
+                    getActiveScreenKey(), checked, activeSlot, rawDims[0], rawDims[1]);
+            updateSameSideRowVisibility();
+            syncPositionControlsFromStorage();
+            BlindSpotService.update(requireContext());
+        });
+
         sameSidePositionSwitch.setOnCheckedChangeListener((btn, checked) -> {
+            if (isUpdatingPositionUi) return;
             appConfig.setBlindSpotUseSameSidePosition(checked, activeSlot);
             syncPositionControlsFromStorage();
             BlindSpotService.update(requireContext());
@@ -821,10 +1152,64 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         bindCoordinateEditText(etPosW, seekbarPosW);
         bindCoordinateEditText(etPosH, seekbarPosH);
 
-        btnWinRot0.setOnClickListener(v -> selectWindowRotation(0));
-        btnWinRot90.setOnClickListener(v -> selectWindowRotation(90));
-        btnWinRot180.setOnClickListener(v -> selectWindowRotation(180));
-        btnWinRot270.setOnClickListener(v -> selectWindowRotation(270));
+        // 分路旋转与四边裁切（按当前屏幕 + 当前摄像头独立保存）
+        btnCamRot0.setOnClickListener(v -> setChannelRotation(0));
+        btnCamRot90.setOnClickListener(v -> setChannelRotation(90));
+        btnCamRot180.setOnClickListener(v -> setChannelRotation(180));
+        btnCamRot270.setOnClickListener(v -> setChannelRotation(270));
+        seekbarCameraRotation.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                if (isUpdatingTransformUi || !fromUser) return;
+                setChannelRotation(progress, false);
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {
+                commitLiveServiceUpdateNow();
+            }
+        });
+
+        bindEdgeCropSeekBar(seekbarCropTop, tvCropTopValue, Edge.TOP);
+        bindEdgeCropSeekBar(seekbarCropBottom, tvCropBottomValue, Edge.BOTTOM);
+        bindEdgeCropSeekBar(seekbarCropLeft, tvCropLeftValue, Edge.LEFT);
+        bindEdgeCropSeekBar(seekbarCropRight, tvCropRightValue, Edge.RIGHT);
+
+        // 物理镜像 & 当前屏幕输出镜像
+        btnPhysicalMirrorH.setOnClickListener(v -> {
+            String camPos = getActiveCameraPos();
+            appConfig.setPhysicalMirrorH(camPos, !appConfig.isPhysicalMirrorH(camPos));
+            updateMirrorUi();
+            commitLiveServiceUpdateNow();
+        });
+        btnPhysicalMirrorV.setOnClickListener(v -> {
+            String camPos = getActiveCameraPos();
+            appConfig.setPhysicalMirrorV(camPos, !appConfig.isPhysicalMirrorV(camPos));
+            updateMirrorUi();
+            commitLiveServiceUpdateNow();
+        });
+        btnOutputMirrorH.setOnClickListener(v -> {
+            String camPos = getActiveCameraPos();
+            MirrorTarget target = isMainEditorSelected()
+                    ? MirrorTarget.BLIND_SPOT
+                    : MirrorTarget.SECONDARY_HUD;
+            appConfig.setOutputMirrorH(target, camPos, !appConfig.isOutputMirrorH(target, camPos));
+            updateMirrorUi();
+            commitLiveServiceUpdateNow();
+        });
+        btnOutputMirrorV.setOnClickListener(v -> {
+            String camPos = getActiveCameraPos();
+            MirrorTarget target = isMainEditorSelected()
+                    ? MirrorTarget.BLIND_SPOT
+                    : MirrorTarget.SECONDARY_HUD;
+            appConfig.setOutputMirrorV(target, camPos, !appConfig.isOutputMirrorV(target, camPos));
+            updateMirrorUi();
+            commitLiveServiceUpdateNow();
+        });
 
         mainFloatingAspectLockSwitch.setOnCheckedChangeListener(
                 (btn, checked) -> appConfig.setMainFloatingAspectRatioLocked(checked));
@@ -834,10 +1219,21 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         secondaryOrientationSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View v, int position, long id) {
+                if (isUpdatingPositionUi || isMainEditorSelected()) {
+                    return;
+                }
                 int orient = position * 90;
-                if (orient != appConfig.getSecondaryDisplayOrientation()) {
-                    appConfig.setSecondaryDisplayOrientation(orient);
-                    BlindSpotService.update(requireContext());
+                String screenKey = getActiveScreenKey();
+                if (orient != appConfig.getBlindSpotScreenOrientation(screenKey)) {
+                    int[] rawDims = resolveEditorRawScreenDimensions();
+                    BlindSpotPlacement.RectRatio currentVisual = appConfig.getBlindSpotScreenPlacement(
+                            screenKey, activeSlot, rawDims[0], rawDims[1]);
+                    appConfig.setBlindSpotScreenOrientation(screenKey, orient);
+                    appConfig.setBlindSpotScreenPlacement(
+                            screenKey, activeSlot, currentVisual, rawDims[0], rawDims[1]);
+                    updateEditorTargetUi();
+                    updateSecondaryOutputInfo();
+                    commitLiveServiceUpdateNow();
                 }
             }
 
@@ -846,14 +1242,19 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
             }
         });
 
+        secondaryBorderSwitch.setOnCheckedChangeListener((btn, checked) -> {
+            if (isUpdatingPositionUi || isMainEditorSelected()) return;
+            appConfig.setBlindSpotScreenBorderEnabled(getActiveScreenKey(), checked);
+            commitLiveServiceUpdateNow();
+        });
+
         seekbarSecondaryAlpha.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
                 tvSecondaryAlphaValue.setText(progress + "%");
-                if (fromUser) {
-                    appConfig.setSecondaryDisplayAlpha(progress);
-                    BlindSpotService.update(requireContext());
-                }
+                if (isUpdatingPositionUi || !fromUser || isMainEditorSelected()) return;
+                appConfig.setBlindSpotScreenAlpha(getActiveScreenKey(), progress);
+                scheduleThrottledServiceUpdate();
             }
 
             @Override
@@ -862,22 +1263,16 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
 
             @Override
             public void onStopTrackingTouch(SeekBar seekBar) {
-                BlindSpotService.update(requireContext());
+                if (!isMainEditorSelected()) {
+                    commitLiveServiceUpdateNow();
+                }
             }
         });
 
         btnPreviewCurrentPosition.setOnClickListener(v -> toggleCurrentPositionPreview());
         btnResetCurrentPosition.setOnClickListener(v -> resetCurrentTargetPosition());
 
-        // 分方向旋转与裁切矫正
-        blindSpotCorrectionSwitch.setOnCheckedChangeListener((btn, checked) -> {
-            appConfig.setBlindSpotCorrectionEnabled(checked);
-            BlindSpotService.update(requireContext());
-        });
-        adjustBlindSpotCorrectionButton.setOnClickListener(v ->
-                SettingsFragment.openSubPage(this, new BlindSpotCorrectionFragment()));
-
-        // 保留 ESP32 / 浏览器 MJPEG 投屏入口
+        // ESP32 / 浏览器 MJPEG 投屏入口
         adjustMjpegStreamButton.setOnClickListener(v ->
                 SettingsFragment.openSubPage(this, new MjpegStreamAdjustFragment()));
 
@@ -919,6 +1314,29 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         }
     }
 
+    private void selectOutputMode(String mode) {
+        if (!AppFeatures.SECONDARY_DISPLAY) {
+            mode = AppConfig.BLIND_SPOT_OUTPUT_MAIN_ONLY;
+        }
+        boolean includesSecondary = AppConfig.BLIND_SPOT_OUTPUT_SECONDARY_ONLY.equals(mode)
+                || AppConfig.BLIND_SPOT_OUTPUT_BOTH.equals(mode);
+        if (includesSecondary) {
+            int secId = appConfig.getSecondaryDisplayId();
+            if (secId == Display.DEFAULT_DISPLAY || !secondaryOutputDisplayIds.contains(secId)) {
+                if (!secondaryOutputDisplayIds.isEmpty()) {
+                    int fallbackId = secondaryOutputDisplayIds.get(0);
+                    appConfig.setSecondaryDisplayId(fallbackId);
+                    isUpdatingDisplaySpinners = true;
+                    secondaryOutputDisplaySpinner.setSelection(0, false);
+                    isUpdatingDisplaySpinners = false;
+                }
+            }
+        }
+        appConfig.setBlindSpotOutputMode(mode);
+        updateOutputModeUi();
+        BlindSpotService.update(requireContext());
+    }
+
     private void selectTriggerScheme(int presetIdx) {
         activeTriggerPresetIndex = presetIdx;
         if (presetIdx == 0) {
@@ -952,42 +1370,117 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
     private void selectVisualSlot(String slot) {
         activeSlot = BlindSpotPlacement.normalizeSlot(slot);
         updateSlotTabsUi();
+        updateCameraScopeHint();
         syncPositionControlsFromStorage();
-        if (isPreviewActive && isMainTargetSelected()) {
-            startMainPreviewForSlot();
+        syncCameraTransformControls();
+        if (isPreviewActive) {
+            startPreviewForEditorTarget();
+        } else if (isSecondaryAdjustMode && !isMainEditorSelected()) {
+            sendSecondaryAdjustAction(true);
         }
     }
 
-    private void selectWindowRotation(int degrees) {
-        if (isMainTargetSelected()) {
-            appConfig.setTurnSignalFloatingRotation(degrees);
+    private void setChannelRotation(int degrees) {
+        setChannelRotation(degrees, true);
+    }
+
+    private void setChannelRotation(int degrees, boolean commitNow) {
+        int safeDeg = BlindSpotCorrectionMath.normalizeAngle(degrees);
+        String screenKey = getActiveScreenKey();
+        String camPos = getActiveCameraPos();
+        appConfig.setBlindSpotScreenCameraRotation(screenKey, camPos, safeDeg);
+        isUpdatingTransformUi = true;
+        seekbarCameraRotation.setProgress(safeDeg);
+        isUpdatingTransformUi = false;
+        updateRotationAndCropVisuals();
+        if (commitNow) {
+            commitLiveServiceUpdateNow();
         } else {
-            appConfig.setSecondaryDisplayRotation(degrees);
+            scheduleThrottledServiceUpdate();
         }
-        updateRotationPillsUi();
-        BlindSpotService.update(requireContext());
+    }
+
+    private enum Edge {
+        TOP, BOTTOM, LEFT, RIGHT
+    }
+
+    private void bindEdgeCropSeekBar(SeekBar seekBar, TextView valueView, Edge edge) {
+        seekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar sb, int progress, boolean fromUser) {
+                if (isUpdatingTransformUi || !fromUser) return;
+                String screenKey = getActiveScreenKey();
+                String camPos = getActiveCameraPos();
+                BlindSpotCorrectionMath.EdgeCrop cur =
+                        appConfig.getBlindSpotScreenCameraEdgeCrop(screenKey, camPos);
+                int topPct = Math.round(cur.top * 100f);
+                int bottomPct = Math.round(cur.bottom * 100f);
+                int leftPct = Math.round(cur.left * 100f);
+                int rightPct = Math.round(cur.right * 100f);
+
+                int clamped = progress;
+                switch (edge) {
+                    case TOP:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, bottomPct);
+                        topPct = clamped;
+                        break;
+                    case BOTTOM:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, topPct);
+                        bottomPct = clamped;
+                        break;
+                    case LEFT:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, rightPct);
+                        leftPct = clamped;
+                        break;
+                    case RIGHT:
+                        clamped = BlindSpotCorrectionMath.clampNewEdgePercent(progress, leftPct);
+                        rightPct = clamped;
+                        break;
+                }
+                if (clamped != progress) {
+                    isUpdatingTransformUi = true;
+                    sb.setProgress(clamped);
+                    isUpdatingTransformUi = false;
+                }
+                valueView.setText(clamped + "%");
+
+                BlindSpotCorrectionMath.EdgeCrop next =
+                        BlindSpotCorrectionMath.EdgeCrop.fromPercents(leftPct, topPct, rightPct, bottomPct);
+                appConfig.setBlindSpotScreenCameraEdgeCrop(screenKey, camPos, next);
+                updateRotationAndCropVisuals();
+                scheduleThrottledServiceUpdate();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar sb) {
+            }
+
+            @Override
+            public void onStopTrackingTouch(SeekBar sb) {
+                commitLiveServiceUpdateNow();
+            }
+        });
     }
 
     private void applyRectChangeFromVisualEditor(BlindSpotPlacement.RectRatio rect, boolean commitService) {
         isUpdatingPositionUi = true;
         try {
-            int[] dims = resolveActiveScreenDimensions();
-            int[] px = rect.toPixelBounds(dims[0], dims[1]);
-            applyPixelNumbersToFields(px[0], px[1], px[2], px[3], rect);
-            if (isMainTargetSelected()) {
-                appConfig.setBlindSpotPlacement(activeSlot, rect);
-                if (!BlindSpotPlacement.SLOT_RAIN_LEFT.equals(activeSlot)
-                        && !BlindSpotPlacement.SLOT_RAIN_RIGHT.equals(activeSlot)) {
-                    appConfig.setTurnSignalFloatingBounds(px[0], px[1], px[2], px[3]);
-                }
-            } else {
-                appConfig.setSecondaryDisplayBounds(px[0], px[1], px[2], px[3]);
+            String screenKey = getActiveScreenKey();
+            int[] rawDims = resolveEditorRawScreenDimensions();
+            int[] visDims = resolveEditorVisualDimensions();
+            int[] visPx = rect.toPixelBounds(visDims[0], visDims[1]);
+            applyPixelNumbersToFields(visPx[0], visPx[1], visPx[2], visPx[3], rect);
+            appConfig.setBlindSpotScreenPlacement(screenKey, activeSlot, rect, rawDims[0], rawDims[1]);
+            if (isMainEditorSelected() && BlindSpotPlacement.isStandardCameraSlot(activeSlot)) {
+                appConfig.setTurnSignalFloatingBounds(visPx[0], visPx[1], visPx[2], visPx[3]);
             }
         } finally {
             isUpdatingPositionUi = false;
         }
-        if (commitService && getContext() != null) {
-            BlindSpotService.update(getContext());
+        if (commitService) {
+            commitLiveServiceUpdateNow();
+        } else if (isPreviewActive || isSecondaryAdjustMode) {
+            scheduleThrottledServiceUpdate();
         }
     }
 
@@ -1038,42 +1531,62 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
                 }
             }
         });
+        editText.setOnFocusChangeListener((v, hasFocus) -> {
+            if (!hasFocus && !isUpdatingPositionUi) {
+                syncPositionControlsFromStorage();
+            }
+        });
     }
 
     private void persistPixelBoundsFromControls(boolean commitService) {
         isUpdatingPositionUi = true;
         try {
-            int[] dims = resolveActiveScreenDimensions();
+            String screenKey = getActiveScreenKey();
+            int[] rawDims = resolveEditorRawScreenDimensions();
+            int[] visDims = resolveEditorVisualDimensions();
             int pxX = seekbarPosX.getProgress();
             int pxY = seekbarPosY.getProgress();
             int pxW = Math.max(1, seekbarPosW.getProgress());
             int pxH = Math.max(1, seekbarPosH.getProgress());
 
             BlindSpotPlacement.RectRatio rect =
-                    BlindSpotPlacement.fromPixels(pxX, pxY, pxW, pxH, dims[0], dims[1]);
+                    BlindSpotPlacement.fromPixels(pxX, pxY, pxW, pxH, visDims[0], visDims[1]);
             tvPosXPct.setText(rect.xPercent() + "%");
             tvPosYPct.setText(rect.yPercent() + "%");
             tvPosWPct.setText(rect.widthPercent() + "%");
             tvPosHPct.setText(rect.heightPercent() + "%");
 
-            if (isMainTargetSelected()) {
-                appConfig.setBlindSpotPlacement(activeSlot, rect);
-                visualEditorView.setPlacement(activeSlot, rect);
-                int[] normalizedPx = rect.toPixelBounds(dims[0], dims[1]);
-                if (!BlindSpotPlacement.SLOT_RAIN_LEFT.equals(activeSlot)
-                        && !BlindSpotPlacement.SLOT_RAIN_RIGHT.equals(activeSlot)) {
-                    appConfig.setTurnSignalFloatingBounds(
-                            normalizedPx[0], normalizedPx[1], normalizedPx[2], normalizedPx[3]);
-                }
-            } else {
-                appConfig.setSecondaryDisplayBounds(pxX, pxY, pxW, pxH);
-                visualEditorView.setPlacement(BlindSpotPlacement.SLOT_FRONT, rect);
+            visualEditorView.setPlacement(activeSlot, rect);
+            appConfig.setBlindSpotScreenPlacement(screenKey, activeSlot, rect, rawDims[0], rawDims[1]);
+            if (isMainEditorSelected() && BlindSpotPlacement.isStandardCameraSlot(activeSlot)) {
+                int[] normalizedPx = rect.toPixelBounds(visDims[0], visDims[1]);
+                appConfig.setTurnSignalFloatingBounds(
+                        normalizedPx[0], normalizedPx[1], normalizedPx[2], normalizedPx[3]);
             }
         } finally {
             isUpdatingPositionUi = false;
         }
-        if (commitService && getContext() != null) {
-            BlindSpotService.update(getContext());
+        if (commitService) {
+            commitLiveServiceUpdateNow();
+        } else if (isPreviewActive || isSecondaryAdjustMode) {
+            scheduleThrottledServiceUpdate();
+        }
+    }
+
+    private void scheduleThrottledServiceUpdate() {
+        if (pendingServiceUpdateScheduled) {
+            return;
+        }
+        pendingServiceUpdateScheduled = true;
+        uiHandler.postDelayed(throttledServiceUpdateRunnable, LIVE_UPDATE_THROTTLE_MS);
+    }
+
+    private void commitLiveServiceUpdateNow() {
+        uiHandler.removeCallbacks(throttledServiceUpdateRunnable);
+        pendingServiceUpdateScheduled = false;
+        Context ctx = getContext();
+        if (ctx != null) {
+            BlindSpotService.update(ctx);
         }
     }
 
@@ -1083,58 +1596,80 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         if (isPreviewActive) {
             isPreviewActive = false;
             sendBlindSpotServiceAction("stop_preview_blind_spot");
-            btnPreviewCurrentPosition.setText("预览当前位置");
+            btnPreviewCurrentPosition.setText("预览当前画面");
             UiOptionPillHelper.apply(btnPreviewCurrentPosition, ctx, false);
             return;
         }
-        if (!WakeUpHelper.hasOverlayPermission(ctx)) {
-            Toast.makeText(ctx, "请先授予悬浮窗权限以显示位置预览", Toast.LENGTH_SHORT).show();
+        if (isMainEditorSelected() && !WakeUpHelper.hasOverlayPermission(ctx)) {
+            Toast.makeText(ctx, "请先授予悬浮窗权限以显示主屏位置预览", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (editorDisplayId == EvccDashcastDisplayResolver.PICK_ID
+                && EvccDashcastDisplayResolver.queryPrimary(ctx) == null) {
+            Toast.makeText(ctx, "EVCC 仪表投屏当前未启动，暂无法在仪表屏实时预览", Toast.LENGTH_SHORT).show();
             return;
         }
         isPreviewActive = true;
-        startMainPreviewForSlot();
-        btnPreviewCurrentPosition.setText("停止位置预览");
+        startPreviewForEditorTarget();
+        btnPreviewCurrentPosition.setText("停止预览");
         UiOptionPillHelper.apply(btnPreviewCurrentPosition, ctx, true, true);
     }
 
-    private void startMainPreviewForSlot() {
+    private void startPreviewForEditorTarget() {
         Context ctx = getContext();
         if (ctx == null) return;
-        String cameraPos = mapSlotToCameraPos(activeSlot);
+        String cameraPos = getActiveCameraPos();
         Intent intent = new Intent(ctx, BlindSpotService.class);
         intent.putExtra("action", "preview_blind_spot");
         intent.putExtra("camera_pos", cameraPos);
         intent.putExtra("placement_slot", activeSlot);
+        intent.putExtra("target_display_id", editorDisplayId);
         ctx.startService(intent);
     }
 
-    private String mapSlotToCameraPos(String slot) {
-        if (BlindSpotPlacement.SLOT_RAIN_LEFT.equals(slot)) return "left";
-        if (BlindSpotPlacement.SLOT_RAIN_RIGHT.equals(slot)) return "right";
-        return slot;
+    private void sendSecondaryAdjustAction(boolean enter) {
+        Context ctx = getContext();
+        if (ctx == null) return;
+        Intent intent = new Intent(ctx, BlindSpotService.class);
+        intent.putExtra("action", enter ? "enter_secondary_display_adjust" : "exit_secondary_display_adjust");
+        if (enter) {
+            int targetId = !isMainEditorSelected()
+                    ? editorDisplayId
+                    : appConfig.getSecondaryDisplayId();
+            if (targetId == Display.DEFAULT_DISPLAY && !secondaryOutputDisplayIds.isEmpty()) {
+                targetId = secondaryOutputDisplayIds.get(0);
+            }
+            intent.putExtra("target_display_id", targetId);
+            intent.putExtra("placement_slot", activeSlot);
+        }
+        ctx.startService(intent);
     }
 
     private void resetCurrentTargetPosition() {
-        if (isMainTargetSelected()) {
-            appConfig.resetBlindSpotPlacement(activeSlot);
+        String screenKey = getActiveScreenKey();
+        String camPos = getActiveCameraPos();
+        int[] rawDims = resolveEditorRawScreenDimensions();
+
+        if (!isMainEditorSelected()) {
+            int defaultOrient = BlindSpotPlacement.SCREEN_EVCC.equals(screenKey) ? 0 : 180;
+            appConfig.setBlindSpotScreenOrientation(screenKey, defaultOrient);
+            appConfig.setBlindSpotScreenAlpha(screenKey, 100);
+            appConfig.setBlindSpotScreenBorderEnabled(screenKey, false);
+        } else {
             appConfig.resetTurnSignalFloatingBounds();
             appConfig.resetMainFloatingBounds();
-            Toast.makeText(requireContext(),
-                    "已恢复「" + BlindSpotPlacement.getSlotDisplayName(activeSlot) + "」默认位置",
-                    Toast.LENGTH_SHORT).show();
-        } else {
-            appConfig.setSecondaryDisplayBounds(0, 0, 720, 480);
-            appConfig.setSecondaryDisplayRotation(0);
-            appConfig.setSecondaryDisplayOrientation(0);
-            appConfig.setSecondaryDisplayAlpha(100);
-            seekbarSecondaryAlpha.setProgress(100);
-            tvSecondaryAlphaValue.setText("100%");
-            secondaryOrientationSpinner.setSelection(0, false);
-            Toast.makeText(requireContext(), "已恢复副屏默认位置与尺寸", Toast.LENGTH_SHORT).show();
         }
-        syncPositionControlsFromStorage();
-        updateRotationPillsUi();
-        BlindSpotService.update(requireContext());
+        appConfig.resetBlindSpotScreenPlacement(screenKey, activeSlot, rawDims[0], rawDims[1]);
+        appConfig.resetBlindSpotScreenCameraTransform(screenKey, camPos);
+
+        updateEditorTargetUi();
+        updateSecondaryOutputInfo();
+        commitLiveServiceUpdateNow();
+        Toast.makeText(
+                requireContext(),
+                String.format(Locale.US, "已恢复【%s】·「%s」默认位置与画面参数",
+                        getActiveScreenShortLabel(), BlindSpotPlacement.getSlotDisplayName(activeSlot)),
+                Toast.LENGTH_SHORT).show();
     }
 
     private void updateTimeoutLabel(int seconds) {
@@ -1206,17 +1741,29 @@ public class BlindSpotSettingsFragment extends Fragment implements UiThemeContro
         }).start();
     }
 
+    private String getCameraShortLabel(String camPos) {
+        if ("front".equals(camPos)) return "前";
+        if ("back".equals(camPos)) return "后";
+        if ("left".equals(camPos)) return "左";
+        if ("right".equals(camPos)) return "右";
+        return camPos;
+    }
+
     @Override
     public void onThemeApplied(Context themedContext, boolean isNight) {
+        updateOutputModeUi();
         updateSlotTabsUi();
         updateTriggerPresetPillsUi();
         updateEditToggleUi();
-        updateRotationPillsUi();
+        updateRotationAndCropVisuals();
+        updateMirrorUi();
         styleStaticActionPills(themedContext != null ? themedContext : getContext());
     }
 
     @Override
     public void onDestroyView() {
+        uiHandler.removeCallbacks(throttledServiceUpdateRunnable);
+        pendingServiceUpdateScheduled = false;
         if (isPreviewActive) {
             isPreviewActive = false;
             sendBlindSpotServiceAction("stop_preview_blind_spot");

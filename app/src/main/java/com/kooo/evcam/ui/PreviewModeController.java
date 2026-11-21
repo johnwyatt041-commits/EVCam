@@ -41,7 +41,7 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Coordinates top-bar preview modes (MODE_A 360 / MODE_B split / MODE_C triple / MODE_D dual-steering),
+ * Coordinates top-bar preview modes (MODE_A 360 / MODE_B split / MODE_C triple / MODE_D dual-steering / MODE_E dual-sides),
  * fullscreen corner navigation, and background staging PhotoTexture providers.
  */
 public final class PreviewModeController implements PreviewModeHost, MultiCameraManager.PhotoSurfaceProvider {
@@ -447,6 +447,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         if (configuredCameraCount >= 2 && mask[PreviewLayoutModel.BACK]) count++;
         if (configuredCameraCount >= 4 && mask[PreviewLayoutModel.LEFT]) count++;
         if (configuredCameraCount >= 4 && mask[PreviewLayoutModel.RIGHT]) count++;
+        if (count == 0 && configuredCameraCount < 4) {
+            return 0;
+        }
         return Math.max(1, count);
     }
 

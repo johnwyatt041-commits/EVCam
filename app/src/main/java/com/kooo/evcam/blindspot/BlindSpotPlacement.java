@@ -21,12 +21,23 @@ public final class BlindSpotPlacement {
     public static final float MIN_WIDTH_RATIO = 0.15f;
     public static final float MIN_HEIGHT_RATIO = 0.15f;
 
+    public static final String SCREEN_MAIN = "main";
+    public static final String SCREEN_EVCC = "evcc";
+    private static final int EVCC_DISPLAY_PICK_ID = -100;
+
     public static final String SLOT_FRONT = "front";
     public static final String SLOT_BACK = "back";
     public static final String SLOT_LEFT = "left";
     public static final String SLOT_RIGHT = "right";
     public static final String SLOT_RAIN_LEFT = "rain_left";
     public static final String SLOT_RAIN_RIGHT = "rain_right";
+
+    public static final List<String> STANDARD_FOUR_SLOTS = Collections.unmodifiableList(Arrays.asList(
+            SLOT_FRONT,
+            SLOT_BACK,
+            SLOT_LEFT,
+            SLOT_RIGHT
+    ));
 
     public static final List<String> ALL_SLOTS = Collections.unmodifiableList(Arrays.asList(
             SLOT_FRONT,
@@ -218,6 +229,191 @@ public final class BlindSpotPlacement {
             default:
                 return new RectRatio(0.02f, 0.20f, 0.42f, 0.60f);
         }
+    }
+
+    @NonNull
+    public static RectRatio defaultForSecondary() {
+        return new RectRatio(0.15f, 0.15f, 0.70f, 0.70f);
+    }
+
+    /** 将 Android DisplayId 映射到独立屏幕配置键（main / evcc / display_<id>）。 */
+    @NonNull
+    public static String screenKeyForDisplay(int displayId) {
+        if (displayId == -1 || displayId == 0) {
+            return SCREEN_MAIN;
+        }
+        if (displayId == EVCC_DISPLAY_PICK_ID) {
+            return SCREEN_EVCC;
+        }
+        if (displayId > 0) {
+            return "display_" + displayId;
+        }
+        return SCREEN_MAIN;
+    }
+
+    public static boolean isMainScreenKey(@Nullable String screenKey) {
+        if (screenKey == null) {
+            return true;
+        }
+        String trimmed = screenKey.trim().toLowerCase(java.util.Locale.ROOT);
+        return trimmed.isEmpty() || SCREEN_MAIN.equals(trimmed);
+    }
+
+    /** 标准四路摄像头槽位（前/后/左/右），不包含雨夜槽位。 */
+    public static boolean isStandardCameraSlot(@Nullable String slot) {
+        if (slot == null) {
+            return false;
+        }
+        String norm = slot.trim().toLowerCase(java.util.Locale.ROOT);
+        return SLOT_FRONT.equals(norm)
+                || SLOT_BACK.equals(norm)
+                || SLOT_LEFT.equals(norm)
+                || SLOT_RIGHT.equals(norm);
+    }
+
+    /** 将槽位（含雨夜左/右）映射到实际物理摄像头方位（front/back/left/right）。 */
+    @NonNull
+    public static String slotToCameraPos(@Nullable String slot) {
+        String norm = normalizeSlot(slot);
+        if (SLOT_RAIN_LEFT.equals(norm)) {
+            return SLOT_LEFT;
+        }
+        if (SLOT_RAIN_RIGHT.equals(norm)) {
+            return SLOT_RIGHT;
+        }
+        return norm;
+    }
+
+    /** 将屏幕硬件安装方向规整到 0 / 90 / 180 / 270。 */
+    public static int normalizeScreenOrientation(int deg) {
+        int norm = ((deg % 360) + 360) % 360;
+        if (norm == 90 || norm == 180 || norm == 270) {
+            return norm;
+        }
+        return 0;
+    }
+
+    /** 返回驾驶者视角下屏幕的可视宽高 [visualW, visualH]（90°/270° 时宽高互换）。 */
+    @NonNull
+    public static int[] visualScreenDimensions(int displayW, int displayH, int orientation) {
+        int safeW = displayW > 0 ? displayW : BASE_CANVAS_WIDTH;
+        int safeH = displayH > 0 ? displayH : BASE_CANVAS_HEIGHT;
+        int norm = normalizeScreenOrientation(orientation);
+        if (norm == 90 || norm == 270) {
+            return new int[]{safeH, safeW};
+        }
+        return new int[]{safeW, safeH};
+    }
+
+    /**
+     * 将驾驶者视觉坐标系中的归一化矩形转换为目标屏幕 WindowManager 逻辑像素 [lx, ly, lw, lh]。
+     * 解决倒置/侧装副屏（如 180° W-HUD）往右/下拖拽时画面反向移动的问题。
+     */
+    @NonNull
+    public static int[] visualToLogicalPixels(
+            @NonNull RectRatio visualRect,
+            int displayW,
+            int displayH,
+            int orientation) {
+        int safeW = displayW > 0 ? displayW : BASE_CANVAS_WIDTH;
+        int safeH = displayH > 0 ? displayH : BASE_CANVAS_HEIGHT;
+        int norm = normalizeScreenOrientation(orientation);
+        int[] visDims = visualScreenDimensions(safeW, safeH, norm);
+        int[] visPx = visualRect.toPixelBounds(visDims[0], visDims[1]);
+        int vx = visPx[0];
+        int vy = visPx[1];
+        int vw = visPx[2];
+        int vh = visPx[3];
+
+        int lx;
+        int ly;
+        int lw;
+        int lh;
+        switch (norm) {
+            case 180:
+                lx = safeW - vx - vw;
+                ly = safeH - vy - vh;
+                lw = vw;
+                lh = vh;
+                break;
+            case 90:
+                lx = safeW - vy - vh;
+                ly = vx;
+                lw = vh;
+                lh = vw;
+                break;
+            case 270:
+                lx = vy;
+                ly = safeH - vx - vw;
+                lw = vh;
+                lh = vw;
+                break;
+            default:
+                lx = vx;
+                ly = vy;
+                lw = vw;
+                lh = vh;
+                break;
+        }
+        lw = Math.max(1, Math.min(safeW, lw));
+        lh = Math.max(1, Math.min(safeH, lh));
+        lx = Math.max(0, Math.min(Math.max(0, safeW - lw), lx));
+        ly = Math.max(0, Math.min(Math.max(0, safeH - lh), ly));
+        return new int[]{lx, ly, lw, lh};
+    }
+
+    /**
+     * 将 WindowManager 逻辑像素逆变换为驾驶者视觉坐标系中的归一化 RectRatio。
+     */
+    @NonNull
+    public static RectRatio logicalToVisualRect(
+            int lx,
+            int ly,
+            int lw,
+            int lh,
+            int displayW,
+            int displayH,
+            int orientation) {
+        int safeW = displayW > 0 ? displayW : BASE_CANVAS_WIDTH;
+        int safeH = displayH > 0 ? displayH : BASE_CANVAS_HEIGHT;
+        int safeLw = Math.max(1, Math.min(safeW, lw));
+        int safeLh = Math.max(1, Math.min(safeH, lh));
+        int safeLx = Math.max(0, Math.min(Math.max(0, safeW - safeLw), lx));
+        int safeLy = Math.max(0, Math.min(Math.max(0, safeH - safeLh), ly));
+        int norm = normalizeScreenOrientation(orientation);
+        int[] visDims = visualScreenDimensions(safeW, safeH, norm);
+
+        int vx;
+        int vy;
+        int vw;
+        int vh;
+        switch (norm) {
+            case 180:
+                vx = safeW - safeLx - safeLw;
+                vy = safeH - safeLy - safeLh;
+                vw = safeLw;
+                vh = safeLh;
+                break;
+            case 90:
+                vx = safeLy;
+                vy = safeW - safeLx - safeLw;
+                vw = safeLh;
+                vh = safeLw;
+                break;
+            case 270:
+                vx = safeH - safeLy - safeLh;
+                vy = safeLx;
+                vw = safeLh;
+                vh = safeLw;
+                break;
+            default:
+                vx = safeLx;
+                vy = safeLy;
+                vw = safeLw;
+                vh = safeLh;
+                break;
+        }
+        return fromPixels(vx, vy, vw, vh, visDims[0], visDims[1]);
     }
 
     private static float clamp(float value, float min, float max) {

@@ -3,6 +3,8 @@ package com.kooo.evcam.playback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.kooo.evcam.camera.ActiveRecordingRegistry;
+
 import java.io.File;
 import java.io.IOException;
 import java.util.HashSet;
@@ -18,6 +20,7 @@ public final class VideoLockStore {
 
     public static final String LOCK_SUFFIX = ".lock";
     public static final String PENDING_SUFFIX = ".pending";
+    public static final long ACTIVE_PENDING_GRACE_WINDOW_MS = 2L * 60L * 1000L;
 
     private VideoLockStore() {}
 
@@ -118,6 +121,28 @@ public final class VideoLockStore {
     }
 
     /**
+     * Determines whether {@code file} is a {@code .pending} file that is still actively recording
+     * (either registered in {@code activePendingPaths} or modified within {@code graceWindowMs}).
+     * When {@code activePendingPaths == null}, preserves all {@code .pending} files for legacy callers.
+     */
+    public static boolean isProtectedPendingFile(@Nullable File file,
+                                                 @Nullable Set<String> activePendingPaths,
+                                                 long nowMs,
+                                                 long graceWindowMs) {
+        if (!isPendingFile(file)) {
+            return false;
+        }
+        if (activePendingPaths == null) {
+            return true;
+        }
+        if (activePendingPaths.contains(ActiveRecordingRegistry.normalizePath(file))) {
+            return true;
+        }
+        long modified = file.lastModified();
+        return nowMs > 0L && modified > 0L && (nowMs - modified) < graceWindowMs;
+    }
+
+    /**
      * Determines whether {@link com.kooo.evcam.StorageCleanupManager} must preserve this file.
      * - Locked media files and their non-orphan {@code .lock} sidecars are preserved.
      * - Active {@code .pending} recordings are preserved.
@@ -125,11 +150,24 @@ public final class VideoLockStore {
      */
     public static boolean shouldPreserveDuringCleanup(@Nullable File file,
                                                       @NonNull Set<String> directoryFileNames) {
+        return shouldPreserveDuringCleanup(file, directoryFileNames, null, 0L, 0L);
+    }
+
+    /**
+     * Determines whether {@link com.kooo.evcam.StorageCleanupManager} must preserve this file,
+     * distinguishing active {@code .pending} files from orphaned leftovers when {@code activePendingPaths}
+     * is supplied.
+     */
+    public static boolean shouldPreserveDuringCleanup(@Nullable File file,
+                                                      @NonNull Set<String> directoryFileNames,
+                                                      @Nullable Set<String> activePendingPaths,
+                                                      long nowMs,
+                                                      long graceWindowMs) {
         if (file == null) {
             return false;
         }
         if (isPendingFile(file)) {
-            return true;
+            return isProtectedPendingFile(file, activePendingPaths, nowMs, graceWindowMs);
         }
         if (isLockFile(file)) {
             return !isOrphanLockFile(file, directoryFileNames);

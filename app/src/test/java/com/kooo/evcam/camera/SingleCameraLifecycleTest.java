@@ -206,4 +206,39 @@ public class SingleCameraLifecycleTest {
         back.shutdownLifecycleExecutor(500);
         right.shutdownLifecycleExecutor(500);
     }
+
+    @Test
+    public void sessionCloseFallbackClearsStuckClosingFlag() {
+        SingleCamera camera = new SingleCamera(context, "0", null, cameraManager);
+        CameraDevice device = mock(CameraDevice.class);
+        camera.attachLifecycleStateForTest(device, null, null);
+
+        camera.setSessionFlagsForTest(false, true);
+        assertTrue(camera.isConfiguringOrClosingForTest());
+
+        camera.triggerSessionCloseFallbackForTest();
+        assertFalse("Timed-out session close fallback must clear closing flag instead of deadlocking",
+                camera.isConfiguringOrClosingForTest());
+        camera.shutdownLifecycleExecutor(500);
+    }
+
+    @Test
+    public void onDisconnectedClearsConfiguringAndClosingFlags() {
+        SingleCamera camera = new SingleCamera(context, "0", null, cameraManager);
+        CameraDevice device = mock(CameraDevice.class);
+        CameraCaptureSession session = mock(CameraCaptureSession.class);
+        camera.attachLifecycleStateForTest(device, session, null);
+
+        camera.setSessionFlagsForTest(true, true);
+        assertTrue(camera.isConfiguringOrClosingForTest());
+
+        camera.triggerOnDisconnectedForTest(device);
+        assertFalse("onDisconnected must reset configuring/closing session flags",
+                camera.isConfiguringOrClosingForTest());
+        assertFalse(camera.hasActiveCaptureSession());
+        assertFalse(camera.isConnected());
+        verify(session).close();
+        verify(device).close();
+        camera.shutdownLifecycleExecutor(500);
+    }
 }

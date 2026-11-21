@@ -278,6 +278,7 @@ public final class VehicleAutomationCoordinator {
 
         List<VehicleTriggerRule> rules = config.getVehicleTriggerRules();
         ruleEngine.setRules(rules);
+        scheduleNextRuleDelayLocked();
         gearPopupCoordinator.setConfig(config.isRdShiftAutoPopupEnabled(), config.getRdShiftPopupSeconds());
         reversePreviewCoordinator.setConfig(
                 config.isReversePreviewEnabled(),

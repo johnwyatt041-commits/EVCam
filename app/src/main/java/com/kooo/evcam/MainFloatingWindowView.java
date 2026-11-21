@@ -549,10 +549,9 @@ public class MainFloatingWindowView extends FrameLayout {
             targetH = bounds[3];
             isCurrentlySwapped = false;
         } else {
-            int correctionRotation = 0;
-            if (appConfig.isBlindSpotCorrectionEnabled() && cameraPos != null) {
-                correctionRotation = appConfig.getBlindSpotCorrectionRotation(cameraPos);
-            }
+            int correctionRotation = cameraPos != null
+                    ? appConfig.getBlindSpotScreenCameraRotation(BlindSpotPlacement.SCREEN_MAIN, cameraPos)
+                    : 0;
             int baseW = appConfig.getMainFloatingWidth();
             int baseH = appConfig.getMainFloatingHeight();
             boolean shouldSwap = BlindSpotCorrection.isCloserToPortrait(correctionRotation);
@@ -576,8 +575,13 @@ public class MainFloatingWindowView extends FrameLayout {
             }
         }
 
-        BlindSpotCorrection.apply(textureView, appConfig,
-                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT, cameraPos, 0, isCurrentlySwapped);
+        BlindSpotCorrection.applyForScreen(
+                textureView,
+                appConfig,
+                BlindSpotPlacement.SCREEN_MAIN,
+                com.kooo.evcam.blindspot.MirrorTarget.BLIND_SPOT,
+                cameraPos,
+                0);
     }
 
     private void scheduleRetryBind() {

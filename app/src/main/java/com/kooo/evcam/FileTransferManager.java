@@ -1,16 +1,26 @@
 package com.kooo.evcam;
 
 import android.content.Context;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+
+import com.kooo.evcam.camera.ActiveRecordingRegistry;
+import com.kooo.evcam.playback.VideoLockStore;
 
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.nio.channels.FileChannel;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Set;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * 文件传输管理器
@@ -65,8 +75,31 @@ public class FileTransferManager {
     private static final int MAX_RETRY_COUNT = 5;           // 最大重试次数（增加到5次）
     private static final long RETRY_DELAY_MS = 3000;        // 重试延迟（毫秒）- 减少到3秒加快重试
     private static final long STARTUP_CLEANUP_DELAY_MS = 60 * 1000;  // 启动后清理延迟：1分钟
-    private static final long TEMP_FILE_EXPIRE_MS = 60 * 60 * 1000;  // 临时文件过期时间：1小时
+    private static final long PENDING_ACTIVE_GRACE_MS = 2 * 60 * 1000; // 活跃 .pending 宽限窗口
+    private static final long STALE_TINY_FILE_AGE_MS = 5 * 60 * 1000;  // 极小无效残片延迟清理时间：5分钟
+    private static final long STALE_PART_FILE_AGE_MS = 60 * 60 * 1000; // 残留 .part 分片清理时间：1小时
     private static final long MIN_VALID_FILE_SIZE = 1024;  // Short, valid recordings can be smaller than 500 KB.
+
+    private volatile String inFlightSourcePath = null;
+
+    public static final class TempCleanupStats {
+        public int deletedVerifiedCount = 0;
+        public int deletedInvalidCount = 0;
+        public int requeuedCount = 0;
+        public int preservedUnsavedCount = 0;
+        public long freedBytes = 0;
+        public long preservedUnsavedBytes = 0;
+    }
+
+    public static final class EmergencyEvictionResult {
+        public final int deletedCount;
+        public final long deletedBytes;
+
+        public EmergencyEvictionResult(int deletedCount, long deletedBytes) {
+            this.deletedCount = deletedCount;
+            this.deletedBytes = deletedBytes;
+        }
+    }
     
     // 统计
     private long totalTransferred = 0;      // 已传输文件数
@@ -153,6 +186,10 @@ public class FileTransferManager {
             }
             return;
         }
+        if (callback == null && isSourceQueuedOrInFlight(sourceFile)) {
+            AppLog.d(TAG, "Skipping duplicate transfer task for already queued/active file: " + sourceFile.getName());
+            return;
+        }
         
         TransferTask task = new TransferTask(sourceFile, targetFile, callback);
         start();
@@ -164,6 +201,22 @@ public class FileTransferManager {
         if (isRunning.get() && transferHandler != null) {
             transferHandler.post(this::processQueue);
         }
+    }
+
+    private boolean isSourceQueuedOrInFlight(File sourceFile) {
+        String normalized = ActiveRecordingRegistry.normalizePath(sourceFile);
+        if (normalized.isEmpty()) {
+            return false;
+        }
+        if (normalized.equals(inFlightSourcePath)) {
+            return true;
+        }
+        for (TransferTask queued : transferQueue) {
+            if (queued != null && normalized.equals(ActiveRecordingRegistry.normalizePath(queued.sourceFile))) {
+                return true;
+            }
+        }
+        return false;
     }
     
     /**
@@ -250,42 +303,243 @@ public class FileTransferManager {
                 totalFailed, getQueueSize(), getPendingFileCount());
     }
     
-    // ===== 私有方法 =====
-    
+    // ===== 私有与清理校验方法 =====
+
     /**
-     * 清理过期的临时文件
-     * 在服务运行期间定期调用
+     * 触发一次临时目录校验清理与未落盘文件补传（异步走队列线程或同步兜底）。
      */
-    private void cleanupExpiredTempFiles() {
+    public void cleanupAndRetryTempFiles() {
+        if (isRunning.get() && transferHandler != null) {
+            transferHandler.post(this::runCleanupAndRetrySync);
+        } else {
+            runCleanupAndRetrySync();
+        }
+    }
+
+    /**
+     * 校验临时目录：仅删除已确认安全落盘到目标目录的文件（或超时极小无效残片），
+     * 绝不因超过 1 小时而误删尚未成功保存到 U 盘的有效视频；目标目录可用时自动入队补传。
+     */
+    public TempCleanupStats runCleanupAndRetrySync() {
+        return runCleanupAndRetrySync(true);
+    }
+
+    private TempCleanupStats runCleanupAndRetrySync(boolean allowRequeue) {
         File tempDir = getTempVideoDir();
         if (tempDir == null || !tempDir.exists()) {
-            return;
+            return new TempCleanupStats();
         }
-        
-        File[] files = tempDir.listFiles();
+        File targetDir = resolveVerifiedTargetVideoDir(context);
+        Set<String> protectedPaths = collectProtectedPaths();
+        TempCleanupStats stats = inspectAndCleanTempDir(
+                tempDir,
+                targetDir,
+                protectedPaths,
+                System.currentTimeMillis(),
+                MIN_VALID_FILE_SIZE,
+                allowRequeue ? (file -> {
+                    if (targetDir != null) {
+                        addTransferTask(file, new File(targetDir, file.getName()), null);
+                    }
+                }) : null
+        );
+        if (stats.deletedVerifiedCount > 0 || stats.deletedInvalidCount > 0
+                || stats.requeuedCount > 0 || stats.preservedUnsavedCount > 0) {
+            AppLog.i(TAG, "Temp cleanup/verify: deletedVerified=" + stats.deletedVerifiedCount
+                    + ", deletedInvalid=" + stats.deletedInvalidCount
+                    + ", requeued=" + stats.requeuedCount
+                    + ", preservedUnsaved=" + stats.preservedUnsavedCount
+                    + " (" + formatSize(stats.preservedUnsavedBytes) + ")"
+                    + ", freed=" + formatSize(stats.freedBytes));
+        }
+        if (stats.preservedUnsavedCount > 0) {
+            AppLog.w(TAG, "Preserved " + stats.preservedUnsavedCount
+                    + " unsaved temp video(s) because target USB storage is unavailable or unverified");
+        }
+        return stats;
+    }
+
+    /**
+     * 内部缓存进入危险低空间阈值时的紧急淘汰：先清理已验证落盘的临时文件，
+     * 仅在仍不足时才按最旧时间淘汰尚未传走的历史临时视频（仍严格跳过录制中/传输中文件）。
+     */
+    public EmergencyEvictionResult evictOldestUnsavedForEmergencySpace(long bytesToFree) {
+        runCleanupAndRetrySync(false);
+        if (bytesToFree <= 0L) {
+            return new EmergencyEvictionResult(0, 0L);
+        }
+        File tempDir = getTempVideoDir();
+        if (tempDir == null || !tempDir.exists()) {
+            return new EmergencyEvictionResult(0, 0L);
+        }
+        File[] files = tempDir.listFiles(File::isFile);
         if (files == null || files.length == 0) {
-            return;
+            return new EmergencyEvictionResult(0, 0L);
         }
-        
-        long now = System.currentTimeMillis();
-        int deletedCount = 0;
-        long deletedSize = 0;
-        
+        Set<String> protectedPaths = collectProtectedPaths();
+        List<File> candidates = new ArrayList<>();
         for (File file : files) {
-            long fileAge = now - file.lastModified();
-            if (fileAge > TEMP_FILE_EXPIRE_MS) {
-                long fileSize = file.length();
-                if (file.delete()) {
-                    deletedCount++;
-                    deletedSize += fileSize;
-                    AppLog.d(TAG, "Cleanup: deleted expired temp file: " + file.getName());
+            if (file == null || !file.isFile()) {
+                continue;
+            }
+            if (protectedPaths.contains(ActiveRecordingRegistry.normalizePath(file))) {
+                continue;
+            }
+            if (!file.getName().toLowerCase(Locale.ROOT).endsWith(".mp4")) {
+                continue;
+            }
+            candidates.add(file);
+        }
+        candidates.sort(Comparator.comparingLong(File::lastModified));
+        int deletedCount = 0;
+        long deletedBytes = 0L;
+        for (File candidate : candidates) {
+            if (deletedBytes >= bytesToFree) {
+                break;
+            }
+            long len = candidate.length();
+            if (candidate.delete()) {
+                deletedCount++;
+                deletedBytes += len;
+                AppLog.w(TAG, "Emergency cache eviction deleted unsaved temp video: "
+                        + candidate.getName() + " (" + formatSize(len) + ")");
+            }
+        }
+        return new EmergencyEvictionResult(deletedCount, deletedBytes);
+    }
+
+    private Set<String> collectProtectedPaths() {
+        Set<String> protectedPaths = new HashSet<>(ActiveRecordingRegistry.snapshot());
+        String activeFlight = inFlightSourcePath;
+        if (activeFlight != null && !activeFlight.isEmpty()) {
+            protectedPaths.add(activeFlight);
+        }
+        for (TransferTask task : transferQueue) {
+            if (task != null && task.sourceFile != null) {
+                String path = ActiveRecordingRegistry.normalizePath(task.sourceFile);
+                if (!path.isEmpty()) {
+                    protectedPaths.add(path);
                 }
             }
         }
-        
-        if (deletedCount > 0) {
-            AppLog.d(TAG, "Periodic cleanup: deleted " + deletedCount + " expired files, freed " + formatSize(deletedSize));
+        return protectedPaths;
+    }
+
+    static File resolveVerifiedTargetVideoDir(Context context) {
+        if (context == null) {
+            return null;
         }
+        AppConfig config = new AppConfig(context);
+        if (config.isUsingExternalSdCard()) {
+            File sdRoot = StorageHelper.getExternalSdCardRoot(context);
+            if (sdRoot == null || !sdRoot.exists()) {
+                return null;
+            }
+            File dcimDir = new File(sdRoot, Environment.DIRECTORY_DCIM);
+            if (!dcimDir.exists() || !dcimDir.isDirectory() || !dcimDir.canWrite()) {
+                return null;
+            }
+            File videoDir = new File(dcimDir, StorageHelper.VIDEO_DIR_NAME);
+            if (!videoDir.exists()) {
+                videoDir.mkdirs();
+            }
+            return (videoDir.isDirectory() && videoDir.canWrite()) ? videoDir : null;
+        }
+        File publicDcim = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM);
+        if (publicDcim == null || !publicDcim.exists()) {
+            return null;
+        }
+        File internalVideoDir = StorageHelper.getVideoDir(context, false);
+        return (internalVideoDir != null && internalVideoDir.isDirectory() && internalVideoDir.canWrite())
+                ? internalVideoDir
+                : null;
+    }
+
+    static boolean isVerifiedInTargetDir(File sourceFile, File targetDir) {
+        if (sourceFile == null || !sourceFile.isFile() || sourceFile.length() < MIN_VALID_FILE_SIZE) {
+            return false;
+        }
+        if (targetDir == null || !targetDir.isDirectory()) {
+            return false;
+        }
+        File targetFile = new File(targetDir, sourceFile.getName());
+        return targetFile.isFile() && targetFile.length() == sourceFile.length();
+    }
+
+    static TempCleanupStats inspectAndCleanTempDir(File tempDir,
+                                                    File verifiedTargetDir,
+                                                    Set<String> protectedPaths,
+                                                    long nowMs,
+                                                    long minValidSize,
+                                                    Consumer<File> requeueCallback) {
+        TempCleanupStats stats = new TempCleanupStats();
+        if (tempDir == null || !tempDir.exists() || !tempDir.isDirectory()) {
+            return stats;
+        }
+        File[] files = tempDir.listFiles();
+        if (files == null || files.length == 0) {
+            return stats;
+        }
+        for (File file : files) {
+            if (file == null || !file.isFile()) {
+                continue;
+            }
+            String canonical = ActiveRecordingRegistry.normalizePath(file);
+            if (protectedPaths != null && protectedPaths.contains(canonical)) {
+                continue;
+            }
+            long len = file.length();
+            long age = Math.max(0L, nowMs - file.lastModified());
+            if (VideoLockStore.isPendingFile(file)) {
+                if (VideoLockStore.isProtectedPendingFile(file, protectedPaths, nowMs, PENDING_ACTIVE_GRACE_MS)) {
+                    continue;
+                }
+                if (len < minValidSize && age >= STALE_TINY_FILE_AGE_MS && file.delete()) {
+                    stats.deletedInvalidCount++;
+                    stats.freedBytes += len;
+                }
+                continue;
+            }
+            String lower = file.getName().toLowerCase(Locale.ROOT);
+            if (!lower.endsWith(".mp4")) {
+                if (lower.endsWith(".part") && age >= STALE_PART_FILE_AGE_MS && file.delete()) {
+                    stats.deletedInvalidCount++;
+                    stats.freedBytes += len;
+                }
+                continue;
+            }
+            if (len < minValidSize) {
+                if (age >= STALE_TINY_FILE_AGE_MS && file.delete()) {
+                    stats.deletedInvalidCount++;
+                    stats.freedBytes += len;
+                    AppLog.d(TAG, "Cleanup: deleted tiny invalid temp file: " + file.getName());
+                }
+                continue;
+            }
+            if (verifiedTargetDir != null && isVerifiedInTargetDir(file, verifiedTargetDir)) {
+                if (file.delete()) {
+                    stats.deletedVerifiedCount++;
+                    stats.freedBytes += len;
+                    AppLog.d(TAG, "Cleanup: deleted verified temp file (already on target): " + file.getName());
+                }
+                continue;
+            }
+            if (verifiedTargetDir != null && requeueCallback != null) {
+                requeueCallback.accept(file);
+                stats.requeuedCount++;
+            } else {
+                stats.preservedUnsavedCount++;
+                stats.preservedUnsavedBytes += len;
+            }
+        }
+        return stats;
+    }
+
+    /**
+     * 清理临时文件（启动 1 分钟后调用）
+     */
+    private void cleanupExpiredTempFiles() {
+        runCleanupAndRetrySync();
     }
     
     /**
@@ -316,6 +570,15 @@ public class FileTransferManager {
      * 处理单个传输任务
      */
     private void processTask(TransferTask task) {
+        inFlightSourcePath = task != null ? ActiveRecordingRegistry.normalizePath(task.sourceFile) : null;
+        try {
+            processTaskInternal(task);
+        } finally {
+            inFlightSourcePath = null;
+        }
+    }
+
+    private void processTaskInternal(TransferTask task) {
         if (!task.sourceFile.exists()) {
             AppLog.w(TAG, "Source file no longer exists: " + task.sourceFile.getName());
             if (task.callback != null) {
@@ -353,14 +616,6 @@ public class FileTransferManager {
             AppLog.e(TAG, "Target directory is not writable: " + targetDir.getAbsolutePath());
             handleTransferFailure(task, "Target directory not writable");
             return;
-        }
-
-        // 删除已存在的目标文件（如果存在）
-        if (task.targetFile.exists()) {
-            AppLog.d(TAG, "Deleting existing target file: " + task.targetFile.getName());
-            if (!task.targetFile.delete()) {
-                AppLog.w(TAG, "Failed to delete existing target file: " + task.targetFile.getName());
-            }
         }
 
         // 尝试复制文件（直接复制，不尝试移动，因为U盘可能是不同的文件系统）
@@ -435,25 +690,52 @@ public class FileTransferManager {
     }
     
     /**
-     * 复制文件（使用缓冲流，更稳定可靠）
-     * 针对U盘等慢速存储优化
+     * 复制文件（优先写入 .part 临时目标文件并落盘 sync 后原子重命名，避免中断在 U 盘留下半截 .mp4）
      */
     private boolean copyFile(File source, File target) {
-        FileInputStream fis = null;
-        FileOutputStream fos = null;
-
-        try {
-            fis = new FileInputStream(source);
-            fos = new FileOutputStream(target);
-
-            // 验证源文件大小
-            long size = source.length();
-            if (size < MIN_VALID_FILE_SIZE) {
-                AppLog.w(TAG, "Source file too small: " + source.getName() + " (" + size + " bytes)");
+        long size = source.length();
+        if (size < MIN_VALID_FILE_SIZE) {
+            AppLog.w(TAG, "Source file too small: " + source.getName() + " (" + size + " bytes)");
+            return false;
+        }
+        File parent = target.getParentFile();
+        File partFile = parent != null ? new File(parent, target.getName() + ".part") : null;
+        if (partFile != null) {
+            if (partFile.exists()) {
+                partFile.delete();
+            }
+            if (copyFileDirect(source, partFile, size)) {
+                if (target.exists() && !target.delete()) {
+                    AppLog.w(TAG, "Failed to delete existing target file before rename: " + target.getName());
+                }
+                if (partFile.renameTo(target) && target.exists() && target.length() == size) {
+                    AppLog.d(TAG, "File copied successfully (.part atomic): " + source.getName() + " (" + formatSize(size) + ")");
+                    return true;
+                }
+                if (partFile.exists()) {
+                    partFile.delete();
+                }
+                AppLog.w(TAG, "Atomic .part rename failed on target FS, falling back to direct copy: " + target.getName());
+            } else {
+                if (partFile.exists()) {
+                    partFile.delete();
+                }
                 return false;
             }
+        }
+        if (target.exists() && !target.delete()) {
+            AppLog.w(TAG, "Failed to delete existing target file: " + target.getName());
+        }
+        return copyFileDirect(source, target, size);
+    }
 
-            // 使用 64KB 缓冲区（对U盘更友好）
+    private boolean copyFileDirect(File source, File destination, long expectedSize) {
+        FileInputStream fis = null;
+        FileOutputStream fos = null;
+        try {
+            fis = new FileInputStream(source);
+            fos = new FileOutputStream(destination);
+
             byte[] buffer = new byte[64 * 1024];
             long transferred = 0;
             int read;
@@ -461,45 +743,37 @@ public class FileTransferManager {
             while ((read = fis.read(buffer)) != -1) {
                 fos.write(buffer, 0, read);
                 transferred += read;
-
-                // 定期刷新缓冲区，避免内存中积累太多
-                if (transferred % (1024 * 1024) == 0) {  // 每1MB刷新一次
+                if (transferred % (1024 * 1024) == 0) {
                     fos.flush();
                 }
             }
 
-            // 最终刷新
             fos.flush();
-
-            // 同步到磁盘（确保数据真正写入）
             fos.getFD().sync();
 
-            // 验证目标文件大小
-            long targetSize = target.length();
-            if (targetSize != size) {
-                AppLog.w(TAG, "File size mismatch after copy: source=" + size + ", target=" + targetSize);
-                target.delete();
+            fis.close();
+            fis = null;
+            fos.close();
+            fos = null;
+
+            long destSize = destination.length();
+            if (destSize != expectedSize) {
+                AppLog.w(TAG, "File size mismatch after copy: source=" + expectedSize + ", dest=" + destSize);
+                destination.delete();
                 return false;
             }
-
-            AppLog.d(TAG, "File copied successfully: " + source.getName() + " (" + formatSize(size) + ")");
             return true;
-
         } catch (IOException e) {
             AppLog.e(TAG, "Error copying file: " + source.getName(), e);
-
-            // 删除可能不完整的目标文件
-            if (target.exists()) {
-                target.delete();
+            if (destination.exists()) {
+                destination.delete();
             }
-
             return false;
         } finally {
             try {
                 if (fis != null) fis.close();
                 if (fos != null) fos.close();
-            } catch (IOException e) {
-                // Ignore
+            } catch (IOException ignored) {
             }
         }
     }

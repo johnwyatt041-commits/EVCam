@@ -8,6 +8,9 @@ import android.opengl.GLES20;
 import android.opengl.GLSurfaceView;
 import android.opengl.GLUtils;
 import android.opengl.Matrix;
+import android.os.Handler;
+import android.os.HandlerThread;
+import android.os.SystemClock;
 import android.view.Surface;
 
 import androidx.annotation.NonNull;
@@ -33,6 +36,7 @@ import java.nio.ByteOrder;
 import java.nio.FloatBuffer;
 import java.nio.ShortBuffer;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLongArray;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
@@ -209,8 +213,18 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private final int[] oesTextureIds = new int[4];
     private final SurfaceTexture[] surfaceTextures = new SurfaceTexture[4];
     private final Surface[] inputSurfaces = new Surface[4];
-    private final boolean[] frameAvailableFlags = new boolean[4];
+    private final AtomicBoolean[] frameAvailableFlags = new AtomicBoolean[] {
+            new AtomicBoolean(false),
+            new AtomicBoolean(false),
+            new AtomicBoolean(false),
+            new AtomicBoolean(false)
+    };
+    private final AtomicLongArray lastOesFrameUptimeMs = new AtomicLongArray(4);
     private final float[][] texMatrices = new float[4][16];
+    @Nullable
+    private HandlerThread oesCallbackThread;
+    @Nullable
+    private Handler oesCallbackHandler;
 
     private int birdProgram;
     private int patchProgram;
@@ -626,17 +640,15 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             return;
         }
 
-        // 更新四路 OES 纹理帧
+        // 更新四路 OES 纹理帧（先原子消费标志再 updateTexImage，避免并发到达的新帧标志被覆盖丢失）
         for (int i = 0; i < 4; i++) {
             SurfaceTexture st = surfaceTextures[i];
-            if (st != null && frameAvailableFlags[i]) {
+            if (st != null && frameAvailableFlags[i].getAndSet(false)) {
                 try {
                     st.updateTexImage();
                     st.getTransformMatrix(texMatrices[i]);
                 } catch (Exception e) {
                     AppLog.w(TAG, "updateTexImage ignored for cam " + i + ": " + e.getMessage());
-                } finally {
-                    frameAvailableFlags[i] = false;
                 }
             }
         }
@@ -961,6 +973,15 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void initOesInputTexturesAndSurfaces() {
         releaseSurfacesOnly();
+        final Handler cbHandler;
+        synchronized (surfaceReleaseLock) {
+            if (oesCallbackThread == null || !oesCallbackThread.isAlive()) {
+                oesCallbackThread = new HandlerThread("SurroundOesCb");
+                oesCallbackThread.start();
+                oesCallbackHandler = new Handler(oesCallbackThread.getLooper());
+            }
+            cbHandler = oesCallbackHandler;
+        }
         GLES20.glGenTextures(4, oesTextureIds, 0);
         for (int i = 0; i < 4; i++) {
             GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[i]);
@@ -970,12 +991,20 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
 
             final int idx = i;
+            frameAvailableFlags[idx].set(false);
+            lastOesFrameUptimeMs.set(idx, 0L);
             SurfaceTexture st = new SurfaceTexture(oesTextureIds[i]);
             st.setDefaultBufferSize(SurroundCalibrationProfile.IMAGE_WIDTH, SurroundCalibrationProfile.IMAGE_HEIGHT);
-            st.setOnFrameAvailableListener(texture -> {
-                frameAvailableFlags[idx] = true;
+            SurfaceTexture.OnFrameAvailableListener frameListener = texture -> {
+                lastOesFrameUptimeMs.set(idx, SystemClock.uptimeMillis());
+                frameAvailableFlags[idx].set(true);
                 requestRenderSafe();
-            });
+            };
+            if (cbHandler != null) {
+                st.setOnFrameAvailableListener(frameListener, cbHandler);
+            } else {
+                st.setOnFrameAvailableListener(frameListener);
+            }
             surfaceTextures[i] = st;
             inputSurfaces[i] = new Surface(st);
         }
@@ -1302,10 +1331,18 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         releaseSurfacesOnly();
     }
 
+    public long getLastOesFrameUptimeMs(int slot) {
+        if (slot < 0 || slot >= 4) {
+            return 0L;
+        }
+        return lastOesFrameUptimeMs.get(slot);
+    }
+
     private void releaseSurfacesOnly() {
         synchronized (surfaceReleaseLock) {
             for (int i = 0; i < 4; i++) {
-                frameAvailableFlags[i] = false;
+                frameAvailableFlags[i].set(false);
+                lastOesFrameUptimeMs.set(i, 0L);
                 if (inputSurfaces[i] != null) {
                     try {
                         inputSurfaces[i].release();
@@ -1321,6 +1358,17 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                     }
                     surfaceTextures[i] = null;
                 }
+            }
+            if (oesCallbackHandler != null) {
+                oesCallbackHandler.removeCallbacksAndMessages(null);
+                oesCallbackHandler = null;
+            }
+            if (oesCallbackThread != null) {
+                try {
+                    oesCallbackThread.quitSafely();
+                } catch (Exception ignored) {
+                }
+                oesCallbackThread = null;
             }
         }
     }

@@ -87,6 +87,9 @@ public final class EditablePreviewLayout extends ViewGroup {
         STORAGE_SPECS.put(PreviewMode.MODE_D, new ModeStorageSpec(
                 "d_saved", null, "d_pane_", null, "d_order_", null,
                 PreviewLayoutModel.PRESET_MODE_D_DUAL));
+        STORAGE_SPECS.put(PreviewMode.MODE_E, new ModeStorageSpec(
+                "e_saved", null, "e_pane_", null, "e_order_", null,
+                PreviewLayoutModel.PRESET_MODE_E_SIDES));
     }
 
     private final EnumMap<PreviewMode, PreviewLayoutModel> modeModels = new EnumMap<>(PreviewMode.class);
@@ -625,6 +628,9 @@ public final class EditablePreviewLayout extends ViewGroup {
     }
 
     public boolean isPaneVisibleInMode(int index) {
+        if (currentMode == PreviewMode.MODE_E) {
+            return index == PreviewLayoutModel.LEFT || index == PreviewLayoutModel.RIGHT;
+        }
         if (currentMode == PreviewMode.MODE_D) {
             return index == modeDLeftPrimaryIndex || index == modeDRightSideIndex;
         }
@@ -640,7 +646,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         setPreviewState(mode, primaryIndex, PreviewLayoutModel.LEFT);
     }
 
-    /** Switch active preview mode and/or paired feeds (Mode C/D), recomputing layout and visibility. */
+    /** Switch active preview mode and/or paired feeds (Mode C/D/E), recomputing layout and visibility. */
     public void setPreviewState(@NonNull PreviewMode mode, int primaryIndex, int modeDRightSide) {
         PreviewMode normalizedMode = STORAGE_SPECS.containsKey(mode) ? mode : PreviewMode.MODE_B;
         int normalizedPrimary = (primaryIndex == PreviewLayoutModel.BACK)
@@ -652,15 +658,19 @@ public final class EditablePreviewLayout extends ViewGroup {
             finishEditing(false);
         }
         boolean modeChanged = currentMode != normalizedMode;
-        boolean primaryChanged = (normalizedMode == PreviewMode.MODE_D)
+        boolean primaryChanged = (normalizedMode == PreviewMode.MODE_E)
+                ? false
+                : ((normalizedMode == PreviewMode.MODE_D)
                 ? (modeDLeftPrimaryIndex != normalizedPrimary || modeDRightSideIndex != normalizedSide)
-                : (modeCPrimaryIndex != normalizedPrimary);
+                : (modeCPrimaryIndex != normalizedPrimary));
 
         currentMode = normalizedMode;
         if (normalizedMode == PreviewMode.MODE_D) {
             modeDLeftPrimaryIndex = normalizedPrimary;
             modeDRightSideIndex = normalizedSide;
-        } else {
+        } else if (normalizedMode == PreviewMode.MODE_C) {
+            modeCPrimaryIndex = normalizedPrimary;
+        } else if (normalizedMode == PreviewMode.MODE_B) {
             modeCPrimaryIndex = normalizedPrimary;
         }
         if (modeChanged) {
@@ -675,6 +685,16 @@ public final class EditablePreviewLayout extends ViewGroup {
     /** Toggles camera pane visibility in the current mode; Mode B guarantees at least one visible pane. */
     public boolean togglePaneVisibility(int index) {
         if (index < 0 || index >= PreviewLayoutModel.PANE_COUNT) return false;
+        if (currentMode == PreviewMode.MODE_E) {
+            if (index == PreviewLayoutModel.LEFT || index == PreviewLayoutModel.RIGHT) {
+                selected = index;
+                invalidate();
+                if (editorSelectionListener != null) {
+                    editorSelectionListener.onSelectedPaneChanged(selected);
+                }
+            }
+            return true;
+        }
         if (currentMode == PreviewMode.MODE_D) {
             if (index == PreviewLayoutModel.FRONT || index == PreviewLayoutModel.BACK) {
                 modeDLeftPrimaryIndex = index;
@@ -739,7 +759,9 @@ public final class EditablePreviewLayout extends ViewGroup {
     }
 
     private void recomputeEffectiveLayout(boolean notify) {
-        if (currentMode == PreviewMode.MODE_D) {
+        if (currentMode == PreviewMode.MODE_E) {
+            effectiveLayout = activeModel().computeEffectiveModeE();
+        } else if (currentMode == PreviewMode.MODE_D) {
             effectiveLayout = activeModel().computeEffectiveModeD(modeDLeftPrimaryIndex, modeDRightSideIndex);
         } else if (currentMode == PreviewMode.MODE_C) {
             effectiveLayout = activeModel().computeEffectiveModeC(
@@ -945,6 +967,9 @@ public final class EditablePreviewLayout extends ViewGroup {
                         ? PreviewLayoutModel.LEFT : PreviewLayoutModel.RIGHT;
                 activeModel().syncPairedSlot(modeDLeftPrimaryIndex, inactiveLeft);
                 activeModel().syncPairedSlot(modeDRightSideIndex, inactiveRight);
+            } else if (currentMode == PreviewMode.MODE_E) {
+                activeModel().syncPairedSlot(PreviewLayoutModel.LEFT, PreviewLayoutModel.FRONT);
+                activeModel().syncPairedSlot(PreviewLayoutModel.RIGHT, PreviewLayoutModel.BACK);
             }
             persistCurrentMode(true);
         } else {

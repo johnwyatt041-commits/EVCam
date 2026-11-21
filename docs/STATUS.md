@@ -1,35 +1,38 @@
 # 项目进度
 
-最后更新/核对：2026-11-21 02:59:13 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已提交 `3869f7f`、封包 `build21` 并发布至 fork Pre-release [`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)，`534` 测、`0` Lint error、6 资产远端 SHA256 核验一致；待银河 E5 实车测试）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-21 23:47:07 +08:00（Asia/Hong_Kong）
+维护：Antigravity（当前工作区在既有补盲/飞书/视图「左右 E」/回放分享网卡修复未提交改动上，完成多路录像启动、U盘中转、`.pending` 恢复、动态分段清理、模式 A 断联及规则忙等 6 项可靠性修复，`1.6.6-test-11212325`，`624` 测、`0` Lint error；待提交与实车测试；最新已发布测试包仍为 [`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；源码提交 **`3869f7f`**（含方案 B 修复与原厂 `avm_calib_res` 导入，`1.6.6-test-11210240`，`versionCode = 86`） |
+| 分支与提交 | `codex/e5-recording-startup-fix`；已提交基线 **`80fdcc8` / `3869f7f`**，当前工作区含补盲、飞书、视图「左右 E」、回放分享及本次 6 项可靠性修复未提交改动（`1.6.6-test-11212325`，`versionCode = 86`） |
 | 本地交付 | `outputs/` 顶层保留 **`build20`** + **`build21`**（各 6 文件，共 12 文件；`build19` 已归档至 `outputs/archive/`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)（6 资产 SHA256 一致） |
-| 离线与设备验证 | `build21` 已通过 `verify.ps1` 双风味 `534` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease`、`0` Lint error（`2180` warnings）与签名/资产核验；**尚未上实车测试** |
-| 实车状态 | 针对 `build20` 360 比例/错位与接缝反馈已完成 `190×462` 车框、零跳变重投影、`Scale` 缩放+辅助工具与原厂 `avm_calib_res` 直导并发布 `build21`，待装车实测 |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)（6 资产 SHA256 一致；未包含本次新改） |
+| 离线与设备验证 | 当前改动已通过 `verify.ps1` 双风味 `624` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease` 及双风味 Lint `0` errors（`2220` warnings）；**尚未上实车测试** |
+| 实车状态 | 待安装验证本次 6 项可靠性修复（多路部分失败/U盘中转断联恢复/`.pending` 恢复/动态清理/模式A看门狗/规则调度）及既有网卡、视图E、补盲、飞书、`build21` 360 |
 
 ## 当前结论与确认边界
 
-- **`build21` 已合并发布方案 B 修复与原厂 `avm_calib_res` 格式直导**：详见 [实车修复与 4.3 外参微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)（E5 实车车框 `190×462` / PNG `226×464`、静态 `bird.mesh` 零跳变原位重投影、`4.3` 新增 `Scale` 与 `Δcx/Δcy/Δk1` + `250 cm` 参考网格/隐藏车模/单路独显、以及 `Table.db` + 704B `.param` 原厂目录扫描/`.zip`/SAF 文件夹直导）。
-- **手机端与 `build19`/`build20` 既有基线保持完整**：APVP `40007`、双层纯两侧引导线、模式 D 转向灯联动、四分栏统一透明度、`.mp4.pending` 权限启动修复与星舰7默认标定均保持。
-- **用户规则拍板（2026-11-18 已确认）**：① **鱼眼矫正保持关闭**（`AppFeatures.FISHEYE_CORRECTION = false`）；② **ESP32 与浏览器投屏保持保留不动**（`AppFeatures.NETWORK_STREAMING = true`）。
+- **多路录像启动、U 盘中转/遗留 `.pending`/动态清理、模式 A 断联与压制规则忙等 6 项问题已离线修复**：详见 [多路录制与系统可靠性修复](tasks/fix-recording-storage-modea-rule-reliability.md)（全 6 项均在源码核实存在：`RecordingStartupTracker` 全路启动跟踪、`FileTransferManager` 落盘核验后删+`.part`原子拷贝、`ActiveRecordingRegistry`+`PendingFileRecoveryManager` 区分活跃与遗留 `.pending`、`StorageSpaceGuard` 分段 O(1) 门控与写入速率动态预留、`SingleCamera`/`SurroundGlRenderer`/`SurroundCameraWatchdog` 修复模式 A 会话死锁与断联自愈、`VehicleRuleEngine` 消除被压制延迟规则 20ms 忙等）。
+- **回放局域网分享“未检测到网卡”已离线修复**：详见 [回放分享网卡修复任务](tasks/fix-lan-share-nic-detection.md)（对照 SmartCam V3.0.56 `Laq1`/`Lvp1`/`Lxn0`，改为 `contains` 匹配与逐接口容错，增加 `ConnectivityManager`/`WifiManager` 兜底、通配符绑定、异步扫描、「热点设置」与诊断摘要）。
+- **主预览视图「左右 E」已离线完成**：详见 [新增视图 E 任务](tasks/add-preview-mode-e-sides.md)（左摄居左、右摄居右默认 50%/50% 并排，隐藏释放前/后主预览流，全链路接入顶栏、布局编辑、外观/360 设置与配置广场）。
+- **补盲三模式输出、副屏坐标校正、单卡统一调校与飞书测试连接已离线完成**：详见 [补盲与飞书测试连接任务](tasks/fix-blindspot-screens-and-feishu-test.md)（`仅主屏/仅副屏/主副屏同时`、`0/90/180/270°` 视觉与逻辑坐标正反映射、单卡「先选屏幕再选摄像头+四路同步」、去除重复「分方向画面矫正」卡片，及飞书两步连接诊断）。
+- **`build21` 已合并发布方案 B 修复与原厂 `avm_calib_res` 格式直导**：详见 [实车修复与 4.3 外参微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)（`190×462` 车框、零跳变重投影、`Scale`+辅助开关及 `Table.db`+`.param` 原厂直导）。
+- **用户规则与历史基线保持**：① **鱼眼矫正保持关闭**（`AppFeatures.FISHEYE_CORRECTION = false`）；② **ESP32 与浏览器投屏保持保留**（`AppFeatures.NETWORK_STREAMING = true`）；手机端 APVP `40007`、双层引导线、模式 D/E、四分栏透明度及 `.mp4.pending` 修复均保持。
 
 ## 下一步
 
-1. 下载安装 `build21`（`1.6.6-test-11210240`）上银河 E5 实车使用 4.3「参考网格/隐藏车模/单路独显/焦距缩放 Scale」调校测试，或导入提取到的 E5 原厂 `avm_calib_res` 标定文件夹。
+1. 在银河 E5 实车验证多路异常启录、U 盘中转恢复、`.pending` 启动扫描、动态分段清理、模式 A 长时防断联、规则调度，以及既有回放网卡/视图「左右 E」/补盲/飞书/`build21` 360 调校（或按需重打包测试 APK）。
 
 ## 最近更新（最多5条）
 
+- 2026-11-21 23:41:10 +08:00 | 完成多路录制启动、U盘中转与清理、模式A断联及压制规则忙等 6 项修复（`1.6.6-test-11212325`，未提交/未封包） | 6 项问题全核实修复，涵盖 `RecordingStartupTracker`、落盘核验+`.part` 拷贝、`ActiveRecordingRegistry`+启动 `.pending` 恢复、`StorageSpaceGuard` O(1) 动态清理、模式 A 状态机+OES 线程+看门狗及 `RuleRuntime.suppressed`；`624` 测与双风味构建/Lint `0` errors 全过 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
+- 2026-11-21 15:33:53 +08:00 | 修复回放局域网分享“未检测到网卡”（`1.6.6-test-11211526`，未提交/未封包） | 对照 SmartCam V3.0.56 修复网卡匹配与逐接口容错，增加系统网络服务兜底、通配符端口回退、异步扫描、「热点设置」及状态竞态修复；`564` 测与双风味构建/Lint `0` errors 全过 | [回放分享网卡修复](tasks/fix-lan-share-nic-detection.md)
+- 2026-11-21 13:07:21 +08:00 | 新增主预览视图「左右 E」（`1.6.6-test-11211258`，未提交/未封包） | 左摄在左+右摄在右默认等分并排、隐藏释放前/后摄主预览，接入顶栏/编辑器/外观与 360 设置/配置广场；`556` 测与双风味构建/Lint `0` errors 全过 | [新增视图 E](tasks/add-preview-mode-e-sides.md)
+- 2026-11-21 03:45:31 +08:00 | 完成补盲主副屏模式/倒置坐标/统一调校重构与飞书测试连接（`1.6.6-test-11210334`，未提交/未封包） | 补盲支持三模式输出、消除重复矫正卡、按「屏幕→摄像头」独立调整并支持四路同步、修复 `180°` 副屏拖动反向，飞书新增两步在线测试连接；`550` 测与双风味构建/Lint `0` errors 全过 | [补盲与飞书测试连接](tasks/fix-blindspot-screens-and-feishu-test.md)
 - 2026-11-21 02:59:13 +08:00 | 封包发布 build21 并推送 GitHub Pre-release（`1.6.6-test-11210240`） | 源码 `3869f7f` 打标 `v1.6.6-test-11210240-build21` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build19` 归档，`534` 测与 Lint `0` errors，待实车测试 | [实车修复与微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
-- 2026-11-21 01:49:06 +08:00 | 记录 `build20` 实车 360 错位现象并核对原厂标定与车模影响（纯文档，未改源码） | 用户确认车头/车尾与两侧对不上、比例怪、缝隙明显（星舰7车模）；确认 PNG 不参与投影但源码车框 `213×534 cm` 偏大拉歪比例与接缝，获取 E5 原厂 `avm_calib_res` 可治本，当前仅支持 JSON/ZIP 导入 | [实车修复与微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
-- 2026-11-20 00:43:30 +08:00 | 封包发布 build20 并推送 GitHub Pre-release（`1.6.6-test-11192353`） | 源码 `4836da2` 打标 `v1.6.6-test-11192353-build20` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 核验一致、`build18` 归档，待实车复测 | [实车修复与微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
-- 2026-11-20 00:01:30 +08:00 | 新增 4.3 四路镜头外参微调、按方案分槽独立保存与 JSON 导出 | 针对 E5 与星舰7前后摄俯仰/高度差，支持 `ΔPitch/Yaw/Roll/X/Y/Z` 实时调校与 `(44, 68)` 重算、内置/本地槽互不覆盖及 `calibration.json` 导出；`530` 测与构建/Lint 全过（`0` errors） | [实车修复与微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
-- 2026-11-19 23:04:30 +08:00 | 新增 360「编辑布局」引导线宽度调整与四分栏统一按键底色透明度 | 顶栏在 `360 A` 开放「编辑布局」，新增右上前/后视引导线宽度（`50%–150%`）与 A/B/C/D 统一按键底色透明度（`0%–100%`，默认 `80%`）滑条及关按键黑框消隙；`524` 测与双风味构建/Lint 全过 | [实车修复与调校](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
 
 ## 归档与按需索引
 

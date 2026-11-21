@@ -3,6 +3,8 @@ package com.kooo.evcam.playback;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
+import com.kooo.evcam.camera.ActiveRecordingRegistry;
+
 import java.io.File;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
@@ -14,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Pure Java scanner and timeline flattener for video/photo playback lists.
@@ -74,6 +77,14 @@ public final class PlaybackTimelineBuilder {
     public static VideoScanResult scanVideoDirectory(@Nullable File videoDir,
                                                      int filterMode,
                                                      long todayReferenceMs) {
+        return scanVideoDirectory(videoDir, filterMode, todayReferenceMs, null);
+    }
+
+    @NonNull
+    public static VideoScanResult scanVideoDirectory(@Nullable File videoDir,
+                                                     int filterMode,
+                                                     long todayReferenceMs,
+                                                     @Nullable Set<String> activePendingPaths) {
         if (videoDir == null || !videoDir.exists() || !videoDir.isDirectory()) {
             return new VideoScanResult(null, Collections.emptyList());
         }
@@ -92,6 +103,10 @@ public final class PlaybackTimelineBuilder {
             String name = file.getName();
             String lower = name.toLowerCase(Locale.ROOT);
             if (lower.endsWith(VideoLockStore.PENDING_SUFFIX)) {
+                if (activePendingPaths != null
+                        && !activePendingPaths.contains(ActiveRecordingRegistry.normalizePath(file))) {
+                    continue;
+                }
                 String completedName = name.substring(0, name.length() - VideoLockStore.PENDING_SUFFIX.length());
                 if (completedName.toLowerCase(Locale.ROOT).endsWith(".mp4")) {
                     String prefix = VideoGroup.extractTimestampPrefix(completedName);

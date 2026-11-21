@@ -65,6 +65,8 @@ public class BlindSpotVisualEditorView extends View {
     private float handleMarginPx;
     private float handleTouchSlopPx;
     private float maxCanvasHeightPx;
+    private float canvasAspectRatio = (float) BlindSpotPlacement.BASE_CANVAS_WIDTH
+            / BlindSpotPlacement.BASE_CANVAS_HEIGHT;
 
     @Nullable
     private OnPlacementChangeListener listener;
@@ -141,6 +143,20 @@ public class BlindSpotVisualEditorView extends View {
         invalidate();
     }
 
+    /** 根据当前选中屏幕的可视宽高动态调整画布比例（主屏 16:10，副屏如 1920×720 等自适应）。 */
+    public void setCanvasAspectRatio(int visualWidthPx, int visualHeightPx) {
+        if (visualWidthPx <= 0 || visualHeightPx <= 0) {
+            return;
+        }
+        float ratio = (float) visualWidthPx / (float) visualHeightPx;
+        float clamped = Math.max(0.5f, Math.min(3.6f, ratio));
+        if (Math.abs(this.canvasAspectRatio - clamped) > 1e-3f) {
+            this.canvasAspectRatio = clamped;
+            requestLayout();
+            invalidate();
+        }
+    }
+
     @NonNull
     public String getCurrentSlot() {
         return currentSlot;
@@ -186,8 +202,7 @@ public class BlindSpotVisualEditorView extends View {
         int hMode = MeasureSpec.getMode(heightMeasureSpec);
 
         int measuredW = availW;
-        int measuredH = Math.round(measuredW * ((float) BlindSpotPlacement.BASE_CANVAS_HEIGHT
-                / BlindSpotPlacement.BASE_CANVAS_WIDTH));
+        int measuredH = Math.round(measuredW / canvasAspectRatio);
 
         float effectiveMaxH = maxCanvasHeightPx;
         if (hMode == MeasureSpec.AT_MOST || hMode == MeasureSpec.EXACTLY) {
@@ -197,8 +212,7 @@ public class BlindSpotVisualEditorView extends View {
         }
         if (measuredH > effectiveMaxH && effectiveMaxH > 0) {
             measuredH = Math.round(effectiveMaxH);
-            measuredW = Math.round(measuredH * ((float) BlindSpotPlacement.BASE_CANVAS_WIDTH
-                    / BlindSpotPlacement.BASE_CANVAS_HEIGHT));
+            measuredW = Math.round(measuredH * canvasAspectRatio);
         }
         setMeasuredDimension(measuredW, measuredH);
     }

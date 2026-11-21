@@ -308,6 +308,17 @@ public final class PreviewEditorController {
                     .show();
             return;
         }
+        if (mode == PreviewMode.MODE_E) {
+            new MaterialAlertDialogBuilder(activity)
+                    .setTitle("左右双摄排版（模式 E）")
+                    .setItems(new String[]{"恢复默认左右等分（左 50% 左摄 + 右 50% 右摄）"},
+                            (dialog, which) -> {
+                                layout.resetCurrentModeDefault();
+                                refreshVisibilityButtons(activity);
+                            })
+                    .show();
+            return;
+        }
         new MaterialAlertDialogBuilder(activity)
                 .setTitle("选择分栏排版（模式 B）")
                 .setItems(new String[]{
@@ -403,7 +414,7 @@ public final class PreviewEditorController {
             } else if (subMode == SubMode.CROP) {
                 hint.setText("点击选中画框，框内单指拖动平移、双指或 +/- 缩放。");
             } else if (subMode == SubMode.OPACITY) {
-                hint.setText("统一调节 360 A / 分栏 B / 三路 C / 模式 D 画面内按键与标签底色透明度。");
+                hint.setText("统一调节 360 A / 分栏 B / 三路 C / 模式 D / 左右 E 画面内按键与标签底色透明度。");
             } else {
                 hint.setText("拖动画面自动避让换位，拖动右下角调尺寸。");
             }
@@ -470,14 +481,25 @@ public final class PreviewEditorController {
         PreviewMode mode = layout.getCurrentMode();
         boolean isC = mode == PreviewMode.MODE_C;
         boolean isD = mode == PreviewMode.MODE_D;
-        updateVisButton(controls.findViewById(R.id.ui_vis_front), ctx,
+        boolean isE = mode == PreviewMode.MODE_E;
+        Button btnFront = controls.findViewById(R.id.ui_vis_front);
+        Button btnBack = controls.findViewById(R.id.ui_vis_back);
+        if (btnFront != null) {
+            btnFront.setVisibility(isE ? View.GONE : View.VISIBLE);
+        }
+        if (btnBack != null) {
+            btnBack.setVisibility(isE ? View.GONE : View.VISIBLE);
+        }
+        updateVisButton(btnFront, ctx,
                 (isC || isD) ? "主视：前" : "前", layout.isPaneVisibleInMode(PreviewLayoutModel.FRONT), !(isC || isD));
-        updateVisButton(controls.findViewById(R.id.ui_vis_back), ctx,
+        updateVisButton(btnBack, ctx,
                 (isC || isD) ? "主视：后" : "后", layout.isPaneVisibleInMode(PreviewLayoutModel.BACK), !(isC || isD));
         updateVisButton(controls.findViewById(R.id.ui_vis_left), ctx,
-                isD ? "侧视：左" : "左", layout.isPaneVisibleInMode(PreviewLayoutModel.LEFT), !isD);
+                isE ? "左侧" : (isD ? "侧视：左" : "左"),
+                layout.isPaneVisibleInMode(PreviewLayoutModel.LEFT), !(isD || isE));
         updateVisButton(controls.findViewById(R.id.ui_vis_right), ctx,
-                isD ? "侧视：右" : "右", layout.isPaneVisibleInMode(PreviewLayoutModel.RIGHT), !isD);
+                isE ? "右侧" : (isD ? "侧视：右" : "右"),
+                layout.isPaneVisibleInMode(PreviewLayoutModel.RIGHT), !(isD || isE));
         styleOptionButton(controls.findViewById(R.id.ui_layout_presets), ctx, false);
         styleOptionButton(controls.findViewById(R.id.ui_layout_reset), ctx, false);
     }

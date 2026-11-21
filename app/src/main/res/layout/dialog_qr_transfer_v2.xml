@@ -102,16 +102,36 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="4dp"
-                    android:text="选择局域网网卡（切换后会重新生成地址，请重新扫码）："
+                    android:text="选择局域网网卡（默认优先 en0，切换后请重新扫码）："
                     android:textColor="@color/text_secondary"
                     android:textSize="13sp" />
 
-                <Spinner
-                    android:id="@+id/ip_spinner"
+                <LinearLayout
                     android:layout_width="match_parent"
-                    android:layout_height="48dp"
+                    android:layout_height="wrap_content"
                     android:layout_marginBottom="10dp"
-                    android:background="@color/input_background" />
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <Spinner
+                        android:id="@+id/ip_spinner"
+                        android:layout_width="0dp"
+                        android:layout_height="48dp"
+                        android:layout_weight="1"
+                        android:background="@color/input_background" />
+
+                    <Button
+                        android:id="@+id/btn_hotspot_settings"
+                        android:layout_width="wrap_content"
+                        android:layout_height="48dp"
+                        android:layout_marginStart="8dp"
+                        android:backgroundTint="@color/button_background"
+                        android:elevation="0dp"
+                        android:text="热点设置"
+                        android:textAllCaps="false"
+                        android:textColor="@color/button_text"
+                        android:textSize="13sp" />
+                </LinearLayout>
 
                 <LinearLayout
                     android:layout_width="match_parent"

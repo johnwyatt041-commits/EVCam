@@ -175,6 +175,10 @@ public final class AppShellController {
         if (btnD != null) {
             btnD.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_D));
         }
+        View btnE = shell.findViewById(R.id.ui_mode_e);
+        if (btnE != null) {
+            btnE.setOnClickListener(v -> onModeSelect.accept(PreviewMode.MODE_E));
+        }
         View btnFullscreen = shell.findViewById(R.id.ui_fullscreen_toggle);
         if (btnFullscreen != null) {
             btnFullscreen.setOnClickListener(v -> onToggleFullscreen.run());
@@ -317,6 +321,7 @@ public final class AppShellController {
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_b), btnGap);
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_c), btnGap);
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_d), btnGap);
+            applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_mode_e), btnGap);
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_fullscreen_toggle), btnGap);
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_floating_window_toggle), groupGap);
             applyTopBarButtonMetrics(topBar.findViewById(R.id.ui_preview_toggle), -1);
@@ -683,6 +688,8 @@ public final class AppShellController {
                 activePreviewMode == PreviewMode.MODE_C);
         styleShellToggle(shell.findViewById(R.id.ui_mode_d), themedContext,
                 activePreviewMode == PreviewMode.MODE_D);
+        styleShellToggle(shell.findViewById(R.id.ui_mode_e), themedContext,
+                activePreviewMode == PreviewMode.MODE_E);
         Button fullscreenBtn = shell.findViewById(R.id.ui_fullscreen_toggle);
         if (fullscreenBtn != null) {
             fullscreenBtn.setText(fullscreenPreview ? "退出全屏" : "全屏");
