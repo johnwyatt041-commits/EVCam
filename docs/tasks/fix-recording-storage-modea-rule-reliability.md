@@ -1,11 +1,11 @@
 # 修复多路录制启动、U盘中转与清理、模式A断联及压制规则忙等
 
-最后更新：2026-11-22 07:34:13 +08:00
-最后核对：2026-11-22 07:34:13 +08:00
+最后更新：2026-11-22 07:52:49 +08:00
+最后核对：2026-11-22 07:52:49 +08:00
 任务/执行者：fix-recording-storage-modea-rule-reliability / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：已提交推送源码（`215753f`，`624` 单测与 Lint `0` errors 通过；尚未封包 `build22` Release 与实车测试）
-当前结论：6 项报告问题均在代码核查中确认存在并完成修复（`1.6.6-test-11212325`），已随既有未提交改版合流提交 `215753f` 并推送 GitHub fork，离线验证全过；待银河 E5 实车验证。
+状态：已封包发布 `build22`（[`v1.6.6-test-11212325-build22`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11212325-build22) / 源码 `215753f`，`624` 单测与 Lint `0` errors；待实车测试）
+当前结论：6 项报告问题均在代码核查中确认存在并完成修复（`1.6.6-test-11212325`），已合流提交 `215753f` 并随 `build22` 发布至 GitHub fork Pre-release（6 资产 SHA-256 核验一致）；待银河 E5 实车验证。
 
 ## 根因核实与已落地改动
 
