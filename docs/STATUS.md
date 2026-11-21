@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-21 23:47:07 +08:00（Asia/Hong_Kong）
-维护：Antigravity（当前工作区在既有补盲/飞书/视图「左右 E」/回放分享网卡修复未提交改动上，完成多路录像启动、U盘中转、`.pending` 恢复、动态分段清理、模式 A 断联及规则忙等 6 项可靠性修复，`1.6.6-test-11212325`，`624` 测、`0` Lint error；待提交与实车测试；最新已发布测试包仍为 [`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-22 07:34:13 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已将补盲重构/飞书测试、`MODE_E`、回放分享网卡修复及 6 项录制/存储/模式 A/规则可靠性修复一并合流提交至 `215753f` 并推送 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`，`1.6.6-test-11212325`，`624` 测、`0` Lint error；尚未封包 `build22` Release 与实车测试；最新已发布测试包仍为 [`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；已提交基线 **`80fdcc8` / `3869f7f`**，当前工作区含补盲、飞书、视图「左右 E」、回放分享及本次 6 项可靠性修复未提交改动（`1.6.6-test-11212325`，`versionCode = 86`） |
+| 分支与提交 | `codex/e5-recording-startup-fix`；最新代码提交 **`215753f`**（整合 `11210334`/`11211258`/`11211526`/`11212325` 四轮未提交版本并推送 fork `johnwyatt041-commits/EVCam`，`versionCode = 86`） |
 | 本地交付 | `outputs/` 顶层保留 **`build20`** + **`build21`**（各 6 文件，共 12 文件；`build19` 已归档至 `outputs/archive/`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)（6 资产 SHA256 一致；未包含本次新改） |
-| 离线与设备验证 | 当前改动已通过 `verify.ps1` 双风味 `624` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease` 及双风味 Lint `0` errors（`2220` warnings）；**尚未上实车测试** |
-| 实车状态 | 待安装验证本次 6 项可靠性修复（多路部分失败/U盘中转断联恢复/`.pending` 恢复/动态清理/模式A看门狗/规则调度）及既有网卡、视图E、补盲、飞书、`build21` 360 |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11210240-build21`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11210240-build21)（源码分支已同步至 `215753f`；新 APK 尚未封包/发布 Pre-release） |
+| 离线与设备验证 | 提交 `215753f` 已通过 `verify.ps1` 双风味 `624` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease` 及双风味 Lint `0` errors（`2220` warnings）；**尚未上实车测试** |
+| 实车状态 | 待打包/安装验证 6 项可靠性修复（多路部分失败/U盘中转/`.pending`/动态清理/模式A/规则）及网卡、视图E、补盲、飞书、`build21` 360 |
 
 ## 当前结论与确认边界
 
@@ -28,11 +28,11 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-21 23:41:10 +08:00 | 完成多路录制启动、U盘中转与清理、模式A断联及压制规则忙等 6 项修复（`1.6.6-test-11212325`，未提交/未封包） | 6 项问题全核实修复，涵盖 `RecordingStartupTracker`、落盘核验+`.part` 拷贝、`ActiveRecordingRegistry`+启动 `.pending` 恢复、`StorageSpaceGuard` O(1) 动态清理、模式 A 状态机+OES 线程+看门狗及 `RuleRuntime.suppressed`；`624` 测与双风味构建/Lint `0` errors 全过 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
-- 2026-11-21 15:33:53 +08:00 | 修复回放局域网分享“未检测到网卡”（`1.6.6-test-11211526`，未提交/未封包） | 对照 SmartCam V3.0.56 修复网卡匹配与逐接口容错，增加系统网络服务兜底、通配符端口回退、异步扫描、「热点设置」及状态竞态修复；`564` 测与双风味构建/Lint `0` errors 全过 | [回放分享网卡修复](tasks/fix-lan-share-nic-detection.md)
-- 2026-11-21 13:07:21 +08:00 | 新增主预览视图「左右 E」（`1.6.6-test-11211258`，未提交/未封包） | 左摄在左+右摄在右默认等分并排、隐藏释放前/后摄主预览，接入顶栏/编辑器/外观与 360 设置/配置广场；`556` 测与双风味构建/Lint `0` errors 全过 | [新增视图 E](tasks/add-preview-mode-e-sides.md)
-- 2026-11-21 03:45:31 +08:00 | 完成补盲主副屏模式/倒置坐标/统一调校重构与飞书测试连接（`1.6.6-test-11210334`，未提交/未封包） | 补盲支持三模式输出、消除重复矫正卡、按「屏幕→摄像头」独立调整并支持四路同步、修复 `180°` 副屏拖动反向，飞书新增两步在线测试连接；`550` 测与双风味构建/Lint `0` errors 全过 | [补盲与飞书测试连接](tasks/fix-blindspot-screens-and-feishu-test.md)
-- 2026-11-21 02:59:13 +08:00 | 封包发布 build21 并推送 GitHub Pre-release（`1.6.6-test-11210240`） | 源码 `3869f7f` 打标 `v1.6.6-test-11210240-build21` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build19` 归档，`534` 测与 Lint `0` errors，待实车测试 | [实车修复与微调](tasks/fix-e5-realcar-360-guidance-mode-d-ui.md)
+- 2026-11-22 07:34:13 +08:00 | 合流提交 4 轮累积改动并推送 GitHub（`215753f` / `1.6.6-test-11212325`，已推送/未封包） | 将补盲多屏/倒置坐标/飞书测试、`MODE_E`、回放分享网卡与 6 项录制/存储/模式 A/规则修复一并提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`624` 测与 Lint `0` errors | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
+- 2026-11-21 23:41:10 +08:00 | 完成多路录制启动、U盘中转与清理、模式A断联及压制规则忙等 6 项修复（`1.6.6-test-11212325`，合流 `215753f`/未封包） | 6 项问题全核实修复，涵盖 `RecordingStartupTracker`、落盘核验+`.part` 拷贝、`ActiveRecordingRegistry`+启动 `.pending` 恢复、`StorageSpaceGuard` O(1) 动态清理、模式 A 状态机+OES 线程+看门狗及 `RuleRuntime.suppressed`；`624` 测与双风味构建/Lint `0` errors 全过 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
+- 2026-11-21 15:33:53 +08:00 | 修复回放局域网分享“未检测到网卡”（`1.6.6-test-11211526`，合流 `215753f`/未封包） | 对照 SmartCam V3.0.56 修复网卡匹配与逐接口容错，增加系统网络服务兜底、通配符端口回退、异步扫描、「热点设置」及状态竞态修复；`564` 测与双风味构建/Lint `0` errors 全过 | [回放分享网卡修复](tasks/fix-lan-share-nic-detection.md)
+- 2026-11-21 13:07:21 +08:00 | 新增主预览视图「左右 E」（`1.6.6-test-11211258`，合流 `215753f`/未封包） | 左摄在左+右摄在右默认等分并排、隐藏释放前/后摄主预览，接入顶栏/编辑器/外观与 360 设置/配置广场；`556` 测与双风味构建/Lint `0` errors 全过 | [新增视图 E](tasks/add-preview-mode-e-sides.md)
+- 2026-11-21 03:45:31 +08:00 | 完成补盲主副屏模式/倒置坐标/统一调校重构与飞书测试连接（`1.6.6-test-11210334`，合流 `215753f`/未封包） | 补盲支持三模式输出、消除重复矫正卡、按「屏幕→摄像头」独立调整并支持四路同步、修复 `180°` 副屏拖动反向，飞书新增两步在线测试连接；`550` 测与双风味构建/Lint `0` errors 全过 | [补盲与飞书测试连接](tasks/fix-blindspot-screens-and-feishu-test.md)
 
 ## 归档与按需索引
 
