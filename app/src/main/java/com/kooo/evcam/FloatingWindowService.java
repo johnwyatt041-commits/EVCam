@@ -194,7 +194,7 @@ public class FloatingWindowService extends Service {
             initialXVal = metrics.widthPixels - sizePx - 20;
             initialYVal = metrics.heightPixels / 2 - sizePx / 2;
         }
-        layoutParams = OverlayWindowParamsFactory.createMainParams(
+        layoutParams = OverlayWindowParamsFactory.createLightweightMainParams(
                 this, sizePx, sizePx, initialXVal, initialYVal, true);
         
         // 设置触摸事件
@@ -257,7 +257,7 @@ public class FloatingWindowService extends Service {
         });
         
         // 添加到窗口
-        attachedOverlay = OverlayWindowParamsFactory.attachMainOverlay(
+        attachedOverlay = OverlayWindowParamsFactory.attachLightweightMainOverlay(
                 this, windowManager, floatingView, layoutParams, this::stopSelf);
         if (attachedOverlay == null) {
             AppLog.e(TAG, "添加悬浮窗失败");

@@ -74,6 +74,8 @@ public class BlindSpotService extends Service {
     private BlindSpotFloatingWindowView preCreatedLeftWindow;  // 预创建的左窗口
     private BlindSpotFloatingWindowView preCreatedRightWindow; // 预创建的右窗口
     private boolean isPreCreatedWindowsReady = false; // 预创建窗口是否已准备好
+    private Runnable preCreateWindowsRunnable;
+    private volatile boolean isServiceDestroyed = false;
     private final BlindSpotCoordinator blindSpotCoordinator = new BlindSpotCoordinator();
     private static volatile boolean internal360Active = false;
 
@@ -109,11 +111,19 @@ public class BlindSpotService extends Service {
     /** MainActivity.onResume 时调用 */
     public static void notifySelfForeground() {
         isSelfInForeground = true;
+        BlindSpotService inst = sInstance;
+        if (inst != null) {
+            inst.hideHandler.post(() -> inst.onSelfForegroundStateChanged(true));
+        }
     }
 
     /** MainActivity.onPause 时调用 */
     public static void notifySelfBackground() {
         isSelfInForeground = false;
+        BlindSpotService inst = sInstance;
+        if (inst != null) {
+            inst.hideHandler.post(() -> inst.onSelfForegroundStateChanged(false));
+        }
     }
 
     /**
@@ -184,65 +194,81 @@ public class BlindSpotService extends Service {
     public void onCreate() {
         super.onCreate();
         sInstance = this;
+        isServiceDestroyed = false;
         appConfig = new AppConfig(this);
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
         syncSuppressionConfig();
         initSignalObserver();
-        initAvmAvoidance();
-        
-        // 预创建补盲窗口（在后台线程中）
-        preCreateBlindSpotWindows();
+        syncAvmAvoidanceState("onCreate", false);
+
+        // 按需延迟预创建主屏补盲窗口（非纯副屏/非复用/非all模式时才触发）
+        syncPreCreatedWindows();
     }
-    
+
+    private boolean shouldPreCreateMainWindowsNow() {
+        if (isServiceDestroyed || appConfig == null) {
+            return false;
+        }
+        boolean avmAllMode = BlindSpotCoordinator.isAvmAvoidanceAllMode(
+                appConfig.isAvmAvoidanceEnabled(), appConfig.getAvmAvoidanceActivity());
+        return BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                appConfig.isBlindSpotGlobalEnabled(),
+                appConfig.isTurnSignalLinkageEnabled(),
+                appConfig.isMainBlindSpotEnabled(),
+                appConfig.isTurnSignalReuseMainFloating(),
+                avmAllMode,
+                canShowMainOverlay());
+    }
+
     /**
-     * 预创建补盲窗口，用于快速显示
-     * 在服务启动时后台创建窗口，避免转向灯触发时再创建导致的延迟
+     * 按需同步主屏独立补盲窗口预创建池（取消 Thread.sleep 线程，改用可取消的 mainHandler 延迟调度）。
      */
-    private void preCreateBlindSpotWindows() {
-        if (!appConfig.isTurnSignalLinkageEnabled() || !appConfig.isMainBlindSpotEnabled()) {
-            AppLog.d(TAG, "转向灯联动或主屏补盲未启用，跳过预创建主屏窗口");
+    private void syncPreCreatedWindows() {
+        if (!shouldPreCreateMainWindowsNow()) {
+            clearPreCreatedWindows();
             return;
         }
-        
-        // 在后台线程预创建窗口
-        new Thread(() -> {
-            try {
-                Thread.sleep(2000); // 延迟2秒，等待服务完全启动
-                
-                if (!canShowMainOverlay() || !appConfig.isMainBlindSpotEnabled()) {
-                    AppLog.d(TAG, "无悬浮窗权限或主屏补盲已关闭，跳过预创建窗口");
-                    return;
-                }
-                
-                mainHandler.post(() -> {
-                    if (!appConfig.isMainBlindSpotEnabled()) {
-                        return;
-                    }
-                    try {
-                        // 预创建左窗口
-                        if (preCreatedLeftWindow == null) {
-                            preCreatedLeftWindow = new BlindSpotFloatingWindowView(this, false);
-                            preCreatedLeftWindow.setCameraPos("left");
-                            AppLog.d(TAG, "✅ 预创建左补盲窗口完成");
-                        }
-                        
-                        // 预创建右窗口
-                        if (preCreatedRightWindow == null) {
-                            preCreatedRightWindow = new BlindSpotFloatingWindowView(this, false);
-                            preCreatedRightWindow.setCameraPos("right");
-                            AppLog.d(TAG, "✅ 预创建右补盲窗口完成");
-                        }
-                        
-                        isPreCreatedWindowsReady = true;
-                        AppLog.i(TAG, "✅ 补盲窗口预创建完成，准备就绪");
-                    } catch (Exception e) {
-                        AppLog.e(TAG, "预创建补盲窗口失败: " + e.getMessage());
-                    }
-                });
-            } catch (InterruptedException e) {
-                AppLog.e(TAG, "预创建窗口线程被中断");
+        if (preCreatedLeftWindow != null && preCreatedRightWindow != null) {
+            isPreCreatedWindowsReady = true;
+            return;
+        }
+        if (preCreateWindowsRunnable != null) {
+            return;
+        }
+        preCreateWindowsRunnable = () -> {
+            preCreateWindowsRunnable = null;
+            if (!shouldPreCreateMainWindowsNow()) {
+                clearPreCreatedWindows();
+                return;
             }
-        }, "PreCreateBlindSpotWindows").start();
+            try {
+                if (preCreatedLeftWindow == null) {
+                    preCreatedLeftWindow = new BlindSpotFloatingWindowView(this, false);
+                    preCreatedLeftWindow.setCameraPos("left");
+                    AppLog.d(TAG, "✅ 预创建左补盲窗口完成");
+                }
+                if (preCreatedRightWindow == null) {
+                    preCreatedRightWindow = new BlindSpotFloatingWindowView(this, false);
+                    preCreatedRightWindow.setCameraPos("right");
+                    AppLog.d(TAG, "✅ 预创建右补盲窗口完成");
+                }
+                isPreCreatedWindowsReady = true;
+                AppLog.i(TAG, "✅ 补盲窗口预创建完成，准备就绪");
+            } catch (Exception e) {
+                AppLog.e(TAG, "预创建补盲窗口失败: " + e.getMessage());
+            }
+        };
+        mainHandler.postDelayed(preCreateWindowsRunnable, 2000L);
+    }
+
+    private void clearPreCreatedWindows() {
+        if (preCreateWindowsRunnable != null) {
+            mainHandler.removeCallbacks(preCreateWindowsRunnable);
+            preCreateWindowsRunnable = null;
+        }
+        preCreatedLeftWindow = null;
+        preCreatedRightWindow = null;
+        isPreCreatedWindowsReady = false;
     }
 
     private void initSignalObserver() {
@@ -525,7 +551,7 @@ public class BlindSpotService extends Service {
         dedicatedBlindSpotWindow.show();
 
         if (!isPreCreatedWindowsReady || preCreatedLeftWindow == null || preCreatedRightWindow == null) {
-            preCreateBlindSpotWindows();
+            syncPreCreatedWindows();
         }
     }
 
@@ -606,10 +632,13 @@ public class BlindSpotService extends Service {
             resetSignalKeepAlive();
         }
 
+        // 转向触发首帧先做一次同步即时检测，避免后台空闲停轮询后转向首帧闪现
+        refreshAvmAvoidanceImmediatelyForSignal();
         syncSuppressionConfig();
 
         if (cameraPos != null && cameraPos.equals(currentSignalCamera)) {
             AppLog.d(TAG, "转向灯相同，不重复切换: " + cameraPos);
+            syncAvmAvoidanceState("turnSignalKeepAlive", true);
             return;
         }
 
@@ -622,6 +651,7 @@ public class BlindSpotService extends Service {
         );
 
         currentSignalCamera = cameraPos;
+        syncAvmAvoidanceState("turnSignalActive", true);
         AppLog.i(TAG, "🚦 转向灯激活: " + cameraPos + ", showMain=" + plan.showMainWindow + ", showSecondary=" + plan.showSecondaryHud);
 
         // --- 1. 创建主屏/副屏窗口 UI ---
@@ -918,6 +948,7 @@ public class BlindSpotService extends Service {
             // --- 副屏显示恢复 ---
             updateSecondaryDisplay();
             hideRunnable = null;
+            syncAvmAvoidanceState("turnSignalEnded", true);
 
             // 补盲结束，如果没有持久 Surface 在用且 Activity 在后台，释放相机
             closeCamerasIfIdle();
@@ -1015,7 +1046,8 @@ public class BlindSpotService extends Service {
         appConfig = new AppConfig(this);
         syncSuppressionConfig();
         ensureSignalObserversAlive();
-        initAvmAvoidance();
+        syncAvmAvoidanceState("settingsUpdate", false);
+        syncPreCreatedWindows();
         reconcileSuppressionTransition("settingsUpdate");
 
         updateWindows();
@@ -1086,6 +1118,8 @@ public class BlindSpotService extends Service {
             currentSignalCamera = null;
             blindSpotCoordinator.reset();
             isMainTempShown = false;
+            stopAvmAvoidance();
+            clearPreCreatedWindows();
             {
                 stopSelf();
             }
@@ -1100,12 +1134,19 @@ public class BlindSpotService extends Service {
         updateMainFloatingWindow();
 
         applyTransforms();
-        
+
+        boolean avmActiveFeature = BlindSpotCoordinator.hasActiveAvmAvoidanceFeature(
+                appConfig.isBlindSpotGlobalEnabled(),
+                appConfig.isAvmAvoidanceEnabled(),
+                appConfig.isMainFloatingEnabled(),
+                appConfig.isTurnSignalLinkageEnabled(),
+                appConfig.isMainBlindSpotEnabled());
+
         if (isSecondaryAdjustMode
                 || appConfig.isMainFloatingEnabled() // 加入主屏悬浮窗检查
                 || appConfig.isSecondaryDisplayEnabled()
                 || appConfig.isTurnSignalLinkageEnabled() // 加入转向灯联动检查
-                || appConfig.isAvmAvoidanceEnabled() // 全景影像避让
+                || avmActiveFeature // 全景影像避让（仅在主屏功能存在时计入）
                 || currentSignalCamera != null // 加入转向灯联动检查
                 || previewCameraPos != null) {
             CameraForegroundService.start(this, "补盲运行中", "正在显示补盲画面");
@@ -1116,7 +1157,7 @@ public class BlindSpotService extends Service {
                 && !appConfig.isMainFloatingEnabled()
                 && !appConfig.isSecondaryDisplayEnabled()
                 && !appConfig.isTurnSignalLinkageEnabled()
-                && !appConfig.isAvmAvoidanceEnabled() // 全景影像避让
+                && !avmActiveFeature // 全景影像避让
                 && previewCameraPos == null) {
             AppLog.i(TAG, "🚪 所有功能都关闭，停止服务");
             stopSelf();
@@ -1547,49 +1588,165 @@ public class BlindSpotService extends Service {
 
     // ==================== 全景影像避让 ====================
 
-    /**
-     * 初始化全景影像避让（前台Activity检测轮询）
-     */
-    private void initAvmAvoidance() {
-        stopAvmAvoidance();
-        if (!appConfig.isAvmAvoidanceEnabled()) return;
+    private boolean hasVisibleMainBlindSpotWindow() {
+        return mainFloatingWindowView != null
+                || dedicatedBlindSpotWindow != null
+                || previewBlindSpotWindow != null;
+    }
 
-        String target = appConfig.getAvmAvoidanceActivity();
-        AppLog.d(TAG, "启动全景影像避让检测，目标Activity: " + target);
+    private boolean shouldPollAvmUsageStatsNow() {
+        if (isServiceDestroyed || appConfig == null) {
+            return false;
+        }
+        return BlindSpotCoordinator.shouldPollAvmUsageStats(
+                appConfig.isBlindSpotGlobalEnabled(),
+                appConfig.isAvmAvoidanceEnabled(),
+                appConfig.getAvmAvoidanceActivity(),
+                appConfig.isMainFloatingEnabled(),
+                appConfig.isTurnSignalLinkageEnabled(),
+                appConfig.isMainBlindSpotEnabled(),
+                currentSignalCamera != null,
+                hasVisibleMainBlindSpotWindow(),
+                isSelfInForeground,
+                canShowMainOverlay());
+    }
 
-        // "all" 模式：始终避让，不需要轮询检测前台应用
-        if ("all".equalsIgnoreCase(target)) {
+    private void onSelfForegroundStateChanged(boolean selfForeground) {
+        if (isServiceDestroyed || appConfig == null) {
+            return;
+        }
+        boolean hasActiveFeature = BlindSpotCoordinator.hasActiveAvmAvoidanceFeature(
+                appConfig.isBlindSpotGlobalEnabled(),
+                appConfig.isAvmAvoidanceEnabled(),
+                appConfig.isMainFloatingEnabled(),
+                appConfig.isTurnSignalLinkageEnabled(),
+                appConfig.isMainBlindSpotEnabled());
+        if (selfForeground && hasActiveFeature && !isAvmAvoidanceActive) {
             isAvmAvoidanceActive = true;
-            AppLog.i(TAG, "全景影像避让：all 模式，主屏补盲窗口始终隐藏（副屏与 ESP32 继续联动）");
-            reconcileSuppressionTransition("avmAll");
+            avmDeactivateCount = 0;
+            reconcileSuppressionTransition("selfForeground");
+        }
+        syncAvmAvoidanceState(selfForeground ? "selfForeground" : "selfBackground", false);
+    }
+
+    /**
+     * 转向触发主屏补盲前的单次即时检查，避免后台空闲停轮询后首帧闪现。
+     */
+    private void refreshAvmAvoidanceImmediatelyForSignal() {
+        if (appConfig == null
+                || !appConfig.isBlindSpotGlobalEnabled()
+                || !appConfig.isAvmAvoidanceEnabled()
+                || !appConfig.isMainBlindSpotEnabled()) {
+            return;
+        }
+        String target = appConfig.getAvmAvoidanceActivity();
+        if (target == null || target.trim().isEmpty()) {
+            return;
+        }
+        boolean foregroundNow = BlindSpotCoordinator.isAvmAvoidanceAllMode(true, target)
+                || isSelfInForeground
+                || isActivityInForeground(target);
+        if (foregroundNow) {
+            avmDeactivateCount = 0;
+            isAvmAvoidanceActive = true;
+        } else {
+            isAvmAvoidanceActive = false;
+            avmDeactivateCount = 0;
+        }
+    }
+
+    /**
+     * 按需同步全景影像避让检测（仅在存在活跃主屏需求且处于后台非 all 模式时每秒轮询 UsageStatsManager）。
+     */
+    private void syncAvmAvoidanceState(String reason, boolean delayFirstPoll) {
+        if (isServiceDestroyed || appConfig == null
+                || !appConfig.isBlindSpotGlobalEnabled()
+                || !appConfig.isAvmAvoidanceEnabled()) {
+            stopAvmAvoidance();
             return;
         }
 
+        String target = appConfig.getAvmAvoidanceActivity();
+        if (target == null || target.trim().isEmpty()) {
+            stopAvmAvoidance();
+            return;
+        }
+
+        if (BlindSpotCoordinator.isAvmAvoidanceAllMode(true, target)) {
+            stopAvmPollingOnly();
+            if (!isAvmAvoidanceActive) {
+                isAvmAvoidanceActive = true;
+                AppLog.i(TAG, "全景影像避让：all 模式，主屏补盲窗口始终隐藏（副屏与 ESP32 继续联动）");
+                reconcileSuppressionTransition("avmAll");
+            }
+            return;
+        }
+
+        boolean hasActiveFeature = BlindSpotCoordinator.hasActiveAvmAvoidanceFeature(
+                appConfig.isBlindSpotGlobalEnabled(),
+                appConfig.isAvmAvoidanceEnabled(),
+                appConfig.isMainFloatingEnabled(),
+                appConfig.isTurnSignalLinkageEnabled(),
+                appConfig.isMainBlindSpotEnabled());
+        if (isSelfInForeground) {
+            stopAvmPollingOnly();
+            if (hasActiveFeature) {
+                if (!isAvmAvoidanceActive) {
+                    isAvmAvoidanceActive = true;
+                    reconcileSuppressionTransition("selfForeground");
+                }
+            } else {
+                stopAvmAvoidance();
+            }
+            return;
+        }
+
+        if (!shouldPollAvmUsageStatsNow()) {
+            AppLog.d(TAG, "全景影像避让：无活跃主屏需求，停止后台轮询 (" + reason + ")");
+            stopAvmAvoidance();
+            return;
+        }
+
+        if (avmCheckRunnable != null) {
+            return;
+        }
+        AppLog.d(TAG, "启动全景影像避让按需检测 (" + reason + ")，目标Activity: " + target);
         avmCheckRunnable = new Runnable() {
             @Override
             public void run() {
-                if (!appConfig.isAvmAvoidanceEnabled()) {
+                if (!shouldPollAvmUsageStatsNow()) {
                     stopAvmAvoidance();
                     return;
                 }
                 checkAvmForeground();
-                hideHandler.postDelayed(this, AVM_CHECK_INTERVAL_MS);
+                if (!isServiceDestroyed && avmCheckRunnable == this) {
+                    hideHandler.postDelayed(this, AVM_CHECK_INTERVAL_MS);
+                }
             }
         };
-        hideHandler.post(avmCheckRunnable);
+        if (delayFirstPoll) {
+            hideHandler.postDelayed(avmCheckRunnable, AVM_CHECK_INTERVAL_MS);
+        } else {
+            hideHandler.post(avmCheckRunnable);
+        }
+    }
+
+    private void stopAvmPollingOnly() {
+        avmEventQueryEndMs = 0;
+        cachedAvmActivity = null;
+        cachedAvmForeground = false;
+        avmDeactivateCount = 0;
+        if (avmCheckRunnable != null) {
+            hideHandler.removeCallbacks(avmCheckRunnable);
+            avmCheckRunnable = null;
+        }
     }
 
     /**
      * 停止全景影像避让检测
      */
     private void stopAvmAvoidance() {
-        avmEventQueryEndMs = 0;
-        cachedAvmActivity = null;
-        cachedAvmForeground = false;
-        if (avmCheckRunnable != null) {
-            hideHandler.removeCallbacks(avmCheckRunnable);
-            avmCheckRunnable = null;
-        }
+        stopAvmPollingOnly();
         if (isAvmAvoidanceActive) {
             isAvmAvoidanceActive = false;
             reconcileSuppressionTransition("avmStopped");
@@ -1708,8 +1865,10 @@ public class BlindSpotService extends Service {
 
     @Override
     public void onDestroy() {
+        isServiceDestroyed = true;
         stopSignalObservers();
         stopAvmAvoidance();
+        clearPreCreatedWindows();
         if (hideRunnable != null) {
             hideHandler.removeCallbacks(hideRunnable);
         }

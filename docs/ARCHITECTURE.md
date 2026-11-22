@@ -14,7 +14,7 @@
 | `camera/CodecVideoRecorder.java`、`camera/EglSurfaceEncoder.java` | GL/MediaCodec 路径，输入帧、编码输出与 EOS 收尾 |
 | `camera/AsyncMuxerWriter.java` | 独立写盘、池化有界压缩样本队列、pending 成功封装后发布 |
 | `camera/RecordingEncoderSelector.java`、`camera/RecordingFpsPolicy.java` | 验证编码尺寸/FPS、实际 configure、相机支持范围选择 |
-| `camera/RecordingExperiment.java`、`camera/CompositeRecording.java`、`camera/MultiCameraCompositor.java` | A/B 变体选择、B 日常三路单编码合成；飞书四路仍独立 |
+| `camera/RecordingExperiment.java`、`camera/CompositeRecording.java`、`camera/MultiCameraCompositor.java` | 历史 B 版（`composite`）日常三路单编码合成路径；B 版已于 2026-11-22 停更下线，`SMARTCAM_COMPOSITE` 恒为 `false`，不再构建或修改该路径 |
 | `camera/FrameTimestampClock.java`、`camera/MuxerTimestampClock.java` | 源帧时序、分段时间轴和回退修复 |
 | `vehicle/`、`camera/VehicleStatusWatermark.java` | 默认关闭的录像状态水印；多路共用 VHAL 信号租约，按需创建小纹理，未知/过期不渲染为关闭；E5 踏板字段尚待验证 |
 | `feishu/`、`remote/` | 飞书长连接、统一命令调度、媒体上传；勿将长期等待放 UI 线程 |

@@ -11,6 +11,7 @@ import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
+import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Binder;
 import android.os.Handler;
@@ -20,7 +21,10 @@ import android.util.DisplayMetrics;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.WindowManager;
+
+import java.util.Locale;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
@@ -81,8 +85,14 @@ public class RecordingFloatingService extends Service {
     private boolean isServiceBound = false;
 
     // 录制状态
+    static final String TIME_TEMPLATE_SHORT = "88:88";
+    static final String TIME_TEMPLATE_LONG = "88:88:88";
+    static final int TIME_WIDTH_SLACK_PX = 4;
+
     private boolean isRecording = false;
     private long recordingStartTime = 0;
+    private boolean timeBadgeExpandedForHours = false;
+    private String lastDisplayedTimeText = null;
     private Runnable timeUpdateRunnable;
 
     // 广播接收器
@@ -213,8 +223,9 @@ public class RecordingFloatingService extends Service {
             int buttonSize = recordingButton.getLayoutParams().width;
             int padding = Math.max(8, buttonSize / 8);
             timeTextView.setPadding(padding, padding / 2, padding, padding / 2);
-            timeTextView.requestLayout();
         }
+        applyTimeTextFixedSizing(timeBadgeExpandedForHours);
+        timeTextView.requestLayout();
 
         // 刷新窗口
         if (attachedOverlay != null) {
@@ -305,6 +316,8 @@ public class RecordingFloatingService extends Service {
             recordingButton = null;
             timeTextView = null;
         }
+        timeBadgeExpandedForHours = false;
+        lastDisplayedTimeText = null;
         stopTimeUpdate();
     }
 
@@ -328,28 +341,37 @@ public class RecordingFloatingService extends Service {
         LinearLayout.LayoutParams buttonParams = new LinearLayout.LayoutParams(buttonSize, buttonSize);
         horizontalContainer.addView(recordingButton, buttonParams);
 
-        // 创建时间显示
+        // 创建时间显示（等宽数字 + 固定最小宽高，避免每秒 setText() 触发 WRAP_CONTENT 重排）
         timeTextView = new TextView(this);
         timeTextView.setTextColor(Color.WHITE);
         timeTextView.setTextSize(timeTextSizeSp);
+        timeTextView.setTypeface(Typeface.MONOSPACE);
+        timeTextView.setFontFeatureSettings("tnum");
+        timeTextView.setSingleLine(true);
+        timeTextView.setMaxLines(1);
+        timeTextView.setGravity(Gravity.CENTER);
         timeTextView.setBackgroundColor(Color.parseColor("#80000000")); // 半透明黑色背景
         // 根据按钮大小调整padding
         int padding = Math.max(8, buttonSize / 8);
         timeTextView.setPadding(padding, padding / 2, padding, padding / 2);
+        timeTextView.setText("00:00");
+        lastDisplayedTimeText = "00:00";
+        timeBadgeExpandedForHours = false;
         timeTextView.setVisibility(View.GONE); // 默认隐藏
         LinearLayout.LayoutParams timeParams = new LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT);
         timeParams.leftMargin = Math.max(4, buttonSize / 16); // 距离按钮
         horizontalContainer.addView(timeTextView, timeParams);
+        applyTimeTextFixedSizing(false);
 
         // 将水平容器添加到浮动容器
         floatingContainer.addView(horizontalContainer, new FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.WRAP_CONTENT,
                 FrameLayout.LayoutParams.WRAP_CONTENT));
 
-        // 设置布局参数（非抢焦、非模态，无障碍激活时优先 2032）
-        layoutParams = OverlayWindowParamsFactory.createMainParams(
+        // 设置轻量纯 2D 布局参数（有标准浮窗权限时使用 2038 且不加全屏/硬件加速层，降低闪屏风险）
+        layoutParams = OverlayWindowParamsFactory.createLightweightMainParams(
                 this,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
@@ -407,13 +429,21 @@ public class RecordingFloatingService extends Service {
         });
 
         // 添加到窗口
-        attachedOverlay = OverlayWindowParamsFactory.attachMainOverlay(
+        attachedOverlay = OverlayWindowParamsFactory.attachLightweightMainOverlay(
                 this, windowManager, floatingContainer, layoutParams, this::stopSelf);
         if (attachedOverlay == null) {
             AppLog.e(TAG, "添加悬浮窗失败");
             stopSelf();
         } else {
             AppLog.d(TAG, "录制悬浮窗创建成功");
+            if (isRecording) {
+                recordingButton.setRecording(true);
+                if (recordingStartTime <= 0L) {
+                    recordingStartTime = System.currentTimeMillis();
+                }
+                timeTextView.setVisibility(View.VISIBLE);
+                startTimeUpdate();
+            }
         }
     }
 
@@ -544,6 +574,7 @@ public class RecordingFloatingService extends Service {
     }
 
     private void updateRecordingState(boolean recording) {
+        boolean wasRecording = isRecording;
         isRecording = recording;
 
         if (recordingButton != null) {
@@ -551,15 +582,26 @@ public class RecordingFloatingService extends Service {
         }
 
         if (recording) {
-            recordingStartTime = System.currentTimeMillis();
-            startTimeUpdate();
+            if (!wasRecording || recordingStartTime <= 0L) {
+                recordingStartTime = System.currentTimeMillis();
+                timeBadgeExpandedForHours = false;
+                lastDisplayedTimeText = null;
+                if (timeTextView != null) {
+                    applyTimeTextFixedSizing(false);
+                }
+            }
             if (timeTextView != null) {
                 timeTextView.setVisibility(View.VISIBLE);
             }
+            startTimeUpdate();
         } else {
             stopTimeUpdate();
+            recordingStartTime = 0L;
+            timeBadgeExpandedForHours = false;
+            lastDisplayedTimeText = "00:00";
             if (timeTextView != null) {
                 timeTextView.setVisibility(View.GONE);
+                applyTimeTextFixedSizing(false);
                 timeTextView.setText("00:00");
             }
         }
@@ -574,9 +616,24 @@ public class RecordingFloatingService extends Service {
             @Override
             public void run() {
                 if (isRecording && timeTextView != null) {
-                    long duration = System.currentTimeMillis() - recordingStartTime;
+                    long duration = Math.max(0L, System.currentTimeMillis() - recordingStartTime);
+                    boolean needHours = needsHourWidth(duration);
+                    if (needHours && !timeBadgeExpandedForHours) {
+                        applyTimeTextFixedSizing(true);
+                        if (attachedOverlay != null) {
+                            attachedOverlay.updateLayout();
+                        } else if (floatingContainer != null && layoutParams != null) {
+                            try {
+                                windowManager.updateViewLayout(floatingContainer, layoutParams);
+                            } catch (Exception ignored) {
+                            }
+                        }
+                    }
                     String timeStr = formatDuration(duration);
-                    timeTextView.setText(timeStr);
+                    if (!timeStr.equals(lastDisplayedTimeText)) {
+                        lastDisplayedTimeText = timeStr;
+                        timeTextView.setText(timeStr);
+                    }
                     mainHandler.postDelayed(this, 1000);
                 }
             }
@@ -592,18 +649,63 @@ public class RecordingFloatingService extends Service {
         }
     }
 
-    private String formatDuration(long durationMs) {
-        long seconds = durationMs / 1000;
-        long minutes = seconds / 60;
-        long hours = minutes / 60;
+    private void applyTimeTextFixedSizing(boolean includeHours) {
+        if (timeTextView == null) {
+            return;
+        }
+        Paint paint = timeTextView.getPaint();
+        if (paint == null) {
+            return;
+        }
+        String template = resolveTimeWidthTemplate(includeHours);
+        float measuredWidth = paint.measureText(template);
+        Paint.FontMetrics fm = paint.getFontMetrics();
+        float fontHeight = fm != null ? Math.max(0f, fm.descent - fm.ascent) : timeTextView.getTextSize();
+        int horizontalPadding = Math.max(timeTextView.getPaddingLeft(), timeTextView.getPaddingRight());
+        int verticalPadding = Math.max(timeTextView.getPaddingTop(), timeTextView.getPaddingBottom());
+        int fixedWidth = computeFixedTimeWidthPx(measuredWidth, horizontalPadding);
+        int fixedHeight = computeFixedTimeHeightPx(fontHeight, verticalPadding);
+        timeTextView.setMinWidth(fixedWidth);
+        timeTextView.setMinHeight(fixedHeight);
+        ViewGroup.LayoutParams lp = timeTextView.getLayoutParams();
+        if (lp != null && (lp.width != fixedWidth || lp.height != fixedHeight)) {
+            lp.width = fixedWidth;
+            lp.height = fixedHeight;
+            timeTextView.setLayoutParams(lp);
+        }
+        timeBadgeExpandedForHours = includeHours;
+    }
 
-        seconds = seconds % 60;
-        minutes = minutes % 60;
+    static boolean needsHourWidth(long durationMs) {
+        return Math.max(0L, durationMs) >= 3_600_000L;
+    }
+
+    static String resolveTimeWidthTemplate(boolean includeHours) {
+        return includeHours ? TIME_TEMPLATE_LONG : TIME_TEMPLATE_SHORT;
+    }
+
+    static int computeFixedTimeWidthPx(float measuredTemplateWidthPx, int horizontalPaddingPx) {
+        int contentPx = (int) Math.ceil(Math.max(0f, measuredTemplateWidthPx));
+        int padPx = Math.max(0, horizontalPaddingPx) * 2;
+        return Math.max(1, contentPx + padPx + TIME_WIDTH_SLACK_PX);
+    }
+
+    static int computeFixedTimeHeightPx(float fontHeightPx, int verticalPaddingPx) {
+        int contentPx = (int) Math.ceil(Math.max(0f, fontHeightPx));
+        int padPx = Math.max(0, verticalPaddingPx) * 2;
+        return Math.max(1, contentPx + padPx);
+    }
+
+    static String formatDuration(long durationMs) {
+        long totalSeconds = Math.max(0L, durationMs) / 1000L;
+        long seconds = totalSeconds % 60L;
+        long minutes = (totalSeconds / 60L) % 60L;
+        long hours = totalSeconds / 3600L;
 
         if (hours > 0) {
-            return String.format("%02d:%02d:%02d", hours, minutes, seconds);
+            return String.format(Locale.US, "%02d:%02d:%02d", hours, minutes, seconds);
         } else {
-            return String.format("%02d:%02d", minutes, seconds);
+            return String.format(Locale.US, "%02d:%02d", minutes, seconds);
         }
     }
 

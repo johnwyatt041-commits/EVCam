@@ -722,6 +722,41 @@
                         <TextView
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
+                            android:text="无水印直连编码（跳过 GL）"
+                            android:textColor="@color/text_primary"
+                            android:textSize="18sp"
+                            android:fontFamily="sans-serif-medium" />
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="关闭水印且画面调节为默认时，摄像头直连硬件编码器跳过 OpenGL 拷贝以降低 GPU 负载；关闭可强制回退 GL 路径用于对照或兜底（下次录制生效）"
+                            android:textColor="@color/text_secondary"
+                            android:textSize="15sp"
+                            android:layout_marginTop="4dp" />
+                    </LinearLayout>
+                    <com.google.android.material.switchmaterial.SwitchMaterial
+                        android:id="@+id/switch_direct_codec_input"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginStart="16dp" />
+                </LinearLayout>
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="horizontal"
+                    android:gravity="center_vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="0dp"
+                        android:layout_height="wrap_content"
+                        android:layout_weight="1"
+                        android:orientation="vertical">
+                        <TextView
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
                             android:text="启动自动录制"
                             android:textColor="@color/text_primary"
                             android:textSize="18sp"

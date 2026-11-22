@@ -83,6 +83,15 @@ public class SingleCamera {
     private android.graphics.SurfaceTexture surroundPreviewSurfaceTexture;
     private OutputConfiguration activePreviewConfig; // 共享预览配置，用于动态 Surface 增减
     private Surface previewSurface;  // 预览Surface（缓存以避免重复创建）
+    private SurfaceTexture previewSurfaceTexture; // 与 previewSurface 绑定的 SurfaceTexture
+    private final java.util.Set<Surface> sessionConfiguredSurfaces = new java.util.LinkedHashSet<>();
+    private final java.util.Set<Surface> sessionConfiguringSurfaces = new java.util.LinkedHashSet<>();
+    private final java.util.List<Surface> pendingReleasePreviewSurfaces = new java.util.ArrayList<>();
+    private Surface sessionPreviewSurface;
+    private volatile boolean sessionPreviewInRepeating = false;
+    private boolean sessionPreviewSurfaceDead = false;
+    private Surface activePreviewPrimarySurface;
+    private boolean activePreviewPrimaryAbandoned = false;
     private ImageReader imageReader;  // 用于拍照的ImageReader
     private boolean singleOutputMode = false;  // 单一输出模式（用于不支持多路输出的车机平台）
     
@@ -112,6 +121,7 @@ public class SingleCamera {
     private long fpsWindowStartTime = 0;
 
     private long lastFrameTimestampMs = 0;
+    private volatile long lastPreviewFrameTimestampMs = 0L;
     private long lastStallRecoveryMs = 0;
     private int stallRecoveryLevel = 0;
     private Runnable healthCheckRunnable;
@@ -152,23 +162,90 @@ public class SingleCamera {
         }
     }
 
+    private void resetSessionTrackingStateLocked() {
+        sessionConfiguredSurfaces.clear();
+        sessionConfiguringSurfaces.clear();
+        sessionPreviewSurface = null;
+        sessionPreviewInRepeating = false;
+        sessionPreviewSurfaceDead = false;
+        activePreviewPrimarySurface = null;
+        activePreviewPrimaryAbandoned = false;
+        activePreviewConfig = null;
+        currentRequestBuilder = null;
+    }
+
+    Surface createPreviewSurfaceFromTexture(SurfaceTexture surfaceTexture) {
+        return new Surface(surfaceTexture);
+    }
+
+    private Surface detachPreviewSurfaceLocked() {
+        final Surface old = this.previewSurface;
+        this.previewSurface = null;
+        this.previewSurfaceTexture = null;
+        if (old == null) {
+            return null;
+        }
+        if (old == sessionPreviewSurface) {
+            sessionPreviewSurfaceDead = true;
+        }
+        if (old == activePreviewPrimarySurface) {
+            activePreviewPrimaryAbandoned = true;
+        }
+        boolean heldBySession = (captureSession != null && sessionConfiguredSurfaces.contains(old))
+                || (isConfiguring && sessionConfiguringSurfaces.contains(old));
+        if (heldBySession) {
+            if (!pendingReleasePreviewSurfaces.contains(old)) {
+                pendingReleasePreviewSurfaces.add(old);
+            }
+            return null;
+        }
+        return old;
+    }
+
+    private void releasePendingPreviewSurfaces() {
+        final java.util.List<Surface> toRelease;
+        synchronized (sessionLock) {
+            if (pendingReleasePreviewSurfaces.isEmpty()) {
+                return;
+            }
+            toRelease = new java.util.ArrayList<>(pendingReleasePreviewSurfaces);
+            pendingReleasePreviewSurfaces.clear();
+        }
+        for (Surface surface : toRelease) {
+            if (surface != null) {
+                try {
+                    surface.release();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+    }
+
     private void cleanupSessionStateBeforeDeviceReset() {
         stopHealthMonitor();
         if (backgroundHandler != null) {
             backgroundHandler.removeCallbacks(recreateSessionRunnable);
             backgroundHandler.removeCallbacks(sessionCloseFallbackRunnable);
+            backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+            backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
         }
-        if (captureSession != null) {
+        final CameraCaptureSession sessionToClose;
+        synchronized (sessionLock) {
+            sessionToClose = captureSession;
+            captureSession = null;
+            resetSessionTrackingStateLocked();
+            isConfiguring = false;
+            isSessionClosing = false;
+            isPendingReconfiguration = false;
+        }
+        if (sessionToClose != null) {
             try {
-                captureSession.close();
+                sessionToClose.close();
             } catch (Exception e) {
                 AppLog.d(TAG, "Camera " + cameraId + " ignored exception during session close: " + e.getMessage());
             }
-            captureSession = null;
         }
-        activePreviewConfig = null;
-        currentRequestBuilder = null;
-        resetSessionFlagsLocked();
+        releasePendingPreviewSurfaces();
     }
 
     // 相机打开后的一次性回调（用于副屏等待相机就绪后立即绑定 Surface）
@@ -257,6 +334,74 @@ public class SingleCamera {
         }
     }
 
+    void attachRecordingSessionStateForTest(
+            CameraDevice device,
+            CameraCaptureSession session,
+            OutputConfiguration sharedPreviewConfig,
+            Surface previewSurface,
+            SurfaceTexture previewTexture,
+            Surface primaryPreviewSurface,
+            boolean previewInRepeating,
+            Surface... configuredSurfaces) {
+        synchronized (reconnectLock) {
+            synchronized (lifecycleLock) {
+                long gen = ++lifecycleGeneration;
+                activeOpenGeneration = gen;
+            }
+            this.cameraDevice = device;
+            this.backgroundHandler = null;
+            synchronized (sessionLock) {
+                this.captureSession = session;
+                this.activePreviewConfig = sharedPreviewConfig;
+                this.previewSurface = previewSurface;
+                this.previewSurfaceTexture = previewTexture;
+                this.sessionPreviewSurface = previewSurface;
+                this.sessionPreviewInRepeating = previewInRepeating;
+                this.sessionPreviewSurfaceDead = false;
+                this.activePreviewPrimarySurface = primaryPreviewSurface;
+                this.activePreviewPrimaryAbandoned = false;
+                this.sessionConfiguredSurfaces.clear();
+                this.sessionConfiguringSurfaces.clear();
+                if (configuredSurfaces != null) {
+                    for (Surface s : configuredSurfaces) {
+                        if (s != null) {
+                            this.sessionConfiguredSurfaces.add(s);
+                        }
+                    }
+                }
+                this.isConfiguring = false;
+                this.isSessionClosing = false;
+                this.isPendingReconfiguration = false;
+            }
+        }
+    }
+
+    boolean isSessionPreviewInRepeatingForTest() {
+        return sessionPreviewInRepeating;
+    }
+
+    boolean isSessionPreviewSurfaceDeadForTest() {
+        synchronized (sessionLock) {
+            return sessionPreviewSurfaceDead;
+        }
+    }
+
+    boolean isActivePreviewPrimaryAbandonedForTest() {
+        synchronized (sessionLock) {
+            return activePreviewPrimaryAbandoned;
+        }
+    }
+
+    int getPendingReleasePreviewSurfaceCountForTest() {
+        synchronized (sessionLock) {
+            return pendingReleasePreviewSurfaces.size();
+        }
+    }
+
+    void triggerOnCaptureCompletedForTest(CameraCaptureSession session, CaptureRequest request, TotalCaptureResult result) {
+        activeCaptureCallback.onCaptureCompleted(session, request, result);
+    }
+
     public boolean hasActiveCaptureSession() {
         return captureSession != null;
     }
@@ -287,6 +432,13 @@ public class SingleCamera {
 
     public void setTextureView(TextureView textureView) {
         if (this.textureView == textureView) {
+            if (textureView != null && textureView.isAvailable()) {
+                SurfaceTexture currentSt = textureView.getSurfaceTexture();
+                if (currentSt != null && previewSurface != null && previewSurfaceTexture != currentSt) {
+                    clearPreviewSurface();
+                }
+                applyPreviewTransformIfUnmanaged();
+            }
             return;
         }
         this.textureView = textureView;
@@ -297,26 +449,257 @@ public class SingleCamera {
     }
 
     public void clearPreviewSurface() {
-        if (previewSurface != null) {
-            try {
-                previewSurface.release();
-            } catch (Exception e) {
-            }
-            previewSurface = null;
+        final Surface immediateRelease;
+        synchronized (sessionLock) {
+            immediateRelease = detachPreviewSurfaceLocked();
         }
-
+        if (immediateRelease != null) {
+            try {
+                immediateRelease.release();
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     /** 主界面不可见时停用预览；录像、补盲及远程输出独立保留。 */
     public void setMainPreviewEnabled(boolean enabled) {
         if (mainPreviewEnabled == enabled) return;
         mainPreviewEnabled = enabled;
-        mainPreviewChanged = true;
-        if (enabled && textureView != null && textureView.isAvailable()) {
-            openCamera();
+        handleMainPreviewStateChange();
+    }
+
+    /** 仅当 TextureView / Surface 状态变化时同步主预览输出（不重复触发整路重建）。 */
+    public void syncMainPreviewOutput() {
+        handleMainPreviewStateChange();
+    }
+
+    public void onPreviewTextureDestroyed() {
+        onPreviewTextureDestroyed(null);
+    }
+
+    public void onPreviewTextureDestroyed(SurfaceTexture destroyedSurfaceTexture) {
+        if (destroyedSurfaceTexture != null) {
+            SurfaceTexture activeSt = this.previewSurfaceTexture;
+            if (activeSt != null && activeSt != destroyedSurfaceTexture) {
+                AppLog.d(TAG, "Camera " + cameraId + " ignoring stale onPreviewTextureDestroyed");
+                return;
+            }
+            TextureView tv = this.textureView;
+            if (activeSt == null && tv != null && tv.isAvailable()
+                    && tv.getSurfaceTexture() != null
+                    && tv.getSurfaceTexture() != destroyedSurfaceTexture) {
+                AppLog.d(TAG, "Camera " + cameraId + " ignoring stale onPreviewTextureDestroyed (new TextureView surface)");
+                return;
+            }
         }
-        if (!closeIfUnused()) {
-            recreateSession();
+        if (backgroundHandler != null) {
+            backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+            backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
+        }
+        final RecordingPreviewSessionPolicy.SessionSnapshot snapshot = buildSessionSnapshot();
+        final RecordingPreviewSessionPolicy.PreviewAction action =
+                RecordingPreviewSessionPolicy.decideOnPreviewTextureDestroyed(snapshot);
+
+        this.textureView = null;
+        clearPreviewSurface();
+
+        switch (action) {
+            case CLOSE_CAMERA:
+                closeIfUnused();
+                break;
+            case UPDATE_REPEATING_TARGETS:
+                if (!applyActiveRepeatingTargets("preview-texture-destroyed")) {
+                    AppLog.w(TAG, "Camera " + cameraId + " repeating sync on texture destroy failed, rebuilding session");
+                    if (!closeIfUnused()) {
+                        recreateSession(true);
+                    }
+                }
+                break;
+            case RECREATE_SESSION:
+                stopRepeatingNow();
+                if (!closeIfUnused()) {
+                    recreateSession();
+                }
+                break;
+            case NO_OP:
+            default:
+                break;
+        }
+    }
+
+    private RecordingPreviewSessionPolicy.SessionSnapshot buildSessionSnapshot() {
+        final TextureView tv = this.textureView;
+        final Surface rec = this.recordSurface;
+        final Surface mainFloat = this.mainFloatingSurface;
+        final Surface secDisplay = this.secondaryDisplaySurface;
+        final Surface fullScreen = this.fullscreenPreviewSurface;
+        final Surface stream = this.streamSurface;
+        final Surface surround = this.surroundPreviewSurface;
+
+        final boolean cameraConnected = this.cameraDevice != null;
+        final boolean hasActiveRecordSurface = isValidSurface(rec);
+        final boolean hasAvailableTexture = tv != null && tv.isAvailable();
+        final SurfaceTexture currentSt = hasAvailableTexture ? tv.getSurfaceTexture() : null;
+        final boolean hasOtherOutput = isValidSurface(mainFloat)
+                || isValidSurface(secDisplay)
+                || isValidSurface(fullScreen)
+                || isValidSurface(stream)
+                || isValidSurface(surround);
+
+        synchronized (sessionLock) {
+            final boolean hasActiveSession = this.captureSession != null;
+            final boolean sessionBusy = this.isConfiguring || this.isSessionClosing;
+            final boolean recordConfigured = hasActiveSession
+                    && hasActiveRecordSurface
+                    && this.sessionConfiguredSurfaces.contains(rec);
+            final boolean configuredPreviewMatches = this.sessionPreviewSurface != null
+                    && !this.sessionPreviewSurfaceDead
+                    && this.previewSurface == this.sessionPreviewSurface
+                    && isValidSurface(this.sessionPreviewSurface)
+                    && currentSt != null
+                    && this.previewSurfaceTexture == currentSt
+                    && this.sessionConfiguredSurfaces.contains(this.sessionPreviewSurface);
+            final boolean configuringPreviewMatches = this.isConfiguring
+                    && this.previewSurface != null
+                    && isValidSurface(this.previewSurface)
+                    && currentSt != null
+                    && this.previewSurfaceTexture == currentSt
+                    && this.sessionConfiguringSurfaces.contains(this.previewSurface);
+            final boolean previewMatches = configuredPreviewMatches || configuringPreviewMatches;
+            final boolean healthySharedConfig = this.activePreviewConfig != null
+                    && !this.sessionPreviewSurfaceDead
+                    && !this.activePreviewPrimaryAbandoned;
+            return new RecordingPreviewSessionPolicy.SessionSnapshot(
+                    cameraConnected,
+                    hasActiveSession,
+                    sessionBusy,
+                    hasActiveRecordSurface,
+                    recordConfigured,
+                    this.singleOutputMode,
+                    this.mainPreviewEnabled,
+                    hasAvailableTexture,
+                    previewMatches,
+                    this.sessionPreviewInRepeating,
+                    healthySharedConfig,
+                    hasOtherOutput
+            );
+        }
+    }
+
+    private void handleMainPreviewStateChange() {
+        final RecordingPreviewSessionPolicy.SessionSnapshot snapshot = buildSessionSnapshot();
+        final RecordingPreviewSessionPolicy.PreviewAction action =
+                RecordingPreviewSessionPolicy.decideOnMainPreviewChanged(snapshot);
+        switch (action) {
+            case CLOSE_CAMERA:
+                mainPreviewChanged = false;
+                closeIfUnused();
+                break;
+            case OPEN_CAMERA:
+                mainPreviewChanged = false;
+                openCamera();
+                break;
+            case UPDATE_REPEATING_TARGETS:
+                mainPreviewChanged = false;
+                if (backgroundHandler != null) {
+                    backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                    backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
+                    backgroundHandler.post(recordingRepeatingSyncRunnable);
+                } else {
+                    syncRecordingRepeatingTargets();
+                }
+                break;
+            case DYNAMIC_ADD_PREVIEW_OR_RECREATE:
+                mainPreviewChanged = false;
+                if (backgroundHandler != null) {
+                    backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                    backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
+                    backgroundHandler.post(dynamicPreviewAttachRunnable);
+                } else {
+                    attachMainPreviewSurfaceDynamically();
+                }
+                break;
+            case RECREATE_SESSION:
+                mainPreviewChanged = true;
+                if (!closeIfUnused()) {
+                    recreateSession();
+                }
+                break;
+            case NO_OP:
+            default:
+                mainPreviewChanged = false;
+                if (backgroundHandler != null) {
+                    backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                    backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
+                }
+                break;
+        }
+    }
+
+    private void syncRecordingRepeatingTargets() {
+        final RecordingPreviewSessionPolicy.SessionSnapshot snapshot = buildSessionSnapshot();
+        if (!snapshot.cameraConnected) {
+            return;
+        }
+        if (!snapshot.hasActiveSession) {
+            if (!closeIfUnused()) {
+                createCameraPreviewSession();
+            }
+            return;
+        }
+        if (snapshot.sessionBusy) {
+            return;
+        }
+        if (!applyActiveRepeatingTargets("main-preview-sync")) {
+            if (!closeIfUnused()) {
+                createCameraPreviewSession();
+            }
+        }
+    }
+
+    private void attachMainPreviewSurfaceDynamically() {
+        final TextureView tv = this.textureView;
+        if (!mainPreviewEnabled || tv == null || !tv.isAvailable()) {
+            return;
+        }
+        final SurfaceTexture st = tv.getSurfaceTexture();
+        if (st == null) {
+            return;
+        }
+        if (previewSize != null) {
+            try {
+                st.setDefaultBufferSize(previewSize.getWidth(), previewSize.getHeight());
+            } catch (Exception ignored) {
+            }
+        }
+        applyPreviewTransformIfUnmanaged();
+
+        final Surface candidate;
+        final Surface oldImmediate;
+        synchronized (sessionLock) {
+            if (previewSurface == null || !previewSurface.isValid() || previewSurfaceTexture != st) {
+                oldImmediate = detachPreviewSurfaceLocked();
+                previewSurface = createPreviewSurfaceFromTexture(st);
+                previewSurfaceTexture = st;
+            } else {
+                oldImmediate = null;
+            }
+            candidate = previewSurface;
+        }
+        if (oldImmediate != null) {
+            try {
+                oldImmediate.release();
+            } catch (Exception ignored) {
+            }
+        }
+        if (!isValidSurface(candidate)) {
+            return;
+        }
+        if (!tryDynamicSurfaceAdd(candidate, "main-preview")) {
+            AppLog.d(TAG, "Camera " + cameraId + " dynamic main preview add failed, rebuilding session");
+            if (!closeIfUnused()) {
+                createCameraPreviewSession();
+            }
         }
     }
 
@@ -651,7 +1034,6 @@ public class SingleCamera {
             boolean disabledMainNow = false;
             if (disableMainPreview && mainPreviewEnabled) {
                 mainPreviewEnabled = false;
-                mainPreviewChanged = true;
                 disabledMainNow = true;
             }
             if (surfaceTexture != null && previewSize != null) {
@@ -660,50 +1042,146 @@ public class SingleCamera {
                 } catch (Exception ignored) {
                 }
             }
-            if (!isConnected()) {
-                openCamera();
+            final boolean alreadyConfigured;
+            synchronized (sessionLock) {
+                alreadyConfigured = captureSession != null
+                        && (sessionConfiguredSurfaces.contains(surface)
+                        || (activePreviewConfig != null
+                        && activePreviewConfig.getSurfaces() != null
+                        && activePreviewConfig.getSurfaces().contains(surface)));
             }
-            if (!changed && !disabledMainNow && !mainPreviewChanged
-                    && isConnected() && captureSession != null && activePreviewConfig != null) {
-                java.util.List<Surface> currentSurfaces = activePreviewConfig.getSurfaces();
-                if (currentSurfaces != null && currentSurfaces.contains(surface)) {
-                    AppLog.d(TAG, "Camera " + cameraId + " surround preview surface unchanged and active, skip re-add");
-                    return;
-                }
-            }
+            final RecordingPreviewSessionPolicy.SessionSnapshot snapshot = buildSessionSnapshot();
+            final RecordingPreviewSessionPolicy.PreviewAction action =
+                    RecordingPreviewSessionPolicy.decideOnSurroundSurfaceAdded(
+                            snapshot, alreadyConfigured, disabledMainNow);
             AppLog.d(TAG, "Camera " + cameraId + " surround preview surface set: " + surface
-                    + (disabledMainNow ? " (mainPreview disabled atomically)" : ""));
-            if (!disabledMainNow && !mainPreviewChanged
-                    && backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
-                backgroundHandler.removeCallbacks(recreateSessionRunnable);
-                backgroundHandler.post(() -> {
-                    if (surroundPreviewSurface == surface && surface.isValid()) {
-                        if (!tryDynamicSurfaceAdd(surface, false)) {
-                            AppLog.d(TAG, "Camera " + cameraId + " surround dynamic add failed, rebuild session");
-                            createCameraPreviewSession();
-                        }
+                    + (disabledMainNow ? " (mainPreview disabled atomically)" : "")
+                    + ", action=" + action);
+            switch (action) {
+                case OPEN_CAMERA:
+                    mainPreviewChanged = false;
+                    openCamera();
+                    break;
+                case NO_OP:
+                    mainPreviewChanged = false;
+                    break;
+                case UPDATE_REPEATING_TARGETS:
+                    mainPreviewChanged = false;
+                    if (backgroundHandler != null) {
+                        backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                        backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                        backgroundHandler.post(recordingRepeatingSyncRunnable);
+                    } else {
+                        syncRecordingRepeatingTargets();
                     }
-                });
-            } else {
-                recreateSession(true);
+                    break;
+                case DYNAMIC_ADD_PREVIEW_OR_RECREATE:
+                    mainPreviewChanged = false;
+                    Runnable addAction = () -> {
+                        if (surroundPreviewSurface == surface && surface.isValid()) {
+                            if (!tryDynamicSurfaceAdd(surface, "surround")) {
+                                AppLog.d(TAG, "Camera " + cameraId + " surround dynamic add failed, rebuild session");
+                                if (!closeIfUnused()) {
+                                    createCameraPreviewSession();
+                                }
+                            }
+                        }
+                    };
+                    if (backgroundHandler != null) {
+                        backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                        backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                        backgroundHandler.post(addAction);
+                    } else {
+                        addAction.run();
+                    }
+                    break;
+                case RECREATE_SESSION:
+                default:
+                    if (disabledMainNow) {
+                        mainPreviewChanged = true;
+                    }
+                    recreateSession(true);
+                    break;
             }
         } else {
             AppLog.d(TAG, "Camera " + cameraId + " surround preview surface cleared");
             if (changed && oldSurface != null) {
-                stopRepeatingNow();
-                if (backgroundHandler != null && captureSession != null && activePreviewConfig != null) {
-                    backgroundHandler.removeCallbacks(recreateSessionRunnable);
-                    backgroundHandler.post(() -> {
-                        if (!tryDynamicSurfaceRemove(oldSurface)) {
-                            if (!closeIfUnused()) {
-                                createCameraPreviewSession();
+                final boolean oldSurfaceWasPrimary;
+                synchronized (sessionLock) {
+                    oldSurfaceWasPrimary = (oldSurface == activePreviewPrimarySurface);
+                }
+                final RecordingPreviewSessionPolicy.SessionSnapshot snapshot = buildSessionSnapshot();
+                final RecordingPreviewSessionPolicy.SurroundClearAction action =
+                        RecordingPreviewSessionPolicy.decideOnSurroundSurfaceCleared(snapshot, oldSurfaceWasPrimary);
+                switch (action) {
+                    case CLOSE_CAMERA:
+                        stopRepeatingNow();
+                        closeIfUnused();
+                        break;
+                    case NO_OP:
+                        break;
+                    case UPDATE_REPEATING_TARGETS:
+                        synchronized (sessionLock) {
+                            if (oldSurfaceWasPrimary) {
+                                activePreviewPrimaryAbandoned = true;
                             }
-                        } else {
-                            closeIfUnused();
                         }
-                    });
-                } else if (!closeIfUnused()) {
-                    recreateSession(false);
+                        Runnable detachPrimaryAction = () -> {
+                            if (!applyActiveRepeatingTargets("surround-clear-primary")) {
+                                if (!closeIfUnused()) {
+                                    createCameraPreviewSession();
+                                }
+                            } else {
+                                closeIfUnused();
+                            }
+                        };
+                        if (backgroundHandler != null) {
+                            backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                            backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                            backgroundHandler.post(detachPrimaryAction);
+                        } else {
+                            detachPrimaryAction.run();
+                        }
+                        break;
+                    case DYNAMIC_REMOVE_OR_UPDATE_REPEATING:
+                        if (!snapshot.recordSurfaceConfiguredInSession) {
+                            stopRepeatingNow();
+                        }
+                        Runnable dynamicRemoveAction = () -> {
+                            if (!tryDynamicSurfaceRemove(oldSurface)) {
+                                boolean detachedByRepeating = false;
+                                if (hasActiveRecordSurface()) {
+                                    synchronized (sessionLock) {
+                                        activePreviewPrimaryAbandoned = true;
+                                    }
+                                    detachedByRepeating = applyActiveRepeatingTargets("surround-clear-dynamic-fallback");
+                                }
+                                if (!detachedByRepeating && !closeIfUnused()) {
+                                    createCameraPreviewSession();
+                                } else {
+                                    closeIfUnused();
+                                }
+                            } else {
+                                closeIfUnused();
+                            }
+                        };
+                        if (backgroundHandler != null) {
+                            backgroundHandler.removeCallbacks(recreateSessionRunnable);
+                            backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                            backgroundHandler.post(dynamicRemoveAction);
+                        } else {
+                            dynamicRemoveAction.run();
+                        }
+                        break;
+                    case RECREATE_SESSION:
+                    default:
+                        if (!hasActiveRecordSurface()) {
+                            stopRepeatingNow();
+                        }
+                        if (!closeIfUnused()) {
+                            recreateSession(false);
+                        }
+                        break;
                 }
             }
         }
@@ -759,6 +1237,9 @@ public class SingleCamera {
             try {
                 // 停止向所有 Surface（包括 recordSurface）发送帧
                 captureSession.stopRepeating();
+                synchronized (sessionLock) {
+                    sessionPreviewInRepeating = false;
+                }
                 AppLog.d(TAG, "Camera " + cameraId + " paused recording surface (stopped repeating request)");
             } catch (CameraAccessException e) {
                 AppLog.e(TAG, "Camera " + cameraId + " failed to pause recording surface", e);
@@ -812,6 +1293,86 @@ public class SingleCamera {
         }
     }
 
+    public boolean pauseRecordSurfaceDelivery() {
+        final CameraCaptureSession session;
+        final CameraDevice device;
+        final java.util.List<Surface> nonRecordTargets = new java.util.ArrayList<>();
+        final boolean includedPreview;
+
+        synchronized (sessionLock) {
+            if (isConfiguring || isSessionClosing) {
+                return false;
+            }
+            session = this.captureSession;
+            device = this.cameraDevice;
+            if (session == null || device == null) {
+                return false;
+            }
+            includedPreview = collectConfiguredNonRecordTargetsLocked(nonRecordTargets);
+        }
+
+        if (nonRecordTargets.isEmpty()) {
+            stopRepeatingNow();
+            return true;
+        }
+
+        try {
+            CaptureRequest.Builder builder = device.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            for (Surface target : nonRecordTargets) {
+                builder.addTarget(target);
+            }
+            session.setRepeatingRequest(builder.build(), activeCaptureCallback, backgroundHandler);
+            synchronized (sessionLock) {
+                if (this.captureSession == session) {
+                    this.currentRequestBuilder = builder;
+                    this.sessionPreviewInRepeating = includedPreview;
+                }
+            }
+            AppLog.d(TAG, "Camera " + cameraId + " paused recordSurface delivery (targets="
+                    + nonRecordTargets.size() + ", previewInRepeating=" + includedPreview + ")");
+            return true;
+        } catch (CameraAccessException | RuntimeException e) {
+            AppLog.w(TAG, "Camera " + cameraId + " failed to pause recordSurface delivery via repeating, stopping repeating: "
+                    + e.getMessage());
+            stopRepeatingNow();
+            return false;
+        }
+    }
+
+    public boolean isDirectCodecInputSizeSupported(int width, int height) {
+        if (width <= 0 || height <= 0) {
+            return false;
+        }
+        CameraCharacteristics characteristics = getCameraCharacteristics();
+        StreamConfigurationMap map = characteristics != null
+                ? characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP)
+                : null;
+        if (map == null) {
+            return false;
+        }
+        Size[] codecSizes = map.getOutputSizes(android.media.MediaCodec.class);
+        if (codecSizes != null && codecSizes.length > 0) {
+            return containsMatchingSize(codecSizes, width, height);
+        }
+        Size[] recorderSizes = map.getOutputSizes(android.media.MediaRecorder.class);
+        if (recorderSizes != null && recorderSizes.length > 0) {
+            return containsMatchingSize(recorderSizes, width, height);
+        }
+        return previewSize != null && previewSize.getWidth() == width && previewSize.getHeight() == height;
+    }
+
+    private static boolean containsMatchingSize(Size[] sizes, int width, int height) {
+        if (sizes == null) {
+            return false;
+        }
+        for (Size size : sizes) {
+            if (size != null && size.getWidth() == width && size.getHeight() == height) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public boolean switchToPreviewOnlyMode() {
         java.util.List<Surface> targets = collectActiveNonRecordSurfaces();
         if (captureSession == null || cameraDevice == null || targets.isEmpty()) {
@@ -832,6 +1393,9 @@ public class SingleCamera {
             
             // 替换当前的重复请求（预览继续，但不再向录制 Surface 发送帧）
             captureSession.setRepeatingRequest(previewOnlyBuilder.build(), null, backgroundHandler);
+            synchronized (sessionLock) {
+                sessionPreviewInRepeating = previewSurface != null && targets.contains(previewSurface);
+            }
             AppLog.d(TAG, "Camera " + cameraId + " switched to preview-only mode (targets=" + targets.size() + ", recording paused)");
             return true;
             
@@ -856,8 +1420,10 @@ public class SingleCamera {
             SurfaceTexture surfaceTexture = textureView.getSurfaceTexture();
             if (surfaceTexture != null) {
                 // 缓存 Surface 以避免重复创建和资源泄漏
-                if (previewSurface == null) {
-                    previewSurface = new Surface(surfaceTexture);
+                if (previewSurface == null || previewSurfaceTexture != surfaceTexture || !previewSurface.isValid()) {
+                    clearPreviewSurface();
+                    previewSurface = createPreviewSurfaceFromTexture(surfaceTexture);
+                    previewSurfaceTexture = surfaceTexture;
                     AppLog.d(TAG, "Camera " + cameraId + " created new preview surface");
                 }
                 return previewSurface;
@@ -1068,6 +1634,10 @@ public class SingleCamera {
 
     public long getLastFrameTimestampMs() {
         return lastFrameTimestampMs;
+    }
+
+    public long getLastPreviewFrameTimestampMs() {
+        return lastPreviewFrameTimestampMs;
     }
 
     /**
@@ -1385,15 +1955,21 @@ public class SingleCamera {
                     }
                     try {
                         // 确保之前的资源已清理（捕获并忽略异常）
+                        final CameraCaptureSession oldSession;
+                        synchronized (sessionLock) {
+                            oldSession = captureSession;
+                            captureSession = null;
+                            resetSessionTrackingStateLocked();
+                        }
                         try {
-                            if (captureSession != null) {
-                                captureSession.close();
-                                captureSession = null;
+                            if (oldSession != null) {
+                                oldSession.close();
                             }
                         } catch (Exception e) {
                             // 忽略关闭session时的异常（车机HAL可能不支持某些操作）
                             AppLog.d(TAG, "Camera " + cameraId + " ignored exception while closing session: " + e.getMessage());
                         }
+                        releasePendingPreviewSurfaces();
 
                         try {
                             if (cameraDevice != null) {
@@ -1637,6 +2213,175 @@ public class SingleCamera {
         };
     }
 
+    private CaptureRequest.Builder createBaseCaptureRequestBuilder(CameraDevice sessionDevice, boolean verboseLog)
+            throws CameraAccessException {
+        int template = (recordSurface != null && !recordingPreviewTemplate)
+                ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW;
+        CaptureRequest.Builder requestBuilder;
+        try {
+            requestBuilder = sessionDevice.createCaptureRequest(template);
+        } catch (IllegalArgumentException unsupported) {
+            if (template != CameraDevice.TEMPLATE_RECORD) throw unsupported;
+            requestBuilder = sessionDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
+            if (verboseLog) {
+                AppLog.w(TAG, "RECORD template unsupported; retaining PREVIEW template with recording target");
+            }
+        }
+        AppConfig captureAppConfig = context != null ? new AppConfig(context) : null;
+        String carModel = captureAppConfig != null ? captureAppConfig.getCarModel() : "";
+        if (recordSurface != null && !RecordingDeviceProfile.isE5(carModel)) {
+            try {
+                CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
+                        CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), recordingFrameRate);
+                if (range != null) {
+                    requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
+                    if (verboseLog) {
+                        AppLog.i(TAG, "Recording source camera=" + cameraId + ", requestedFps="
+                                + recordingFrameRate + ", supportedRange=" + range);
+                    }
+                }
+            } catch (Exception e) {
+                if (verboseLog) {
+                    AppLog.w(TAG, "Camera rejected optional FPS range; retaining HAL default: " + e.getMessage());
+                }
+            }
+        } else if (recordSurface != null) {
+            if (verboseLog) {
+                AppLog.i(TAG, "E5 recording source camera=" + cameraId + ", HAL default FPS (working baseline)");
+            }
+        } else if (captureAppConfig != null) {
+            int previewFpsLimit = captureAppConfig.getPreviewFpsLimit();
+            if (previewFpsLimit > 0 && !RecordingDeviceProfile.isE5(carModel)) {
+                try {
+                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
+                    Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
+                            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), previewFpsLimit);
+                    if (range != null) {
+                        requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
+                        if (verboseLog) {
+                            AppLog.d(TAG, "Preview limit camera=" + cameraId + ", requestedFps="
+                                    + previewFpsLimit + ", range=" + range);
+                        }
+                    }
+                } catch (Exception e) {
+                    if (verboseLog) {
+                        AppLog.w(TAG, "Preview FPS limit unavailable; retaining HAL default: " + e.getMessage());
+                    }
+                }
+            }
+        }
+        return requestBuilder;
+    }
+
+    private void submitRepeatingRequest(CameraCaptureSession session, CaptureRequest.Builder requestBuilder)
+            throws CameraAccessException {
+        try {
+            session.setRepeatingRequest(requestBuilder.build(), activeCaptureCallback, backgroundHandler);
+        } catch (IllegalArgumentException rejectedRange) {
+            if (requestBuilder.get(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) == null) {
+                throw rejectedRange;
+            }
+            requestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
+            session.setRepeatingRequest(requestBuilder.build(), activeCaptureCallback, backgroundHandler);
+            AppLog.w(TAG, "FPS range rejected by active stream combination; using HAL default");
+        }
+    }
+
+    private void addConfiguredValidTargetLocked(java.util.List<Surface> targets, Surface candidate) {
+        if (isValidSurface(candidate)
+                && sessionConfiguredSurfaces.contains(candidate)
+                && !targets.contains(candidate)) {
+            targets.add(candidate);
+        }
+    }
+
+    private boolean collectConfiguredNonRecordTargetsLocked(java.util.List<Surface> targets) {
+        boolean previewAdded = false;
+        if (!singleOutputMode) {
+            final Surface sessionPrev = this.sessionPreviewSurface;
+            if (mainPreviewEnabled
+                    && !sessionPreviewSurfaceDead
+                    && sessionPrev != null
+                    && this.previewSurface == sessionPrev
+                    && isValidSurface(sessionPrev)
+                    && sessionConfiguredSurfaces.contains(sessionPrev)
+                    && !targets.contains(sessionPrev)) {
+                targets.add(sessionPrev);
+                previewAdded = true;
+            }
+            addConfiguredValidTargetLocked(targets, mainFloatingSurface);
+            addConfiguredValidTargetLocked(targets, secondaryDisplaySurface);
+            addConfiguredValidTargetLocked(targets, fullscreenPreviewSurface);
+            addConfiguredValidTargetLocked(targets, streamSurface);
+            addConfiguredValidTargetLocked(targets, surroundPreviewSurface);
+        }
+        return previewAdded;
+    }
+
+    private boolean applyActiveRepeatingTargets(String reason) {
+        final CameraCaptureSession session;
+        final CameraDevice device;
+        final java.util.List<Surface> targets = new java.util.ArrayList<>();
+        final boolean includedPreview;
+        final boolean expectingRecord;
+        final Surface expectedRecordSurface;
+
+        synchronized (sessionLock) {
+            if (isConfiguring || isSessionClosing) {
+                AppLog.d(TAG, "Camera " + cameraId + " skipping repeating target update (" + reason + "): session busy");
+                return false;
+            }
+            session = this.captureSession;
+            device = this.cameraDevice;
+            if (session == null || device == null) {
+                return false;
+            }
+
+            expectedRecordSurface = this.recordSurface;
+            expectingRecord = isValidSurface(expectedRecordSurface);
+            if (expectingRecord) {
+                if (!sessionConfiguredSurfaces.contains(expectedRecordSurface)) {
+                    AppLog.w(TAG, "Camera " + cameraId + " recordSurface not configured in active session (" + reason + ")");
+                    return false;
+                }
+                targets.add(expectedRecordSurface);
+            }
+
+            includedPreview = collectConfiguredNonRecordTargetsLocked(targets);
+        }
+
+        if (expectingRecord && !targets.contains(expectedRecordSurface)) {
+            return false;
+        }
+        if (targets.isEmpty()) {
+            AppLog.w(TAG, "Camera " + cameraId + " no configured active targets for repeating update (" + reason + ")");
+            return false;
+        }
+
+        try {
+            CaptureRequest.Builder builder = createBaseCaptureRequestBuilder(device, false);
+            for (Surface target : targets) {
+                builder.addTarget(target);
+            }
+            submitRepeatingRequest(session, builder);
+            synchronized (sessionLock) {
+                if (this.captureSession != session) {
+                    return false;
+                }
+                this.currentRequestBuilder = builder;
+                this.sessionPreviewInRepeating = includedPreview;
+            }
+            AppLog.d(TAG, "Camera " + cameraId + " updated repeating targets (" + reason
+                    + "): targets=" + targets.size() + ", previewInRepeating=" + includedPreview);
+            return true;
+        } catch (CameraAccessException | RuntimeException e) {
+            AppLog.w(TAG, "Camera " + cameraId + " failed to update repeating targets (" + reason
+                    + "): " + e.getMessage());
+            return false;
+        }
+    }
+
     /**
      * 创建预览会话
      */
@@ -1676,12 +2421,14 @@ public class SingleCamera {
             // 【关键】如果旧会话仍在运行，必须先关闭它再创建新 session。
             // HAL 不允许 Surface 同时绑定到多个 stream（"Surface already has a stream created for it"）
             if (captureSession != null) {
-                final CameraCaptureSession oldSession = captureSession;
-                captureSession = null;
+                final CameraCaptureSession oldSession;
+                synchronized (sessionLock) {
+                    oldSession = captureSession;
+                    captureSession = null;
+                    resetSessionTrackingStateLocked();
+                    isSessionClosing = true;
+                }
                 try {
-                    synchronized (sessionLock) {
-                        isSessionClosing = true;
-                    }
                     oldSession.stopRepeating();
                     oldSession.close();
                     AppLog.d(TAG, "Camera " + cameraId + " initiated session close (early, before surface prep)");
@@ -1703,11 +2450,10 @@ public class SingleCamera {
                 return;
             }
 
-            // 必须等旧会话关闭后再释放 GL/Surface，避免影响仍在推送的录像。
-            if (mainPreviewChanged) {
-                clearPreviewSurface();
-                mainPreviewChanged = false;
-            }
+            // 旧会话已关闭，此时可以安全释放上一会话期间滞留的旧 previewSurface。
+            releasePendingPreviewSurfaces();
+            mainPreviewChanged = false;
+
             SurfaceTexture surfaceTexture = null;
             if (mainPreviewEnabled && textureView != null && textureView.isAvailable()) {
                 surfaceTexture = textureView.getSurfaceTexture();
@@ -1734,29 +2480,14 @@ public class SingleCamera {
                     }
                     return;
                 }
-                if (previewSurface == null || !previewSurface.isValid()) {
-                    if (previewSurface != null) {
-                        try { previewSurface.release(); } catch (Exception e) {}
-                        previewSurface = null;
-                    }
-
-                    {
-
-                        previewSurface = new Surface(surfaceTexture);
-                    }
+                if (previewSurface == null || !previewSurface.isValid() || previewSurfaceTexture != surfaceTexture) {
+                    clearPreviewSurface();
+                    previewSurface = createPreviewSurfaceFromTexture(surfaceTexture);
+                    previewSurfaceTexture = surfaceTexture;
                     AppLog.d(TAG, "Camera " + cameraId + " Created NEW preview surface: " + previewSurface);
                 }
-            } else if (mainFloatingSurface != null && mainFloatingSurface.isValid()) {
-                if (previewSurface != null) {
-                    try { previewSurface.release(); } catch (Exception e) {}
-                    previewSurface = null;
-                }
-
             } else {
-                if (previewSurface != null) {
-                    try { previewSurface.release(); } catch (Exception e) {}
-                    previewSurface = null;
-                }
+                clearPreviewSurface();
             }
 
             Surface surface = selectPrimaryPreviewSurface();
@@ -1771,72 +2502,31 @@ public class SingleCamera {
                     || (surroundPreviewSurface != null && surroundPreviewSurface.isValid());
             if (!hasAnySurface) {
                 AppLog.d(TAG, "Camera " + cameraId + " no available surfaces, skipping session creation (waiting for surface)");
-                // 关闭旧 session，防止继续推帧到已销毁的 Surface（queueBuffer abandoned）
-                if (captureSession != null) {
-                    try {
-                        captureSession.close();
-                    } catch (Exception e) {
-                        // 忽略
-                    }
-                    captureSession = null;
-                    AppLog.d(TAG, "Camera " + cameraId + " closed old session (no surfaces)");
-                }
+                final CameraCaptureSession sessionToClose;
                 synchronized (sessionLock) {
+                    sessionToClose = captureSession;
+                    captureSession = null;
+                    resetSessionTrackingStateLocked();
                     isConfiguring = false;
                 }
+                if (sessionToClose != null) {
+                    try {
+                        sessionToClose.close();
+                    } catch (Exception ignored) {
+                    }
+                    AppLog.d(TAG, "Camera " + cameraId + " closed old session (no surfaces)");
+                }
+                releasePendingPreviewSurfaces();
                 return;
             }
 
             AppLog.d(TAG, "Camera " + cameraId + " Creating capture request...");
-            int template = (recordSurface != null && !recordingPreviewTemplate)
-                    ? CameraDevice.TEMPLATE_RECORD : CameraDevice.TEMPLATE_PREVIEW;
-            CaptureRequest.Builder requestBuilder;
-            try { requestBuilder = sessionDevice.createCaptureRequest(template); }
-            catch (IllegalArgumentException unsupported) {
-                if (template != CameraDevice.TEMPLATE_RECORD) throw unsupported;
-                requestBuilder = sessionDevice.createCaptureRequest(CameraDevice.TEMPLATE_PREVIEW);
-                AppLog.w(TAG, "RECORD template unsupported; retaining PREVIEW template with recording target");
-            }
-            final CaptureRequest.Builder previewRequestBuilder = requestBuilder;
-            AppConfig captureAppConfig = new AppConfig(context);
-            if (recordSurface != null && !RecordingDeviceProfile.isE5(captureAppConfig.getCarModel())) {
-                try {
-                    CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-                    Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
-                            CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), recordingFrameRate);
-                    if (range != null) {
-                        previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
-                        AppLog.i(TAG, "Recording source camera=" + cameraId + ", requestedFps="
-                                + recordingFrameRate + ", supportedRange=" + range);
-                    }
-                } catch (Exception e) {
-                    AppLog.w(TAG, "Camera rejected optional FPS range; retaining HAL default: " + e.getMessage());
-                }
-            } else if (recordSurface != null) {
-                AppLog.i(TAG,"E5 recording source camera="+cameraId+", HAL default FPS (working baseline)");
-            } else {
-                int previewFpsLimit = captureAppConfig.getPreviewFpsLimit();
-                if (previewFpsLimit > 0 && !RecordingDeviceProfile.isE5(captureAppConfig.getCarModel())) {
-                    try {
-                        CameraCharacteristics characteristics = cameraManager.getCameraCharacteristics(cameraId);
-                        Range<Integer> range = RecordingFpsPolicy.choose(characteristics.get(
-                                CameraCharacteristics.CONTROL_AE_AVAILABLE_TARGET_FPS_RANGES), previewFpsLimit);
-                        if (range != null) {
-                            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, range);
-                            AppLog.d(TAG, "Preview limit camera=" + cameraId + ", requestedFps="
-                                    + previewFpsLimit + ", range=" + range);
-                        }
-                    } catch (Exception e) {
-                        AppLog.w(TAG, "Preview FPS limit unavailable; retaining HAL default: " + e.getMessage());
-                    }
-                }
-            }
-            
-            currentRequestBuilder = previewRequestBuilder;
+            final CaptureRequest.Builder previewRequestBuilder = createBaseCaptureRequestBuilder(sessionDevice, true);
             
             // 准备所有输出Surface
             java.util.List<Surface> surfaces = new java.util.ArrayList<>();
             java.util.List<OutputConfiguration> outputConfigs = new java.util.ArrayList<>();
+            OutputConfiguration previewSharedConfigLocal = null;
 
             // 单一输出模式处理（用于 L6/L7 等不支持多路输出的车机平台）
             if (singleOutputMode && recordSurface != null && recordSurface.isValid()) {
@@ -1871,7 +2561,7 @@ public class SingleCamera {
                     if (surface != null && surface.isValid()) {
                         OutputConfiguration previewSharedConfig = new OutputConfiguration(surface);
                         previewSharedConfig.enableSurfaceSharing();
-                        activePreviewConfig = previewSharedConfig;
+                        previewSharedConfigLocal = previewSharedConfig;
                         surfaces.add(surface);
                         previewRequestBuilder.addTarget(surface);
 
@@ -1953,20 +2643,38 @@ public class SingleCamera {
 
             if (outputConfigs.isEmpty()) {
                 AppLog.w(TAG, "Camera " + cameraId + " No valid surfaces for session, skipping configuration");
+                final CameraCaptureSession sessionToClose;
                 synchronized (sessionLock) {
+                    sessionToClose = captureSession;
+                    captureSession = null;
+                    resetSessionTrackingStateLocked();
                     isConfiguring = false;
                     isSessionClosing = false;
                 }
-                if (captureSession != null) {
+                if (sessionToClose != null) {
                     try {
-                        captureSession.close();
-                    } catch (Exception e) {
+                        sessionToClose.close();
+                    } catch (Exception ignored) {
                     }
-                    captureSession = null;
                 }
-                activePreviewConfig = null;
-                currentRequestBuilder = null;
+                releasePendingPreviewSurfaces();
                 return;
+            }
+
+            final java.util.List<Surface> configuredSurfacesForThisSession = new java.util.ArrayList<>(surfaces);
+            final Surface primaryPreviewForThisSession =
+                    (!singleOutputMode && surface != null && surface.isValid()) ? surface : null;
+            final OutputConfiguration previewConfigForThisSession =
+                    primaryPreviewForThisSession != null ? previewSharedConfigLocal : null;
+            final Surface previewSurfaceForThisSession =
+                    (!singleOutputMode && mainPreviewEnabled && previewSurface != null
+                            && previewSurface.isValid() && configuredSurfacesForThisSession.contains(previewSurface))
+                            ? previewSurface : null;
+
+            synchronized (sessionLock) {
+                sessionConfiguringSurfaces.clear();
+                sessionConfiguringSurfaces.addAll(configuredSurfacesForThisSession);
+                currentRequestBuilder = previewRequestBuilder;
             }
 
             AppLog.d(TAG, "Camera " + cameraId + " Total physical streams (OutputConfigs): " + outputConfigs.size() + 
@@ -1989,10 +2697,12 @@ public class SingleCamera {
                     if (cameraDevice != sessionDevice || (sessionGen != 0L && !isOpenGenerationActive(sessionGen))) {
                         AppLog.d(TAG, "Camera " + cameraId + " stale session onConfigured ignored (gen=" + sessionGen + ")");
                         synchronized (sessionLock) {
+                            resetSessionTrackingStateLocked();
                             isConfiguring = false;
                             isSessionClosing = false;
                         }
                         try { session.close(); } catch (Exception ignored) {}
+                        releasePendingPreviewSurfaces();
                         return;
                     }
                     AppLog.d(TAG, "Camera " + cameraId + " Session configured!");
@@ -2004,17 +2714,30 @@ public class SingleCamera {
                         isConfiguring = false;
                         isSessionClosing = false;
                         pending = isPendingReconfiguration;
+                        sessionConfiguringSurfaces.clear();
                     }
 
                     if (pending) {
                         AppLog.d(TAG, "Camera " + cameraId + " found pending configuration request, restarting...");
+                        synchronized (sessionLock) {
+                            captureSession = session;
+                            activePreviewConfig = previewConfigForThisSession;
+                            activePreviewPrimarySurface = primaryPreviewForThisSession;
+                            sessionConfiguredSurfaces.clear();
+                            sessionConfiguredSurfaces.addAll(configuredSurfacesForThisSession);
+                            sessionPreviewSurface = previewSurfaceForThisSession;
+                        }
                         createCameraPreviewSession();
                         return;
                     }
 
                     if (cameraDevice == null) {
                         AppLog.e(TAG, "Camera " + cameraId + " cameraDevice is null in onConfigured");
+                        synchronized (sessionLock) {
+                            resetSessionTrackingStateLocked();
+                        }
                         try { session.close(); } catch (Exception ignored) {}
+                        releasePendingPreviewSurfaces();
                         return;
                     }
 
@@ -2024,22 +2747,78 @@ public class SingleCamera {
                         return;
                     }
 
-                    captureSession = session;
+                    final int keptTargetCount;
+                    synchronized (sessionLock) {
+                        captureSession = session;
+                        activePreviewConfig = previewConfigForThisSession;
+                        activePreviewPrimarySurface = primaryPreviewForThisSession;
+                        activePreviewPrimaryAbandoned = false;
+                        sessionConfiguredSurfaces.clear();
+                        sessionConfiguredSurfaces.addAll(configuredSurfacesForThisSession);
+                        sessionPreviewSurface = previewSurfaceForThisSession;
+
+                        int kept = 0;
+                        boolean previewActive = false;
+                        boolean previewDead = false;
+                        for (Surface configured : configuredSurfacesForThisSession) {
+                            boolean keep = false;
+                            if (configured == recordSurface && isValidSurface(configured)) {
+                                keep = true;
+                            } else if (!singleOutputMode) {
+                                if (configured == previewSurfaceForThisSession
+                                        && mainPreviewEnabled
+                                        && previewSurface == previewSurfaceForThisSession
+                                        && isValidSurface(configured)) {
+                                    keep = true;
+                                    previewActive = true;
+                                } else if ((configured == mainFloatingSurface
+                                        || configured == secondaryDisplaySurface
+                                        || configured == fullscreenPreviewSurface
+                                        || configured == streamSurface
+                                        || configured == surroundPreviewSurface)
+                                        && isValidSurface(configured)) {
+                                    keep = true;
+                                }
+                            }
+                            if (keep) {
+                                kept++;
+                            } else {
+                                previewRequestBuilder.removeTarget(configured);
+                                boolean isDetachedOrDeadPreview = (configured == previewSurfaceForThisSession)
+                                        && (previewSurface != previewSurfaceForThisSession || !isValidSurface(configured));
+                                if (isDetachedOrDeadPreview) {
+                                    previewDead = true;
+                                }
+                                if (configured == primaryPreviewForThisSession
+                                        && (configured != previewSurfaceForThisSession || isDetachedOrDeadPreview)) {
+                                    activePreviewPrimaryAbandoned = true;
+                                }
+                            }
+                        }
+                        sessionPreviewSurfaceDead = previewDead;
+                        sessionPreviewInRepeating = previewActive;
+                        currentRequestBuilder = previewRequestBuilder;
+                        keptTargetCount = kept;
+                    }
+
+                    if (keptTargetCount == 0) {
+                        AppLog.w(TAG, "Camera " + cameraId + " all targets became inactive during session config, closing session");
+                        synchronized (sessionLock) {
+                            captureSession = null;
+                            resetSessionTrackingStateLocked();
+                        }
+                        try { session.close(); } catch (Exception ignored) {}
+                        releasePendingPreviewSurfaces();
+                        closeIfUnused();
+                        return;
+                    }
+
                     try {
                         frameCount = 0;
                         lastFrameLogTime = System.currentTimeMillis();
 
                         if (captureSession != session) return;
-                        try {
-                            captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
-                        } catch (IllegalArgumentException rejectedRange) {
-                            if (previewRequestBuilder.get(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE) == null) {
-                                throw rejectedRange;
-                            }
-                            previewRequestBuilder.set(CaptureRequest.CONTROL_AE_TARGET_FPS_RANGE, null);
-                            captureSession.setRepeatingRequest(previewRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
-                            AppLog.w(TAG, "FPS range rejected by active stream combination; using HAL default");
-                        }
+                        submitRepeatingRequest(session, previewRequestBuilder);
                         AppLog.d(TAG, "Camera " + cameraId + " preview started!");
                         lastFrameTimestampMs = System.currentTimeMillis();
                         stallRecoveryLevel = 0;
@@ -2048,15 +2827,23 @@ public class SingleCamera {
                         if (callback != null) callback.onCameraConfigured(cameraId);
                     } catch (CameraAccessException e) {
                         AppLog.e(TAG, "Failed to start preview", e);
-                        captureSession = null;
-                        activePreviewConfig = null;
+                        synchronized (sessionLock) {
+                            captureSession = null;
+                            resetSessionTrackingStateLocked();
+                        }
+                        try { session.close(); } catch (Exception ignored) {}
+                        releasePendingPreviewSurfaces();
                         if (cameraDevice != null && hasActiveOutputs()) {
                             recreateSession(true);
                         }
                     } catch (IllegalStateException e) {
                         AppLog.w(TAG, "Session closed: " + e.getMessage());
-                        captureSession = null;
-                        activePreviewConfig = null;
+                        synchronized (sessionLock) {
+                            captureSession = null;
+                            resetSessionTrackingStateLocked();
+                        }
+                        try { session.close(); } catch (Exception ignored) {}
+                        releasePendingPreviewSurfaces();
                         if (cameraDevice != null && hasActiveOutputs()) {
                             recreateSession(true);
                         }
@@ -2072,9 +2859,11 @@ public class SingleCamera {
                         AppLog.d(TAG, "Camera " + cameraId + " stale session onConfigureFailed ignored (gen=" + sessionGen + ")");
                         try { session.close(); } catch (Exception ignored) {}
                         synchronized (sessionLock) {
+                            resetSessionTrackingStateLocked();
                             isConfiguring = false;
                             isSessionClosing = false;
                         }
+                        releasePendingPreviewSurfaces();
                         return;
                     }
                     AppLog.e(TAG, "Failed to configure camera " + cameraId + " session!");
@@ -2084,10 +2873,12 @@ public class SingleCamera {
                     } catch (Exception ignored) {}
                     boolean pending;
                     synchronized (sessionLock) {
+                        resetSessionTrackingStateLocked();
                         isConfiguring = false;
                         isSessionClosing = false;
                         pending = isPendingReconfiguration;
                     }
+                    releasePendingPreviewSurfaces();
 
                     if (pending) {
                         AppLog.d(TAG, "Camera " + cameraId + " found pending configuration request after failure, retrying...");
@@ -2192,39 +2983,36 @@ public class SingleCamera {
             }
 
         } catch (CameraAccessException e) {
-            synchronized (sessionLock) { isConfiguring = false; isSessionClosing = false; }
+            synchronized (sessionLock) {
+                resetSessionTrackingStateLocked();
+                isConfiguring = false;
+                isSessionClosing = false;
+            }
             AppLog.e(TAG, "Failed to create preview session for camera " + cameraId, e);
             AppLog.e(TAG, "Exception details: " + e.getMessage());
             e.printStackTrace();
         } catch (IllegalArgumentException e) {
-            synchronized (sessionLock) { isConfiguring = false; isSessionClosing = false; }
+            synchronized (sessionLock) {
+                resetSessionTrackingStateLocked();
+                isConfiguring = false;
+                isSessionClosing = false;
+            }
             // 特殊处理 "Surface was abandoned" 错误
             String message = e.getMessage();
             if (message != null && message.contains("abandoned")) {
                 AppLog.e(TAG, "Camera " + cameraId + " detected abandoned Surface, attempting recovery...");
 
-                boolean cleared = false;
-                if (secondaryDisplaySurface != null) {
-                    secondaryDisplaySurface = null;
-                    cleared = true;
-                    AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned secondaryDisplaySurface and retrying");
-                }
-                if (!cleared && mainFloatingSurface != null) {
-                    mainFloatingSurface = null;
-                    cleared = true;
-                    AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned mainFloatingSurface and retrying");
-                }
-                if (!cleared && surroundPreviewSurface != null) {
-                    surroundPreviewSurface = null;
-                    surroundPreviewSurfaceTexture = null;
-                    cleared = true;
-                    AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned surroundPreviewSurface and retrying");
-                }
-                if (!cleared && recordSurface != null) {
-                    recordSurface = null;
-                    cleared = true;
-                    AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned recordSurface and retrying");
-                }
+                RecordingPreviewSessionPolicy.AbandonedSurfaceTarget targetToClear =
+                        RecordingPreviewSessionPolicy.chooseAbandonedSurfaceToClear(
+                                previewSurface != null, isValidSurface(previewSurface),
+                                secondaryDisplaySurface != null, isValidSurface(secondaryDisplaySurface),
+                                mainFloatingSurface != null, isValidSurface(mainFloatingSurface),
+                                fullscreenPreviewSurface != null, isValidSurface(fullscreenPreviewSurface),
+                                surroundPreviewSurface != null, isValidSurface(surroundPreviewSurface),
+                                streamSurface != null, isValidSurface(streamSurface),
+                                recordSurface != null, isValidSurface(recordSurface)
+                        );
+                boolean cleared = clearAbandonedSurfaceByTarget(targetToClear);
                 if (cleared && backgroundHandler != null) {
                     backgroundHandler.postDelayed(() -> {
                         if (cameraDevice != null) {
@@ -2238,10 +3026,59 @@ public class SingleCamera {
             AppLog.e(TAG, "Unexpected IllegalArgumentException creating session for camera " + cameraId, e);
             e.printStackTrace();
         } catch (Exception e) {
-            synchronized (sessionLock) { isConfiguring = false; isSessionClosing = false; }
+            synchronized (sessionLock) {
+                resetSessionTrackingStateLocked();
+                isConfiguring = false;
+                isSessionClosing = false;
+            }
             AppLog.e(TAG, "Unexpected exception creating session for camera " + cameraId, e);
             AppLog.e(TAG, "Exception details: " + e.getMessage());
             e.printStackTrace();
+        }
+    }
+
+    private boolean clearAbandonedSurfaceByTarget(RecordingPreviewSessionPolicy.AbandonedSurfaceTarget target) {
+        if (target == null) {
+            return false;
+        }
+        switch (target) {
+            case PREVIEW:
+                clearPreviewSurface();
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned previewSurface and retrying");
+                return true;
+            case SECONDARY_DISPLAY:
+                secondaryDisplaySurface = null;
+                secondaryDisplaySurfaceTexture = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned secondaryDisplaySurface and retrying");
+                return true;
+            case MAIN_FLOATING:
+                mainFloatingSurface = null;
+                mainFloatingSurfaceTexture = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned mainFloatingSurface and retrying");
+                return true;
+            case FULLSCREEN_PREVIEW:
+                fullscreenPreviewSurface = null;
+                fullscreenPreviewSurfaceTexture = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned fullscreenPreviewSurface and retrying");
+                return true;
+            case SURROUND_PREVIEW:
+                surroundPreviewSurface = null;
+                surroundPreviewSurfaceTexture = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned surroundPreviewSurface and retrying");
+                return true;
+            case STREAM:
+                streamSurface = null;
+                streamSurfaceHandler = null;
+                streamSurfaceTexture = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned streamSurface and retrying");
+                return true;
+            case RECORD:
+                recordSurface = null;
+                AppLog.w(TAG, "Camera " + cameraId + " cleared abandoned recordSurface and retrying");
+                return true;
+            case NONE:
+            default:
+                return false;
         }
     }
 
@@ -2272,6 +3109,8 @@ public class SingleCamera {
      */
     private final Runnable recreateSessionRunnable = this::createCameraPreviewSession;
     private final Runnable sessionCloseFallbackRunnable = this::createCameraPreviewSessionIfClosePending;
+    private final Runnable recordingRepeatingSyncRunnable = this::syncRecordingRepeatingTargets;
+    private final Runnable dynamicPreviewAttachRunnable = this::attachMainPreviewSurfaceDynamically;
 
     /** 帧捕获回调（复用实例，供动态 Surface 更新时 setRepeatingRequest 使用） */
     private final CameraCaptureSession.CaptureCallback activeCaptureCallback = new CameraCaptureSession.CaptureCallback() {
@@ -2293,6 +3132,9 @@ public class SingleCamera {
             frameCount++;
             long now = System.currentTimeMillis();
             lastFrameTimestampMs = now;
+            if (sessionPreviewInRepeating) {
+                lastPreviewFrameTimestampMs = now;
+            }
             if (!hasReadActualParams || frameCount == 1) {
                 readActualParamsFromResult(result);
                 hasReadActualParams = true;
@@ -2327,6 +3169,9 @@ public class SingleCamera {
         if (captureSession != null) {
             try {
                 captureSession.stopRepeating();
+                synchronized (sessionLock) {
+                    sessionPreviewInRepeating = false;
+                }
                 AppLog.d(TAG, "Camera " + cameraId + " stopRepeating (surface about to be removed)");
             } catch (Exception e) {
                 // 忽略
@@ -2422,76 +3267,107 @@ public class SingleCamera {
     }
 
     private boolean tryDynamicSurfaceAdd(Surface surface, boolean isMainFloating) {
+        return tryDynamicSurfaceAdd(surface, isMainFloating ? "main floating" : "secondary display");
+    }
+
+    private boolean tryDynamicSurfaceAdd(Surface surface, String sourceLabel) {
+        final CameraCaptureSession session;
+        final OutputConfiguration previewConfig;
+        final boolean alreadyConfigured;
+        final boolean isPreviewSurface;
         synchronized (sessionLock) {
-            if (isConfiguring || isSessionClosing) return false;
-        }
-        if (captureSession == null || activePreviewConfig == null || currentRequestBuilder == null) {
-            return false;
-        }
-        if (surface == null || !surface.isValid()) return false;
-        java.util.List<Surface> configuredSurfaces = activePreviewConfig.getSurfaces();
-        if (configuredSurfaces != null && configuredSurfaces.contains(surface)) {
-            AppLog.d(TAG, "Camera " + cameraId + " surface already in OutputConfiguration, skip dynamic add");
-            return true;
-        }
-
-        try {
-            // 1. 添加到共享 OutputConfiguration
-            activePreviewConfig.addSurface(surface);
-
-            // 2. 通知已配置的 Session 动态更新 OutputConfiguration (API 28+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                captureSession.updateOutputConfiguration(activePreviewConfig);
-            } else {
-                throw new UnsupportedOperationException("updateOutputConfiguration requires API 28+");
+            if (isConfiguring || isSessionClosing
+                    || sessionPreviewSurfaceDead || activePreviewPrimaryAbandoned) {
+                return false;
             }
-
-            // 3. 将新 Surface 加入 CaptureRequest 目标
-            currentRequestBuilder.addTarget(surface);
-
-            // 4. 更新 repeating request
-            captureSession.setRepeatingRequest(
-                    currentRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
-
-            AppLog.d(TAG, "Camera " + cameraId + " dynamic surface ADD succeeded (" +
-                    (isMainFloating ? "main floating" : "secondary display") + ")");
-            return true;
-        } catch (Exception e) {
-            AppLog.w(TAG, "Camera " + cameraId + " dynamic surface add failed: " + e.getMessage());
-            // 回滚：尽力恢复状态
-            try { activePreviewConfig.removeSurface(surface); } catch (Exception ignored) {}
-            try { currentRequestBuilder.removeTarget(surface); } catch (Exception ignored) {}
-            return false;
+            session = this.captureSession;
+            previewConfig = this.activePreviewConfig;
+            if (session == null || previewConfig == null || this.cameraDevice == null) {
+                return false;
+            }
+            if (surface == null || !surface.isValid()) {
+                return false;
+            }
+            alreadyConfigured = sessionConfiguredSurfaces.contains(surface);
+            isPreviewSurface = (surface == this.previewSurface);
         }
+
+        if (!alreadyConfigured) {
+            java.util.List<Surface> configuredSurfaces = previewConfig.getSurfaces();
+            if (configuredSurfaces != null && configuredSurfaces.contains(surface)) {
+                synchronized (sessionLock) {
+                    sessionConfiguredSurfaces.add(surface);
+                    if (isPreviewSurface) {
+                        this.sessionPreviewSurface = surface;
+                        this.sessionPreviewSurfaceDead = false;
+                    }
+                }
+            } else {
+                try {
+                    // 1. 添加到共享 OutputConfiguration
+                    previewConfig.addSurface(surface);
+
+                    // 2. 通知已配置的 Session 动态更新 OutputConfiguration (API 28+)
+                    session.updateOutputConfiguration(previewConfig);
+
+                    synchronized (sessionLock) {
+                        if (this.captureSession != session || this.activePreviewConfig != previewConfig) {
+                            try { previewConfig.removeSurface(surface); } catch (Exception ignored) {}
+                            return false;
+                        }
+                        sessionConfiguredSurfaces.add(surface);
+                        if (isPreviewSurface) {
+                            this.sessionPreviewSurface = surface;
+                            this.sessionPreviewSurfaceDead = false;
+                        }
+                    }
+                } catch (Exception e) {
+                    AppLog.w(TAG, "Camera " + cameraId + " dynamic surface add failed (" + sourceLabel + "): " + e.getMessage());
+                    // 回滚：尽力恢复状态
+                    try { previewConfig.removeSurface(surface); } catch (Exception ignored) {}
+                    return false;
+                }
+            }
+        }
+
+        if (applyActiveRepeatingTargets("dynamic-add-" + sourceLabel)) {
+            AppLog.d(TAG, "Camera " + cameraId + " dynamic surface ADD succeeded (" + sourceLabel + ")");
+            return true;
+        }
+        return false;
     }
 
     private boolean tryDynamicSurfaceRemove(Surface surface) {
+        final CameraCaptureSession session;
+        final OutputConfiguration previewConfig;
         synchronized (sessionLock) {
-            if (isConfiguring || isSessionClosing) return false;
+            if (isConfiguring || isSessionClosing
+                    || sessionPreviewSurfaceDead || activePreviewPrimaryAbandoned) {
+                return false;
+            }
+            session = this.captureSession;
+            previewConfig = this.activePreviewConfig;
+            if (session == null || previewConfig == null || surface == null) {
+                return false;
+            }
+            if (surface == this.activePreviewPrimarySurface) {
+                return false;
+            }
         }
-        if (captureSession == null || activePreviewConfig == null || currentRequestBuilder == null) {
+
+        // 先切换 repeating request 停止向目标 Surface 推帧，录制期间不会中断 recordSurface
+        if (!applyActiveRepeatingTargets("dynamic-remove")) {
             return false;
         }
-        if (surface == null) return false;
 
         try {
-            // 1. 从 CaptureRequest 移除目标（停止向该 Surface 推帧）
-            currentRequestBuilder.removeTarget(surface);
-
-            // 2. 从共享 OutputConfiguration 移除
-            activePreviewConfig.removeSurface(surface);
-
-            // 3. 通知已配置的 Session 动态更新 OutputConfiguration (API 28+)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                captureSession.updateOutputConfiguration(activePreviewConfig);
-            } else {
-                throw new UnsupportedOperationException("updateOutputConfiguration requires API 28+");
+            previewConfig.removeSurface(surface);
+            session.updateOutputConfiguration(previewConfig);
+            synchronized (sessionLock) {
+                if (this.captureSession == session && this.activePreviewConfig == previewConfig) {
+                    sessionConfiguredSurfaces.remove(surface);
+                }
             }
-
-            // 4. 恢复 repeating request（仅包含剩余 Surface）
-            captureSession.setRepeatingRequest(
-                    currentRequestBuilder.build(), activeCaptureCallback, backgroundHandler);
-
             AppLog.d(TAG, "Camera " + cameraId + " dynamic surface REMOVE succeeded");
             return true;
         } catch (Exception e) {
@@ -2512,6 +3388,8 @@ public class SingleCamera {
         if (cameraDevice != null) {
             if (backgroundHandler != null) {
                 // 移除待执行的任务，实现防抖
+                backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
                 backgroundHandler.removeCallbacks(recreateSessionRunnable);
                 
                 int delay;
@@ -2843,6 +3721,7 @@ public class SingleCamera {
         final CameraCaptureSession sessionToClose;
         final CameraDevice deviceToClose;
         final Surface previewSurfaceToRelease;
+        final java.util.List<Surface> pendingPreviewSurfacesToRelease;
         final ImageReader imageReaderToClose;
         final HandlerThread threadToStop;
         final boolean hadActiveResources;
@@ -2871,13 +3750,29 @@ public class SingleCamera {
             if (backgroundHandler != null) {
                 backgroundHandler.removeCallbacks(recreateSessionRunnable);
                 backgroundHandler.removeCallbacks(sessionCloseFallbackRunnable);
+                backgroundHandler.removeCallbacks(recordingRepeatingSyncRunnable);
+                backgroundHandler.removeCallbacks(dynamicPreviewAttachRunnable);
             }
 
             // 重置 Session 状态标志（防止重新打开时残留状态导致死循环）
             synchronized (sessionLock) {
+                sessionToClose = captureSession;
+                captureSession = null;
+                resetSessionTrackingStateLocked();
                 isSessionClosing = false;
                 isConfiguring = false;
                 isPendingReconfiguration = false;
+
+                previewSurfaceToRelease = previewSurface;
+                previewSurface = null;
+                previewSurfaceTexture = null;
+
+                if (pendingReleasePreviewSurfaces.isEmpty()) {
+                    pendingPreviewSurfacesToRelease = java.util.Collections.emptyList();
+                } else {
+                    pendingPreviewSurfacesToRelease = new java.util.ArrayList<>(pendingReleasePreviewSurfaces);
+                    pendingReleasePreviewSurfaces.clear();
+                }
             }
 
             // 清除未触发的回调
@@ -2885,16 +3780,8 @@ public class SingleCamera {
                 onCameraOpenedCallbacks.clear();
             }
 
-            sessionToClose = captureSession;
-            captureSession = null;
-            activePreviewConfig = null;
-            currentRequestBuilder = null;
-
             deviceToClose = cameraDevice;
             cameraDevice = null;
-
-            previewSurfaceToRelease = previewSurface;
-            previewSurface = null;
 
             // 立即清理外部 Surface 引用，保证 closeCamera 返回后新注册的 Surface 不会被异步释放任务误清
             if (recordSurface != null) {
@@ -2939,6 +3826,7 @@ public class SingleCamera {
             hadActiveResources = sessionToClose != null
                     || deviceToClose != null
                     || previewSurfaceToRelease != null
+                    || !pendingPreviewSurfacesToRelease.isEmpty()
                     || imageReaderToClose != null
                     || threadToStop != null;
         }
@@ -2987,12 +3875,21 @@ public class SingleCamera {
                         AppLog.d(TAG, "Camera " + cameraId + " ignored exception while releasing preview surface: " + e.getMessage());
                     }
                 }
+                for (Surface pendingPreview : pendingPreviewSurfacesToRelease) {
+                    if (pendingPreview != null && pendingPreview != previewSurfaceToRelease) {
+                        try {
+                            pendingPreview.release();
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
                 // 兜底释放并发 createCameraPreviewSession 在退场瞬间新建的 previewSurface
                 Surface strayPreviewSurface = null;
                 synchronized (reconnectLock) {
                     if (isGenerationCurrent(closeGen) && previewSurface != null) {
                         strayPreviewSurface = previewSurface;
                         previewSurface = null;
+                        previewSurfaceTexture = null;
                     }
                 }
                 if (strayPreviewSurface != null) {
@@ -3030,6 +3927,11 @@ public class SingleCamera {
             }
             if (previewSurfaceToRelease != null) {
                 try { previewSurfaceToRelease.release(); } catch (Exception ignored) {}
+            }
+            for (Surface pendingPreview : pendingPreviewSurfacesToRelease) {
+                if (pendingPreview != null && pendingPreview != previewSurfaceToRelease) {
+                    try { pendingPreview.release(); } catch (Exception ignored) {}
+                }
             }
             if (imageReaderToClose != null) {
                 try { imageReaderToClose.close(); } catch (Exception ignored) {}

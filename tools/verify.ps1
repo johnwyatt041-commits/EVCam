@@ -39,7 +39,7 @@ try {
     $env:JAVA_HOME = $jdkDirectory.FullName
     $env:ANDROID_HOME = $AndroidSdk
     $env:ANDROID_SDK_ROOT = $AndroidSdk
-    $gradleArguments = @(':app:testIndependentDebugUnitTest', ':app:testCompositeDebugUnitTest', ':app:assembleDebug', ':app:assembleRelease', '--no-daemon')
+    $gradleArguments = @(':app:testIndependentDebugUnitTest', ':app:assembleDebug', ':app:assembleRelease', '--no-daemon')
     if (-not $Online) { $gradleArguments += '--offline' }
     Push-Location $repositoryRoot
     try {
@@ -58,10 +58,7 @@ try {
         Get-Content -LiteralPath $logPath -Tail 70
         throw "Gradle failed with exit code $buildExitCode. Log: $logPath"
     }
-    $testFiles = @()
-    foreach ($variant in @('Independent', 'Composite')) {
-        $testFiles += @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot ('app/build/test-results/test' + $variant + 'DebugUnitTest')) -Filter 'TEST-*.xml')
-    }
+    $testFiles = @(Get-ChildItem -LiteralPath (Join-Path $repositoryRoot 'app/build/test-results/testIndependentDebugUnitTest') -Filter 'TEST-*.xml')
     if ($testFiles.Count -eq 0) { throw 'No JVM test result files were produced.' }
     $tests = 0; $failures = 0; $errors = 0; $skipped = 0
     foreach ($testFile in $testFiles) {

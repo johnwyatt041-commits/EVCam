@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-22 13:03:30 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已封包发布 **`build24`** [`v1.6.6-test-11221230-build24`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11221230-build24) 至 `johnwyatt041-commits/EVCam` Pre-release，源码提交 **`9f90c63`**，`1.6.6-test-11221230`，双风味 `650` 测、`0` Lint error 与 `apksigner` v2 校验全过；`build22` 已归档至 `outputs/archive/`，待银河 E5 实车验证）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-22 21:25:03 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已完成 [`S1~S4` + `M1~M2`](tasks/optimize-recording-preview-perf.md) 离线实现与验证，源码在 **`9f90c63`** 上待提交，版本 `1.6.6-test-11222113`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；源码基线 **`9f90c63`**（tag `v1.6.6-test-11221230-build24`，`versionCode = 86`） |
-| 本地交付 | `outputs/` 顶层保留 **`build23`** + **`build24`**（各 6 文件，共 12 文件；`build22` 已归档至 `outputs/archive/`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11221230-build24`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11221230-build24)（6 资产上传并核验远端 SHA256 一致） |
-| 离线与设备验证 | `build24`（`9f90c63`）已通过 `verify.ps1` 双风味 `650` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease`、双风味 Lint `0` errors（`2227` warnings）与 `apksigner` v2 校验；**尚未上实车测试** |
-| 实车状态 | 待安装 `build24` 上银河 E5 实车验证 10 项性能优化、U 盘测速、`build22` 6 项可靠性修复及网卡/视图E/补盲/飞书/`build21` 360 |
+| 分支与提交 | `codex/e5-recording-startup-fix`；已推远端最新 tag 为 **`v1.6.6-test-11221230-build24`**（`9f90c63`），当前工作区含单 A 版收敛 + **`S1~S4` + `M1~M2`** 改动（`1.6.6-test-11222113`，待提交） |
+| 本地交付 | `outputs/` 顶层保留 **`build23`** + **`build24`**（历史 `build22` 已归档至 `outputs/archive/`）；今后仅产出 A 版包 |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11221230-build24`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11221230-build24) |
+| 离线与设备验证 | **已通过单 A 版验证**（`verify.ps1` `374` 测 `0` 失败/`0` 错误/`0` 跳过 + A 版 Debug/Release + `:app:lintIndependentDebug` `0` errors）；**`build24` 实车日志已核实**，`S1~S4` 与 `M1~M2` 待实车复测 |
+| 实车状态 | 已收首份 `build24` E5 日志（`independent(A)`，`mode_d`）；`S1~S4` + `M1~M2` 已离线就绪，待决提交封包上车实测，另待测 U 盘测速、`build22` 补盲/网卡/飞书 |
 
 ## 当前结论与确认边界
 
@@ -27,15 +27,15 @@
 
 ## 下一步
 
-1. 视用户确认决定是否提交推送并封包测试第一批性能优化，在银河 E5 实车验证流畅度、U 盘测速与既有可靠性修复，再结合实车日志决定第二批待修复项优先级。
+1. 待用户决定基于当前 **`S1~S4` + `M1~M2`**（`1.6.6-test-11222113`）提交代码与封包上车实测（复测开 `Debug 日志转 INFO`，对照 `path=direct` vs `path=gl` 与帧率），之后再按实车表现评估 `L1~L3`。
 
 ## 最近更新（最多5条）
 
-- 2026-11-22 13:03:30 +08:00 | 封包发布 build24 并推送 GitHub Pre-release（`1.6.6-test-11221230`） | 源码 `9f90c63` 打标 `v1.6.6-test-11221230-build24` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build22` 归档，双风味 `650` 测与 Lint `0` errors 全过，待实车测试 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
-- 2026-11-22 09:00:57 +08:00 | 封包发布 build23 并推送 GitHub Pre-release（`1.6.6-test-11220818`） | 源码 `bb34e66` 打标 `v1.6.6-test-11220818-build23` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build21` 归档，`638` 测与 Lint `0` errors，待实车测试 | [U盘速度检测](tasks/add-usb-speed-test.md)
-- 2026-11-22 08:55:30 +08:00 | 提交并推送 U 盘手动写入速度检测至 GitHub fork（`1.6.6-test-11220818`） | 在记录仪存储位置新增「U盘写入速度检测」卡片，基于 `FileChannel.force(true)` 真实落盘测速并评估直写/中转达标状态，提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`638` 测与 Lint `0` errors 全过 | [U盘速度检测](tasks/add-usb-speed-test.md)
-- 2026-11-22 07:52:49 +08:00 | 封包发布 build22 并推送 GitHub Pre-release（`1.6.6-test-11212325`） | 源码 `215753f` 打标 `v1.6.6-test-11212325-build22` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build20` 归档，`624` 测与 Lint `0` errors，待实车测试 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
-- 2026-11-22 07:34:13 +08:00 | 合流提交 4 轮累积改动并推送 GitHub（`215753f` / `1.6.6-test-11212325`） | 将补盲多屏/倒置坐标/飞书测试、`MODE_E`、回放分享网卡与 6 项录制/存储/模式 A/规则修复一并提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`624` 测与 Lint `0` errors | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
+- 2026-11-22 21:25:03 +08:00 | 完成 `optimize-recording-preview-perf` 第二组 `M2` 无水印无调色直连编码跳过 GL 与单 A 版离线验证（`1.6.6-test-11222113`） | 新增 `DirectEncodingPolicy` 与设置页可控开关，无水印且无/恒等调色时直连 `MediaCodec` 输入面并保留 `preStartDrain`/首 IDR 门控、跨段/S3/M1 契约与单路一次自动回退 GL；`verify.ps1` `374` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
+- 2026-11-22 20:41:35 +08:00 | 完成 `optimize-recording-preview-perf` 第二组 `M1` 预览隔离重建与单 A 版离线验证（`1.6.6-test-11222037`） | 新增 `RecordingPreviewSessionPolicy`，录制期切 Mode D/前后台/`TextureView` 销毁与 `Mode A` 改走 RepeatingRequest 热切/动态 `OutputConfiguration` 隔离整路重建；`verify.ps1` `357` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
+- 2026-11-22 20:06:06 +08:00 | 完成 `optimize-recording-preview-perf` 第一组 `S1~S4` 优化与单 A 版离线验证（`1.6.6-test-11222001`） | 悬浮窗防重排与轻量参数、VHAL 120s 静默重连消震荡、起录并发异步准备与取消清理、`BlindSpotService` 按需轮询/预创建落地；`verify.ps1` `342` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
+- 2026-11-22 19:20:00 +08:00 | 正式下线 B 版（`composite`）并锁定全项目仅更新 A 版（`1.6.6-test-11221918`） | `app/build.gradle.kts` 移除 `composite` flavor、`verify.ps1` 收敛为 `Independent` 单风味测试/构建，并在 `AGENTS.md`/`START_HERE.md`/`DEVELOPMENT.md`/`REQUIREMENTS.md`/`ARCHITECTURE.md` 固化规则禁止再编发 B 版 | [AGENTS.md](../AGENTS.md)
+- 2026-11-22 19:04:00 +08:00 | 完成 `build24` 实车日志分析并拆分第二批优化清单（`S1~S4` / `M1~M2` / `L1~L3`） | 实证排除编码参数与切 B 版，锁定 `Mode D`/生命周期 `recreateSession` 与 3 路 GL 耗时为主因，登记后台偶发闪屏排查路径 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 
 ## 归档与按需索引
 

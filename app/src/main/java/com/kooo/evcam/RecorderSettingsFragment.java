@@ -63,6 +63,7 @@ public class RecorderSettingsFragment extends Fragment {
     private SwitchMaterial recordingStatsSwitch;
     private SwitchMaterial timestampWatermarkSwitch;
     private SwitchMaterial forceH264Switch;
+    private SwitchMaterial directCodecInputSwitch;
     
     private AppConfig appConfig;
     
@@ -273,7 +274,7 @@ public class RecorderSettingsFragment extends Fragment {
                 appConfig.setTimestampWatermarkEnabled(isChecked);
                 notifyActiveRecorders();
                 if (!isUpdatingDisplayUi) {
-                    String message = isChecked ? "时间水印已开启" : "时间水印已关闭";
+                    String message = isChecked ? ("时间水印已开启" + deferredDirectSuffix()) : "时间水印已关闭";
                     Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
                     AppLog.d("SettingsFragment", message);
                 }
@@ -301,6 +302,24 @@ public class RecorderSettingsFragment extends Fragment {
                 AppLog.d("SettingsFragment", message);
             }
         });
+
+        // 初始化无水印直连编码（跳过 GL）开关
+        directCodecInputSwitch = view.findViewById(R.id.switch_direct_codec_input);
+        if (directCodecInputSwitch != null) {
+            if (getContext() != null && appConfig != null) {
+                directCodecInputSwitch.setChecked(appConfig.isDirectCodecInputEnabled());
+            }
+            directCodecInputSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (getContext() != null && appConfig != null) {
+                    appConfig.setDirectCodecInputEnabled(isChecked);
+                    String message = isChecked
+                            ? "已启用无水印直连编码（跳过 GL），下次录制生效"
+                            : "已关闭直连编码，下次录制将强制使用 GL 路径";
+                    Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
+                    AppLog.d("SettingsFragment", message);
+                }
+            });
+        }
 
         // 初始化启动自动录制开关
         autoStartRecordingSwitch = view.findViewById(R.id.switch_auto_start_recording);
@@ -2217,7 +2236,7 @@ public class RecorderSettingsFragment extends Fragment {
                 refreshImageAdjustSectionUi();
                 notifyActiveRecorders();
                 Toast.makeText(ctx,
-                        isChecked ? "画面调节已启用（实时单遍处理，零 FBO 拷贝）"
+                        isChecked ? ("画面调节已启用（实时单遍处理，零 FBO 拷贝）" + deferredDirectSuffix())
                                 : "画面调节已关闭，已切回零开销直通旁路",
                         Toast.LENGTH_SHORT).show();
             });
@@ -2460,7 +2479,9 @@ public class RecorderSettingsFragment extends Fragment {
                     if (isUpdatingDisplayUi) return;
                     appConfig.setWatermarkSpeedEnabled(isChecked);
                     notifyActiveRecorders();
-                    Toast.makeText(ctx, isChecked ? "车速水印已开启，未收到信号时显示 --" : "车速水印已关闭", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ctx, isChecked
+                            ? ("车速水印已开启，未收到信号时显示 --" + deferredDirectSuffix())
+                            : "车速水印已关闭", Toast.LENGTH_SHORT).show();
                 });
             }
             if (switchWatermarkGear != null) {
@@ -2469,7 +2490,9 @@ public class RecorderSettingsFragment extends Fragment {
                     if (isUpdatingDisplayUi) return;
                     appConfig.setWatermarkGearEnabled(isChecked);
                     notifyActiveRecorders();
-                    Toast.makeText(ctx, isChecked ? "档位水印已开启，未收到信号时显示未知" : "档位水印已关闭", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ctx, isChecked
+                            ? ("档位水印已开启，未收到信号时显示未知" + deferredDirectSuffix())
+                            : "档位水印已关闭", Toast.LENGTH_SHORT).show();
                 });
             }
             if (switchWatermarkTurnSignal != null) {
@@ -2478,7 +2501,9 @@ public class RecorderSettingsFragment extends Fragment {
                     if (isUpdatingDisplayUi) return;
                     appConfig.setWatermarkTurnSignalEnabled(isChecked);
                     notifyActiveRecorders();
-                    Toast.makeText(ctx, isChecked ? "转向灯水印已开启，未收到信号时显示未知" : "转向灯水印已关闭", Toast.LENGTH_SHORT).show();
+                    Toast.makeText(ctx, isChecked
+                            ? ("转向灯水印已开启，未收到信号时显示未知" + deferredDirectSuffix())
+                            : "转向灯水印已关闭", Toast.LENGTH_SHORT).show();
                 });
             }
 
@@ -2713,6 +2738,14 @@ public class RecorderSettingsFragment extends Fragment {
         if (manager != null) {
             manager.refreshActiveRecorderSettings();
         }
+    }
+
+    private String deferredDirectSuffix() {
+        MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+        if (manager != null && manager.hasActiveDirectCodecRecorders() && manager.hasPendingGlConfigChange()) {
+            return "（当前为直连录制，下次开始录制生效）";
+        }
+        return "";
     }
 
     private void notifyAllMirrorAndRecorderConsumers() {

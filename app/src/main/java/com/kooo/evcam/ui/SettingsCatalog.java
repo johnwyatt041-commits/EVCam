@@ -72,7 +72,7 @@ public final class SettingsCatalog {
             new Entry(ID_SYSTEM_PERMISSIONS, "13", "13. 系统与权限", "系统与权限",
                     "权限分级诊断、开机自启动、ADB 一键授权与系统后台白名单", R.drawable.ic_nav_permissions),
             new Entry(ID_UPDATE, "14", "14. 软件更新", "软件更新",
-                    "私有 GitHub 手动检查更新、加密 PAT 与 A/B 安装包下载", R.drawable.ic_nav_update),
+                    "私有 GitHub 手动检查更新、加密 PAT 与 APK 安装包下载", R.drawable.ic_nav_update),
             new Entry(ID_DEBUG_LOG, "15", "15. Debug 日志", "Debug 日志",
                     "Debug 日志级别开关、会话增量持久化、本地导出与连贯性校验", R.drawable.ic_nav_debug)
     ));

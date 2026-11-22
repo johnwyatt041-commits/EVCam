@@ -136,4 +136,72 @@ public class BlindSpotCoordinatorAndSuppressionTest {
         assertTrue(bothDuring360.suppressedOnMainOnly);
         assertTrue(bothDuring360.showSecondaryHud);
     }
+
+    @Test
+    public void backgroundAvmPollingRunsOnlyWithActiveMainDemandInBackground() {
+        String avmClass = "com.geely.avm_app.AvmRenderActivity";
+
+        // 1. 仅开启转向灯补盲，但当前未打转向且未开常驻主悬浮窗：日常直行后台绝不空转轮询
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, false, true, true, false, false, false, true));
+
+        // 2. 转向灯激活且启用主屏补盲，在后台非 all 模式：立即需要轮询
+        assertTrue(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, false, true, true, true, false, false, true));
+
+        // 3. 仅有可见主屏窗（如临时窗口尚未关闭）：需要轮询
+        assertTrue(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, false, true, true, false, true, false, true));
+
+        // 4. 开启主屏常驻悬浮窗且在后台：需要轮询
+        assertTrue(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, true, false, false, false, false, false, true));
+
+        // 5. EVCam 自身在前台时暂停 UsageStatsManager 轮询
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, true, true, true, true, true, true, true));
+
+        // 6. 仅副屏模式（无主屏悬浮窗且无主屏补盲）即使转向灯激活也不轮询
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, false, true, false, true, false, false, true));
+        assertFalse(BlindSpotCoordinator.hasActiveAvmAvoidanceFeature(
+                true, true, false, true, false));
+
+        // 7. "all" 模式始终抑制且永不轮询
+        assertTrue(BlindSpotCoordinator.isAvmAvoidanceAllMode(true, "all"));
+        assertTrue(BlindSpotCoordinator.isAvmAvoidanceAllMode(true, " ALL "));
+        assertFalse(BlindSpotCoordinator.isAvmAvoidanceAllMode(false, "all"));
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, "all", true, true, true, true, true, false, true));
+
+        // 8. 全局关闭、AVM 关闭、无权限或目标为空：全部停止轮询
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                false, true, avmClass, true, true, true, true, true, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, false, avmClass, true, true, true, true, true, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, "  ", true, true, true, true, true, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPollAvmUsageStats(
+                true, true, avmClass, true, true, true, true, true, false, false));
+    }
+
+    @Test
+    public void preCreateMainWindowsRunsOnlyWhenIndependentMainBlindSpotIsEligible() {
+        assertTrue(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, true, true, false, false, true));
+
+        // 任意一项不满足（全局关 / 未开转向联动 / 仅副屏 / 复用主悬浮窗 / AVM all / 无权限）均不预创建
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                false, true, true, false, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, false, true, false, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, true, false, false, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, true, true, true, false, true));
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, true, true, false, true, true));
+        assertFalse(BlindSpotCoordinator.shouldPreCreateMainBlindSpotWindows(
+                true, true, true, false, false, false));
+    }
 }

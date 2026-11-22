@@ -7,6 +7,7 @@ import java.io.ByteArrayInputStream;
 import java.io.InputStream;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import io.grpc.CallOptions;
 import io.grpc.ManagedChannel;
@@ -149,7 +150,133 @@ public class VhalSignalObserver {
 
     // 重连参数
     private static final long RECONNECT_DELAY_MS = 3000;
-    private static final long STREAM_TIMEOUT_MS = 120_000; // gRPC stream 最大沉默时间
+    static final long STREAM_TIMEOUT_MS = 120_000; // gRPC stream 最大沉默时间
+    static final long SILENT_RECONNECT_GRACE_MS = 10_000L; // 静默重连恢复确认宽限期
+    private static final long SEND_ALL_RPC_TIMEOUT_MS = 3_000L;
+
+    private final ReconnectStateMachine reconnectStateMachine = new ReconnectStateMachine();
+
+    /**
+     * 线程安全的重连与流活跃度状态机（纯 Java，可在 JVM 单元测试直接验证）：
+     * - 120s 空闲超时触发静默重连时，保留已解码挡位且不复位 VehicleSignalHub；
+     * - 仅在明确断流、重连失败、超过宽限期仍未恢复或主动停止时才通知断连并退回 UNKNOWN。
+     */
+    static final class ReconnectStateMachine {
+        enum StreamEndReason {
+            IDLE_TIMEOUT,
+            RECONNECT_TIMEOUT,
+            STREAM_ERROR,
+            STREAM_COMPLETED,
+            STOPPED
+        }
+
+        enum ConnectAction {
+            NONE,
+            NOTIFY_CONNECTED,
+            NOTIFY_DISCONNECTED_AND_RESET
+        }
+
+        enum DisconnectAction {
+            NONE,
+            SILENT_RECONNECT,
+            NOTIFY_DISCONNECTED_AND_RESET,
+            RECONNECT_AFTER_DELAY
+        }
+
+        private boolean connected = false;
+        private boolean silentReconnecting = false;
+        private long streamStartMs = 0L;
+        private long lastActivityMs = 0L;
+        private boolean confirmedInCurrentStream = false;
+
+        synchronized void reset() {
+            connected = false;
+            silentReconnecting = false;
+            streamStartMs = 0L;
+            lastActivityMs = 0L;
+            confirmedInCurrentStream = false;
+        }
+
+        synchronized boolean isSilentReconnecting() {
+            return silentReconnecting;
+        }
+
+        synchronized boolean isConnected() {
+            return connected;
+        }
+
+        synchronized ConnectAction onConnectAttemptResult(boolean connectOk, long nowMs) {
+            if (connectOk) {
+                connected = true;
+                if (!silentReconnecting) {
+                    return ConnectAction.NOTIFY_CONNECTED;
+                }
+                return ConnectAction.NONE;
+            }
+            boolean shouldReset = connected || silentReconnecting;
+            silentReconnecting = false;
+            connected = false;
+            confirmedInCurrentStream = false;
+            return shouldReset ? ConnectAction.NOTIFY_DISCONNECTED_AND_RESET : ConnectAction.NONE;
+        }
+
+        synchronized void onStreamOpened(long nowMs) {
+            streamStartMs = nowMs;
+            lastActivityMs = nowMs;
+            confirmedInCurrentStream = !silentReconnecting;
+        }
+
+        synchronized void onStreamActivity(long nowMs) {
+            lastActivityMs = nowMs;
+            confirmedInCurrentStream = true;
+            silentReconnecting = false;
+        }
+
+        synchronized StreamEndReason evaluateTimeout(long nowMs, long idleTimeoutMs, long silentGraceMs) {
+            if (silentReconnecting && !confirmedInCurrentStream) {
+                return (nowMs - streamStartMs >= silentGraceMs) ? StreamEndReason.RECONNECT_TIMEOUT : null;
+            }
+            return (nowMs - lastActivityMs >= idleTimeoutMs) ? StreamEndReason.IDLE_TIMEOUT : null;
+        }
+
+        synchronized long computeWaitMs(long nowMs, long idleTimeoutMs, long silentGraceMs) {
+            if (silentReconnecting && !confirmedInCurrentStream) {
+                return Math.max(0L, silentGraceMs - (nowMs - streamStartMs));
+            }
+            return Math.max(0L, idleTimeoutMs - (nowMs - lastActivityMs));
+        }
+
+        synchronized DisconnectAction onStreamEnded(StreamEndReason reason, boolean stillRunning) {
+            if (!stillRunning || reason == StreamEndReason.STOPPED) {
+                boolean shouldReset = connected || silentReconnecting;
+                silentReconnecting = false;
+                connected = false;
+                confirmedInCurrentStream = false;
+                return shouldReset ? DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET : DisconnectAction.NONE;
+            }
+            if (reason == StreamEndReason.IDLE_TIMEOUT) {
+                if (connected && !silentReconnecting) {
+                    silentReconnecting = true;
+                    confirmedInCurrentStream = false;
+                    return DisconnectAction.SILENT_RECONNECT;
+                }
+                boolean shouldReset = connected || silentReconnecting;
+                silentReconnecting = false;
+                connected = false;
+                confirmedInCurrentStream = false;
+                return shouldReset ? DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET : DisconnectAction.RECONNECT_AFTER_DELAY;
+            }
+            boolean shouldReset = connected || silentReconnecting;
+            silentReconnecting = false;
+            connected = false;
+            confirmedInCurrentStream = false;
+            return shouldReset ? DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET : DisconnectAction.RECONNECT_AFTER_DELAY;
+        }
+    }
+
+    private static long monotonicNowMs() {
+        return System.nanoTime() / 1_000_000L;
+    }
 
     public VhalSignalObserver(TurnSignalListener listener) {
         this.listener = listener;
@@ -169,6 +296,7 @@ public class VhalSignalObserver {
         if (running) return;
         running = true;
         lastSignalState = -1;
+        reconnectStateMachine.reset();
 
         connectThread = new Thread(this::connectLoop, "VehicleApiConnect");
         connectThread.setDaemon(true);
@@ -242,28 +370,75 @@ public class VhalSignalObserver {
 
     private void connectLoop() {
         while (running) {
+            boolean sleepBeforeRetry = true;
             try {
                 AppLog.d(TAG, "Connecting to vehicle API service...");
                 boolean ok = connect();
+                ReconnectStateMachine.ConnectAction connectAction =
+                        reconnectStateMachine.onConnectAttemptResult(ok, monotonicNowMs());
                 if (ok) {
-                    AppLog.d(TAG, "Connected, starting property stream");
-                    notifyConnectionState(true);
-                    streamProperties(); // blocks until disconnected
+                    connected = true;
+                    if (connectAction == ReconnectStateMachine.ConnectAction.NOTIFY_CONNECTED) {
+                        AppLog.d(TAG, "Connected, starting property stream");
+                        notifyConnectionState(true);
+                    } else {
+                        AppLog.d(TAG, "Silent reconnect channel established, resuming property stream");
+                    }
+                    ReconnectStateMachine.StreamEndReason endReason = streamProperties(); // blocks until disconnected
+                    ReconnectStateMachine.DisconnectAction disconnectAction =
+                            reconnectStateMachine.onStreamEnded(endReason, running);
+                    if (disconnectAction == ReconnectStateMachine.DisconnectAction.SILENT_RECONNECT) {
+                        AppLog.w(TAG, "Stream idle timeout (" + STREAM_TIMEOUT_MS
+                                + "ms), silent reconnecting without resetting state");
+                        disconnectChannelOnly();
+                        sleepBeforeRetry = false;
+                    } else if (disconnectAction == ReconnectStateMachine.DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET) {
+                        connected = false;
+                        notifyConnectionState(false);
+                        disconnectChannelOnly();
+                    } else {
+                        connected = false;
+                        disconnectChannelOnly();
+                    }
+                } else {
+                    connected = false;
+                    if (connectAction == ReconnectStateMachine.ConnectAction.NOTIFY_DISCONNECTED_AND_RESET) {
+                        notifyConnectionState(false);
+                    }
+                    disconnectChannelOnly();
                 }
             } catch (Exception e) {
                 AppLog.e(TAG, "Connection error: " + e.getMessage());
+                ReconnectStateMachine.ConnectAction errAction =
+                        reconnectStateMachine.onConnectAttemptResult(false, monotonicNowMs());
+                connected = false;
+                if (errAction == ReconnectStateMachine.ConnectAction.NOTIFY_DISCONNECTED_AND_RESET) {
+                    notifyConnectionState(false);
+                }
+                disconnectChannelOnly();
             }
 
-            connected = false;
-            notifyConnectionState(false);
-            disconnect();
-
-            if (!running) break;
+            if (!running) {
+                if (reconnectStateMachine.onStreamEnded(ReconnectStateMachine.StreamEndReason.STOPPED, false)
+                        == ReconnectStateMachine.DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET) {
+                    connected = false;
+                    notifyConnectionState(false);
+                }
+                break;
+            }
+            if (!sleepBeforeRetry) {
+                continue;
+            }
 
             try {
                 AppLog.d(TAG, "Reconnecting in " + RECONNECT_DELAY_MS + "ms...");
                 Thread.sleep(RECONNECT_DELAY_MS);
             } catch (InterruptedException e) {
+                if (reconnectStateMachine.onStreamEnded(ReconnectStateMachine.StreamEndReason.STOPPED, false)
+                        == ReconnectStateMachine.DisconnectAction.NOTIFY_DISCONNECTED_AND_RESET) {
+                    connected = false;
+                    notifyConnectionState(false);
+                }
                 break;
             }
         }
@@ -294,7 +469,6 @@ public class VhalSignalObserver {
                     .intercept(MetadataUtils.newAttachHeadersInterceptor(headers))
                     .build();
 
-            connected = true;
             AppLog.d(TAG, "Channel created, session_id=" + sessionId);
             return true;
         } catch (UnsatisfiedLinkError e) {
@@ -302,35 +476,46 @@ public class VhalSignalObserver {
             return false;
         } catch (Exception e) {
             AppLog.e(TAG, "Connect failed: " + e.getMessage());
-            disconnect();
+            disconnectChannelOnly();
             return false;
         }
     }
 
     private void disconnect() {
         connected = false;
-        if (grpcChannel != null) {
+        disconnectChannelOnly();
+    }
+
+    private void disconnectChannelOnly() {
+        ManagedChannel channel = grpcChannel;
+        grpcChannel = null;
+        if (channel != null) {
             try {
-                grpcChannel.shutdown();
-                if (!grpcChannel.awaitTermination(2, TimeUnit.SECONDS)) {
-                    grpcChannel.shutdownNow();
+                channel.shutdown();
+                if (!channel.awaitTermination(2, TimeUnit.SECONDS)) {
+                    channel.shutdownNow();
                 }
             } catch (Exception ignored) {
-                try { grpcChannel.shutdownNow(); } catch (Exception ignored2) {}
+                try { channel.shutdownNow(); } catch (Exception ignored2) {}
             }
-            grpcChannel = null;
         }
     }
 
     /**
-     * 开始属性流监听（阻塞直到断开或出错）
+     * 开始属性流监听（阻塞直到断开、空闲超时或出错）
      */
-    private void streamProperties() {
-        if (grpcChannel == null) return;
+    private ReconnectStateMachine.StreamEndReason streamProperties() {
+        final ManagedChannel streamChannel = grpcChannel;
+        if (streamChannel == null) {
+            return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
+        }
 
         // 使用 CountDownLatch 等待流结束
         final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
-        final boolean[] streamError = {false};
+        final AtomicBoolean streamClosed = new AtomicBoolean(false);
+        final AtomicBoolean streamError = new AtomicBoolean(false);
+        final AtomicBoolean streamCompleted = new AtomicBoolean(false);
+        io.grpc.ClientCall<byte[], byte[]> call = null;
 
         try {
             MethodDescriptor<byte[], byte[]> streamMethod = MethodDescriptor.<byte[], byte[]>newBuilder()
@@ -340,11 +525,16 @@ public class VhalSignalObserver {
                     .setResponseMarshaller(ByteMarshaller.INSTANCE)
                     .build();
 
-            var call = grpcChannel.newCall(streamMethod, CallOptions.DEFAULT);
+            call = streamChannel.newCall(streamMethod, CallOptions.DEFAULT);
+            reconnectStateMachine.onStreamOpened(monotonicNowMs());
 
             ClientCalls.asyncServerStreamingCall(call, new byte[0], new StreamObserver<byte[]>() {
                 @Override
                 public void onNext(byte[] value) {
+                    if (streamClosed.get()) {
+                        return;
+                    }
+                    reconnectStateMachine.onStreamActivity(monotonicNowMs());
                     try {
                         processPropertyBatch(value);
                     } catch (Exception e) {
@@ -354,14 +544,21 @@ public class VhalSignalObserver {
 
                 @Override
                 public void onError(Throwable t) {
+                    if (streamClosed.get()) {
+                        return;
+                    }
                     AppLog.e(TAG, "Property stream error: " + t.getMessage());
-                    streamError[0] = true;
+                    streamError.set(true);
                     latch.countDown();
                 }
 
                 @Override
                 public void onCompleted() {
+                    if (streamClosed.get()) {
+                        return;
+                    }
                     AppLog.d(TAG, "Property stream completed");
+                    streamCompleted.set(true);
                     latch.countDown();
                 }
             });
@@ -380,7 +577,7 @@ public class VhalSignalObserver {
                         return;
                     }
                     
-                    if (grpcChannel == null || !running) return;
+                    if (!running || streamClosed.get() || grpcChannel != streamChannel) return;
                     
                     try {
                         MethodDescriptor<byte[], byte[]> sendAllMethod = MethodDescriptor.<byte[], byte[]>newBuilder()
@@ -389,8 +586,13 @@ public class VhalSignalObserver {
                                 .setRequestMarshaller(ByteMarshaller.INSTANCE)
                                 .setResponseMarshaller(ByteMarshaller.INSTANCE)
                                 .build();
-                        var sendCall = grpcChannel.newCall(sendAllMethod, CallOptions.DEFAULT);
+                        var sendCall = streamChannel.newCall(
+                                sendAllMethod,
+                                CallOptions.DEFAULT.withDeadlineAfter(SEND_ALL_RPC_TIMEOUT_MS, TimeUnit.MILLISECONDS));
                         ClientCalls.blockingUnaryCall(sendCall, new byte[0]);
+                        if (!streamClosed.get() && !streamError.get()) {
+                            reconnectStateMachine.onStreamActivity(monotonicNowMs());
+                        }
                         AppLog.d(TAG, "Requested all property values to stream (attempt " + attempt + ")");
                         return;
                     } catch (UnsatisfiedLinkError e) {
@@ -403,15 +605,48 @@ public class VhalSignalObserver {
                 AppLog.e(TAG, "SendAll exhausted all retries");
             }, "VehicleApiSendAll").start();
 
-            // 等待流结束（带超时，防止半开连接卡死 reconnect 循环）
-            if (!latch.await(STREAM_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                AppLog.w(TAG, "Stream idle timeout (" + STREAM_TIMEOUT_MS + "ms), forcing reconnect");
+            // 等待流结束（仅在真正连续静默满 STREAM_TIMEOUT_MS 时触发静默重连，防止半开连接卡死）
+            while (running) {
+                ReconnectStateMachine.StreamEndReason timeoutReason = reconnectStateMachine.evaluateTimeout(
+                        monotonicNowMs(), STREAM_TIMEOUT_MS, SILENT_RECONNECT_GRACE_MS);
+                if (timeoutReason != null) {
+                    return timeoutReason;
+                }
+                long waitMs = Math.max(1L, reconnectStateMachine.computeWaitMs(
+                        monotonicNowMs(), STREAM_TIMEOUT_MS, SILENT_RECONNECT_GRACE_MS));
+                if (latch.await(waitMs, TimeUnit.MILLISECONDS)) {
+                    break;
+                }
             }
 
+            if (!running) {
+                return ReconnectStateMachine.StreamEndReason.STOPPED;
+            }
+            if (streamError.get()) {
+                return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
+            }
+            if (streamCompleted.get()) {
+                return ReconnectStateMachine.StreamEndReason.STREAM_COMPLETED;
+            }
+            return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return running ? ReconnectStateMachine.StreamEndReason.STREAM_ERROR
+                    : ReconnectStateMachine.StreamEndReason.STOPPED;
         } catch (UnsatisfiedLinkError e) {
             AppLog.e(TAG, "Native method not found: " + e.getMessage());
+            return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
         } catch (Exception e) {
             AppLog.e(TAG, "Stream setup failed: " + e.getMessage());
+            return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
+        } finally {
+            streamClosed.set(true);
+            if (call != null) {
+                try {
+                    call.cancel("VHAL stream closed", null);
+                } catch (Exception ignored) {
+                }
+            }
         }
     }
 

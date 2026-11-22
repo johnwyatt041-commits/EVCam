@@ -82,7 +82,7 @@ public class MultiCameraManager {
 
     /** 当非录制空闲预览态更新预览限帧档位时，平滑刷新各已打开摄像头的捕获会话。 */
     public synchronized void refreshPreviewFrameLimit() {
-        if (isRecording) return;
+        if (isRecording || preparingRecording) return;
         for (SingleCamera camera : cameras.values()) {
             if (camera != null && camera.isCameraOpened() && camera.hasValidPreviewSurface()) {
                 camera.recreateSession();
@@ -127,6 +127,13 @@ public class MultiCameraManager {
     private volatile List<String> currentRecordingKeys = java.util.Collections.emptyList();
     private volatile long currentSegmentDurationMs = 60_000L;
     private volatile boolean startupInSyncPrepare = false;
+    private final Object prepareLock = new Object();
+    private final java.util.concurrent.atomic.AtomicLong prepareGeneration = new java.util.concurrent.atomic.AtomicLong(0L);
+    private volatile boolean preparingRecording = false;
+    private volatile CodecPrepareCoordinator<CodecVideoRecorder, android.view.Surface> activePrepareCoordinator = null;
+    private final DirectEncodingPolicy.FallbackGuard directFallbackGuard = new DirectEncodingPolicy.FallbackGuard();
+    private final Set<String> pendingDirectFallbackStartKeys = java.util.Collections.synchronizedSet(new HashSet<>());
+    private final Map<String, CodecVideoRecorder> inFlightFallbackRecorders = new java.util.concurrent.ConcurrentHashMap<>();
     private volatile String lastStartupErrorMessage = null;
     private StatusCallback statusCallback;
     private PreviewSizeCallback previewSizeCallback;
@@ -318,6 +325,10 @@ public class MultiCameraManager {
             return;
         }
         String key = resolveRecordingKeyByCameraId(cameraId);
+        CodecPrepareCoordinator<CodecVideoRecorder, android.view.Surface> activePrepare = activePrepareCoordinator;
+        if (activePrepare != null && activePrepare.isKeyPending(key)) {
+            return;
+        }
         boolean fatalStorage = RecordingStorageAccess.isFatalWriteErrorMessage(error);
         boolean codecFatal = false;
         if (key != null) {
@@ -591,15 +602,15 @@ public class MultiCameraManager {
     }
 
     public void onPreviewTextureDestroyed(String cameraKey) {
+        onPreviewTextureDestroyed(cameraKey, null);
+    }
+
+    public void onPreviewTextureDestroyed(String cameraKey, SurfaceTexture destroyedSurfaceTexture) {
         SingleCamera camera = cameras.get(cameraKey);
         if (camera == null) {
             return;
         }
-        camera.setTextureView(null);
-        camera.clearPreviewSurface();
-        if (!camera.closeIfUnused()) {
-            camera.recreateSession();
-        }
+        camera.onPreviewTextureDestroyed(destroyedSurfaceTexture);
     }
 
     public void setMainPreviewEnabled(boolean enabled) {
@@ -722,21 +733,12 @@ public class MultiCameraManager {
             return;
         }
         boolean required = previewDemand.isRequired(cameraKey);
-        boolean viewChanged = camera.getTextureView() != view;
         camera.setTextureView(view);
         if (camera.isMainPreviewEnabled() != required) {
             camera.setMainPreviewEnabled(required);
             return;
         }
-        if (required && view != null && view.isAvailable()) {
-            if (!camera.isConnected()) {
-                camera.openCamera();
-            } else if (viewChanged || !camera.hasValidPreviewSurface()) {
-                camera.recreateSession();
-            }
-        } else if (!camera.closeIfUnused() && viewChanged) {
-            camera.recreateSession();
-        }
+        camera.syncMainPreviewOutput();
     }
 
     public void attachPhotoTextureView(String cameraKey, TextureView stagingView) {
@@ -753,7 +755,7 @@ public class MultiCameraManager {
             if (!camera.isConnected()) {
                 camera.openCamera();
             } else {
-                camera.recreateSession();
+                camera.syncMainPreviewOutput();
             }
         }
     }
@@ -854,7 +856,7 @@ public class MultiCameraManager {
                     statusCallback.onCameraStatusUpdate(cameraId, "预览已启动");
                 }
 
-                // 检查是否有录制器正在等待会话重新配置（分段切换）
+                // 检查是否有录制器正在等待会话重新配置（分段切换）或等待直连回退 GL 后启动
                 for (Map.Entry<String, SingleCamera> entry : cameras.entrySet()) {
                     if (entry.getValue().getCameraId().equals(cameraId)) {
                         String key = entry.getKey();
@@ -864,6 +866,25 @@ public class MultiCameraManager {
                             AppLog.d(TAG, "Camera " + cameraId + " session reconfigured, starting next segment recording");
                             recorder.clearWaitingForSessionReconfiguration();
                             recorder.startRecording();
+                        }
+                        if (pendingDirectFallbackStartKeys.remove(key)) {
+                            final CodecVideoRecorder fallbackRec = codecRecorders.get(key);
+                            if (fallbackRec != null && !fallbackRec.isRecording() && isRecording && !stoppingRecording) {
+                                mainHandler.postDelayed(() -> {
+                                    if (!isRecording || stoppingRecording || isReleased()) {
+                                        return;
+                                    }
+                                    CodecVideoRecorder currentRec = codecRecorders.get(key);
+                                    if (currentRec == fallbackRec && !currentRec.isRecording()) {
+                                        boolean started = currentRec.startRecording();
+                                        cameraRecordingActive.put(key, started || currentRec.isRecording());
+                                        AppLog.i(TAG, "Started GL fallback codec recorder for " + key + ": " + started);
+                                        if (!started && !currentRec.isRecording()) {
+                                            handleDirectFallbackTerminalFailure(key, "gl_fallback_start_failed", false);
+                                        }
+                                    }
+                                }, 150);
+                            }
                         }
                         break;
                     }
@@ -930,7 +951,34 @@ public class MultiCameraManager {
                     statusCallback.onCameraStatusUpdate(cameraId, "错误: " + errorMsg);
                 }
 
-                // 如果在等待会话配置期间发生错误，减少期望计数（线程安全处理）
+                // 如果在等待会话配置期间发生错误，先检查是否触发直连->GL回退，否则减少期望计数
+                boolean checkDirectFallback = false;
+                boolean checkPostFallbackFailure = false;
+                String errorCameraKey = null;
+                synchronized (sessionLock) {
+                    if (errorCode == -3) {
+                        errorCameraKey = resolveRecordingKeyByCameraId(cameraId);
+                        if (expectedSessionCount > 0) {
+                            checkDirectFallback = true;
+                        } else if (errorCameraKey != null && pendingDirectFallbackStartKeys.remove(errorCameraKey)) {
+                            checkPostFallbackFailure = true;
+                        }
+                    }
+                }
+                if (checkPostFallbackFailure && errorCameraKey != null) {
+                    handleDirectFallbackTerminalFailure(errorCameraKey, "gl_fallback_session_failed", false);
+                    return;
+                }
+                if (checkDirectFallback && errorCameraKey != null
+                        && triggerDirectToGlFallbackIfEligible(errorCameraKey, "session_configure_failed", true)) {
+                    synchronized (sessionLock) {
+                        if (expectedSessionCount > 0 && pendingRecordingStart != null) {
+                            rescheduleSessionTimeoutLocked(3000L);
+                        }
+                    }
+                    return;
+                }
+
                 synchronized (sessionLock) {
                     if (expectedSessionCount > 0 && errorCode == -3) {
                         expectedSessionCount--;
@@ -1216,8 +1264,8 @@ public class MultiCameraManager {
      * @param timestamp 统一的时间戳，用于所有摄像头的文件命名
      */
     public boolean startRecording(String timestamp) {
-        if (isRecording || stoppingRecording) {
-            AppLog.w(TAG, "Recording is active or still stopping");
+        if (isRecording || preparingRecording || stoppingRecording) {
+            AppLog.w(TAG, "Recording is active, preparing, or still stopping");
             return false;
         }
 
@@ -1240,8 +1288,8 @@ public class MultiCameraManager {
      * @param enabledCameras 要录制的摄像头位置集合（如 ["front", "back"]），为 null 时录制所有摄像头
      */
     public boolean startRecording(String timestamp, Set<String> enabledCameras) {
-        if (isRecording || stoppingRecording) {
-            AppLog.w(TAG, "Recording is active or still stopping");
+        if (isRecording || preparingRecording || stoppingRecording) {
+            AppLog.w(TAG, "Recording is active, preparing, or still stopping");
             return false;
         }
 
@@ -1707,17 +1755,16 @@ public class MultiCameraManager {
                 : keys;
         startupTracker.reset(expectedTrackerKeys);
 
-        // 清理之前的软编码录制器
-        for (CodecVideoRecorder recorder : codecRecorders.values()) {
-            recorder.release();
-        }
+        cancelActivePrepareCoordinator("restartCodecRecording");
+        // 异步清理之前的软编码录制器，避免阻塞主线程
+        List<CodecVideoRecorder> staleRecorders = new ArrayList<>(codecRecorders.values());
         codecRecorders.clear();
+        releaseCodecRecordersAsync(staleRecorders);
 
-        // 为每个摄像头创建软编码录制器并准备
-        boolean prepareSuccess = true;
-        startupInSyncPrepare = true;
-        try {
-            if (RecordingExperiment.compositeDaily(keys)) {
+        if (RecordingExperiment.compositeDaily(keys)) {
+            boolean prepareSuccess = true;
+            startupInSyncPrepare = true;
+            try {
                 try {
                     Map<String,Size> sourceSizes = new LinkedHashMap<>();
                     for (String key : keys) {
@@ -1741,114 +1788,282 @@ public class MultiCameraManager {
                     }
                     prepareSuccess=false;
                 }
+            } finally {
+                startupInSyncPrepare = false;
             }
-            for (String key : RecordingExperiment.compositeDaily(keys) ? java.util.Collections.<String>emptyList() : keys) {
-                SingleCamera camera = cameras.get(key);
-                if (camera == null) {
-                    continue;
+
+            if (!prepareSuccess) {
+                closeCompositeInputs();
+                for (String key : keys) {
+                    SingleCamera camera = cameras.get(key);
+                    if (camera != null) camera.clearRecordSurface();
                 }
-
-                // 获取摄像头的实际预览分辨率
-                Size previewSize = camera.getPreviewSize();
-                if (previewSize == null) {
-                    AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x800");
-                    previewSize = new Size(1280, 800);
-                }
-
-                // 最大编码分辨率限制（H.264 编码器硬件限制，固定值）
-                final int MAX_ENCODE_SIZE = 4096;
-
-                // 计算调整后的编码分辨率（3.2 画面画质缩放 + 防止超大分辨率失败，保持偶数对齐）
-                ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
-                int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
-                int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
-                if (encodeWidth > MAX_ENCODE_SIZE || encodeHeight > MAX_ENCODE_SIZE) {
-                    float widthRatio = (float) MAX_ENCODE_SIZE / encodeWidth;
-                    float heightRatio = (float) MAX_ENCODE_SIZE / encodeHeight;
-                    float scaleFactor = Math.min(widthRatio, heightRatio);
-                    encodeWidth = ((int) (encodeWidth * scaleFactor) / 2) * 2;  // 确保是偶数
-                    encodeHeight = ((int) (encodeHeight * scaleFactor) / 2) * 2;
-                    if (encodeWidth < 2) encodeWidth = 2;
-                    if (encodeHeight < 2) encodeHeight = 2;
-                    AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " +
-                            previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " +
-                            encodeWidth + "x" + encodeHeight + " (max: " + MAX_ENCODE_SIZE + ")");
-                }
-
-                // 计算码率（基于调整后的分辨率和帧率）
-                int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, targetFrameRate);
-
-                // 创建软编码录制器（使用调整后的分辨率）
-                CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
-                        camera.getCameraId(),
-                        encodeWidth,
-                        encodeHeight
-                );
-
-                Size sourceSize = camera.getPreviewSize();
-                int srcW = sourceSize != null ? sourceSize.getWidth() : encodeWidth;
-                int srcH = sourceSize != null ? sourceSize.getHeight() : encodeHeight;
-                configureCodecRecorderCommon(
-                        key, camera, codecRecorder, segmentDurationMs,
-                        bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight, appConfig, adjConfig);
-
-                // 设置回调
-                codecRecorder.setCallback(createCodecRecordCallback(key));
-
-                // 准备录制
-                String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
-                AppLog.d(TAG, "Preparing codec recording for " + key + " with size: " + previewSize.getWidth() + "x" + previewSize.getHeight());
-
-                android.graphics.SurfaceTexture surfaceTexture = codecRecorder.prepareRecording(path);
-                if (surfaceTexture == null) {
-                    AppLog.e(TAG, "Failed to prepare codec recording for " + key);
-                    prepareSuccess = false;
-                    break;
-                }
-
-                // 将 SurfaceTexture 设置给 Camera（通过 Surface）
-                android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
-                camera.setRecordSurface(recordSurface, true);  // Codec 模式
-
-                registerCodecRecorder(key, codecRecorder);
+                AppLog.e(TAG, "Failed to prepare composite codec recording");
+                List<CodecVideoRecorder> failedRecorders = new ArrayList<>(codecRecorders.values());
+                codecRecorders.clear();
+                releaseCodecRecordersAsync(failedRecorders);
+                return false;
             }
-        } finally {
-            startupInSyncPrepare = false;
-        }
 
-        if (!prepareSuccess) {
-            closeCompositeInputs();
+            // 重新创建摄像头会话
+            synchronized (sessionLock) {
+                sessionConfiguredCount = 0;
+                expectedSessionCount = keys.size();
+                cameraSessionReady.clear();
+                cameraRecordingActive.clear();
+            }
+
+            final List<String> recordingKeys = new ArrayList<>(keys);
+            pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false);
             for (String key : keys) {
                 SingleCamera camera = cameras.get(key);
-                if (camera != null) camera.clearRecordSurface();
+                if (camera != null) {
+                    camera.recreateSession();
+                }
             }
-            AppLog.e(TAG, "Failed to prepare codec recording");
-            // 清理已准备的录制器
-            for (CodecVideoRecorder recorder : codecRecorders.values()) {
-                recorder.release();
-            }
-            codecRecorders.clear();
+
+            // 设置超时机制
+            sessionTimeoutRunnable = () -> {
+                AppLog.w(TAG, "Session configuration timeout, starting codec recording with available cameras");
+                synchronized (sessionLock) {
+                    final Runnable recordingTask = pendingRecordingStart;
+                    if (recordingTask != null) {
+                        pendingRecordingStart = null;
+                        recordingTask.run();
+                    }
+                    sessionConfiguredCount = 0;
+                    expectedSessionCount = 0;
+                }
+            };
+            mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
+
+            startupWatchdog.start();
+            return true;
+        }
+
+        // 并发异步准备各路 CodecVideoRecorder，准备齐后再统一配置 Camera2 Session
+        if (!launchAsyncCodecPrepare(keys, saveDir, timestamp, segmentDurationMs, targetFrameRate, false, false)) {
             return false;
         }
 
-        // 重新创建摄像头会话
-        synchronized (sessionLock) {
-            sessionConfiguredCount = 0;
-            expectedSessionCount = keys.size();
-            cameraSessionReady.clear();
-            cameraRecordingActive.clear();
+        startupWatchdog.start();
+        return true;
+    }
+
+    private boolean launchAsyncCodecPrepare(
+            final List<String> keys,
+            final File saveDir,
+            final String timestamp,
+            final long segmentDurationMs,
+            final int targetFrameRate,
+            final boolean forcedReopen,
+            final boolean fromReprepare) {
+        if (!fromReprepare) {
+            directFallbackGuard.reset();
+            pendingDirectFallbackStartKeys.clear();
+        }
+        final AppConfig appConfig = new AppConfig(context);
+        final Map<String, CodecVideoRecorder> plannedRecorders = new LinkedHashMap<>();
+        final Map<String, String> targetPaths = new LinkedHashMap<>();
+
+        for (String key : keys) {
+            SingleCamera camera = cameras.get(key);
+            if (camera == null) {
+                continue;
+            }
+            CodecVideoRecorder codecRecorder = buildConfiguredCodecRecorder(
+                    key, camera, appConfig, segmentDurationMs, targetFrameRate,
+                    directFallbackGuard.isFallbackAttempted(key));
+
+            String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
+            plannedRecorders.put(key, codecRecorder);
+            targetPaths.put(key, path);
         }
 
-        final List<String> recordingKeys = new ArrayList<>(keys);
-        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, false);
-        for (String key : keys) {
+        if (plannedRecorders.isEmpty()) {
+            AppLog.e(TAG, "No valid cameras available for async codec prepare");
+            return false;
+        }
+
+        final long generationId;
+        final CodecPrepareCoordinator<CodecVideoRecorder, Surface> coordinator;
+        synchronized (prepareLock) {
+            generationId = prepareGeneration.incrementAndGet();
+            preparingRecording = true;
+            coordinator = new CodecPrepareCoordinator<>(
+                    generationId,
+                    plannedRecorders,
+                    new CodecPrepareCoordinator.Hooks<CodecVideoRecorder, Surface>() {
+                        @Override
+                        public void requestStop(CodecVideoRecorder recorder) {
+                            recorder.requestStop();
+                        }
+
+                        @Override
+                        public void releaseRecorder(CodecVideoRecorder recorder) {
+                            releaseCodecRecordersAsync(java.util.Collections.singletonList(recorder));
+                        }
+
+                        @Override
+                        public void onBatchReady(CodecPrepareCoordinator.BatchResult<CodecVideoRecorder, Surface> result) {
+                            Runnable applyOnMain = () -> handleAsyncCodecPrepareBatchReady(keys, result, forcedReopen, fromReprepare);
+                            if (Looper.myLooper() == Looper.getMainLooper()) {
+                                applyOnMain.run();
+                            } else {
+                                mainHandler.post(applyOnMain);
+                            }
+                        }
+                    }
+            );
+            activePrepareCoordinator = coordinator;
+        }
+
+        for (Map.Entry<String, CodecVideoRecorder> entry : plannedRecorders.entrySet()) {
+            final String key = entry.getKey();
+            final CodecVideoRecorder codecRecorder = entry.getValue();
+            final String path = targetPaths.get(key);
+            AppLog.d(TAG, "Preparing codec recording asynchronously for " + key + " -> " + path);
+            codecRecorder.prepareRecordingSurfaceAsync(path, (success, recordSurface, directPath, errorMessage) -> {
+                String detail = errorMessage;
+                if ((detail == null || detail.isEmpty()) && !success) {
+                    detail = codecRecorder.getLastPrepareErrorMessage();
+                }
+                boolean fatal = !success && (codecRecorder.hasFatalWriteError()
+                        || RecordingStorageAccess.isFatalWriteErrorMessage(detail));
+                coordinator.onPrepareResult(key, success, recordSurface, detail, fatal);
+            });
+        }
+
+        return true;
+    }
+
+    private void handleAsyncCodecPrepareBatchReady(
+            List<String> plannedKeys,
+            CodecPrepareCoordinator.BatchResult<CodecVideoRecorder, Surface> result,
+            boolean forcedReopen,
+            boolean fromReprepare) {
+        boolean staleOrCancelled;
+        synchronized (prepareLock) {
+            staleOrCancelled = result.generationId != prepareGeneration.get()
+                    || stoppingRecording
+                    || isReleased()
+                    || result.cancelled;
+            if (!staleOrCancelled) {
+                preparingRecording = false;
+                activePrepareCoordinator = null;
+            }
+        }
+
+        if (staleOrCancelled) {
+            AppLog.w(TAG, "Discarding stale/cancelled async codec prepare result (gen=" + result.generationId + ")");
+            if (!result.succeeded.isEmpty()) {
+                List<CodecVideoRecorder> toRelease = new ArrayList<>(result.succeeded.size());
+                for (CodecPrepareCoordinator.PreparedEntry<CodecVideoRecorder, Surface> entry : result.succeeded) {
+                    if (entry.recorder != null) {
+                        toRelease.add(entry.recorder);
+                    }
+                }
+                releaseCodecRecordersAsync(toRelease);
+            }
+            return;
+        }
+
+        if (result.fatalStorageError || result.succeeded.isEmpty()) {
+            for (String key : plannedKeys) {
+                SingleCamera camera = cameras.get(key);
+                if (camera != null) {
+                    camera.clearRecordSurface();
+                }
+            }
+            if (!result.succeeded.isEmpty()) {
+                List<CodecVideoRecorder> toRelease = new ArrayList<>(result.succeeded.size());
+                for (CodecPrepareCoordinator.PreparedEntry<CodecVideoRecorder, Surface> entry : result.succeeded) {
+                    if (entry.recorder != null) {
+                        toRelease.add(entry.recorder);
+                    }
+                }
+                releaseCodecRecordersAsync(toRelease);
+            }
+            String detail = result.fatalErrorMessage;
+            if (detail == null || detail.isEmpty()) {
+                for (String err : result.failed.values()) {
+                    if (err != null && !err.isEmpty()) {
+                        detail = err;
+                        break;
+                    }
+                }
+            }
+            if (detail == null || detail.isEmpty()) {
+                detail = "Failed to prepare codec recording";
+            }
+            lastStartupErrorMessage = detail;
+            boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+            String userMessage = RecordingStorageAccess.formatUserStartupFailureMessage(detail, missingAllFiles);
+            failRecordingStartupWithUserMessage(
+                    (fromReprepare ? "Failed to re-prepare codec recording: " : "Failed to prepare codec recording: ") + detail,
+                    userMessage);
+            return;
+        }
+
+        if (!result.failed.isEmpty()) {
+            for (Map.Entry<String, String> failedEntry : result.failed.entrySet()) {
+                String failedKey = failedEntry.getKey();
+                String failedReason = failedEntry.getValue();
+                SingleCamera failedCamera = cameras.get(failedKey);
+                if (failedCamera != null) {
+                    failedCamera.clearRecordSurface();
+                }
+                AppLog.w(TAG, "Async codec prepare failed for camera " + failedKey + ": " + failedReason);
+                startupTracker.recordCameraFailure(failedKey, failedReason, false);
+            }
+        }
+
+        final List<String> readyKeys = new ArrayList<>(result.succeeded.size());
+        for (CodecPrepareCoordinator.PreparedEntry<CodecVideoRecorder, Surface> entry : result.succeeded) {
+            SingleCamera camera = cameras.get(entry.key);
+            if (camera == null) {
+                releaseCodecRecordersAsync(java.util.Collections.singletonList(entry.recorder));
+                continue;
+            }
+            Surface recordSurface = entry.surfaceToken != null
+                    ? entry.surfaceToken
+                    : entry.recorder.getRecordSurface();
+            if (recordSurface == null || !recordSurface.isValid()) {
+                AppLog.w(TAG, "Prepared surface null or invalid for camera " + entry.key);
+                startupTracker.recordCameraFailure(entry.key, "prepared_surface_null", false);
+                releaseCodecRecordersAsync(java.util.Collections.singletonList(entry.recorder));
+                continue;
+            }
+            camera.setRecordSurface(recordSurface, true);
+            registerCodecRecorder(entry.key, entry.recorder);
+            readyKeys.add(entry.key);
+        }
+
+        if (readyKeys.isEmpty()) {
+            failRecordingStartupWithUserMessage(
+                    "No prepared cameras left after async codec prepare",
+                    "录像启动失败，请重试");
+            return;
+        }
+
+        synchronized (sessionLock) {
+            sessionConfiguredCount = 0;
+            expectedSessionCount = readyKeys.size();
+            cameraSessionReady.clear();
+            cameraRecordingActive.clear();
+            pendingRecordingStart = () -> executeCodecRecordingStart(readyKeys, 0, forcedReopen);
+        }
+
+        for (String key : readyKeys) {
             SingleCamera camera = cameras.get(key);
             if (camera != null) {
                 camera.recreateSession();
             }
         }
 
-        // 设置超时机制
+        if (sessionTimeoutRunnable != null) {
+            mainHandler.removeCallbacks(sessionTimeoutRunnable);
+        }
         sessionTimeoutRunnable = () -> {
             AppLog.w(TAG, "Session configuration timeout, starting codec recording with available cameras");
             synchronized (sessionLock) {
@@ -1862,9 +2077,202 @@ public class MultiCameraManager {
             }
         };
         mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
+    }
 
-        startupWatchdog.start();
+    private void cancelActivePrepareCoordinator(String reason) {
+        CodecPrepareCoordinator<CodecVideoRecorder, Surface> coordinatorToCancel;
+        synchronized (prepareLock) {
+            prepareGeneration.incrementAndGet();
+            preparingRecording = false;
+            coordinatorToCancel = activePrepareCoordinator;
+            activePrepareCoordinator = null;
+        }
+        if (coordinatorToCancel != null) {
+            AppLog.d(TAG, "Cancelling active codec prepare coordinator: " + reason);
+            coordinatorToCancel.cancel();
+        }
+    }
+
+    private void rescheduleSessionTimeoutLocked(long delayMs) {
+        if (sessionTimeoutRunnable != null) {
+            mainHandler.removeCallbacks(sessionTimeoutRunnable);
+            mainHandler.postDelayed(sessionTimeoutRunnable, delayMs);
+        }
+    }
+
+    private boolean triggerDirectToGlFallbackIfEligible(
+            String cameraKey,
+            String reason,
+            boolean duringInitialSessionWait) {
+        if (cameraKey == null || cameraKey.isEmpty() || stoppingRecording || isReleased() || compositeRecording != null) {
+            return false;
+        }
+        CodecVideoRecorder current = codecRecorders.get(cameraKey);
+        SingleCamera camera = cameras.get(cameraKey);
+        if (current == null || camera == null) {
+            return false;
+        }
+        if (!directFallbackGuard.tryBeginFallback(cameraKey, current.isDirectInputActive(), current.hasFatalWriteError())) {
+            return false;
+        }
+
+        AppLog.w(TAG, "Direct codec input failed for camera " + cameraKey + " (" + reason + "), falling back to GL pipeline");
+        final long gen = prepareGeneration.get();
+        final String oldPath = current.getCurrentFilePath();
+        camera.pauseRecordSurfaceDelivery();
+        codecRecorders.remove(cameraKey, current);
+        releaseCodecRecordersAsync(java.util.Collections.singletonList(current));
+
+        AppConfig appConfig = new AppConfig(context);
+        long segMs = currentSegmentDurationMs > 0 ? currentSegmentDurationMs : appConfig.getSegmentDurationMs();
+        int targetFps = appConfig.getActualFrameRate(25);
+        CodecVideoRecorder fallbackRecorder = buildConfiguredCodecRecorder(
+                cameraKey, camera, appConfig, segMs, targetFps, true);
+        inFlightFallbackRecorders.put(cameraKey, fallbackRecorder);
+
+        File saveDir = StorageHelper.getRecordingDir(context);
+        if (!saveDir.exists()) {
+            saveDir.mkdirs();
+        }
+        String fallbackPath = resolveDirectFallbackPath(saveDir, cameraKey, oldPath);
+        fallbackRecorder.prepareRecordingSurfaceAsync(fallbackPath, mainHandler::post, (success, glSurface, directPath, errorMessage) -> {
+            inFlightFallbackRecorders.remove(cameraKey, fallbackRecorder);
+            directFallbackGuard.finishFallback(cameraKey);
+            boolean stale = gen != prepareGeneration.get()
+                    || stoppingRecording
+                    || isReleased()
+                    || (!isRecording && !duringInitialSessionWait && pendingRecordingStart == null);
+            if (stale) {
+                releaseCodecRecordersAsync(java.util.Collections.singletonList(fallbackRecorder));
+                return;
+            }
+            if (!success || glSurface == null || !glSurface.isValid()) {
+                String detail = (errorMessage != null && !errorMessage.isEmpty())
+                        ? errorMessage
+                        : fallbackRecorder.getLastPrepareErrorMessage();
+                if (detail == null || detail.isEmpty()) {
+                    detail = "Direct->GL fallback prepare failed";
+                }
+                AppLog.e(TAG, "Direct->GL fallback prepare failed for " + cameraKey + ": " + detail);
+                releaseCodecRecordersAsync(java.util.Collections.singletonList(fallbackRecorder));
+                handleDirectFallbackTerminalFailure(cameraKey, detail, duringInitialSessionWait);
+                return;
+            }
+
+            registerCodecRecorder(cameraKey, fallbackRecorder);
+            camera.setRecordSurface(glSurface, true);
+            if (!duringInitialSessionWait) {
+                pendingDirectFallbackStartKeys.add(cameraKey);
+            }
+            camera.recreateSession(true);
+        });
         return true;
+    }
+
+    private String resolveDirectFallbackPath(File saveDir, String cameraKey, String oldPath) {
+        long baseMs = System.currentTimeMillis();
+        SimpleDateFormat fmt = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault());
+        for (int offsetSec = 0; offsetSec < 10; offsetSec++) {
+            String candidateTs = fmt.format(new Date(baseMs + offsetSec * 1000L));
+            File candidate = new File(saveDir, candidateTs + "_" + cameraKey + ".mp4");
+            File candidatePending = new File(candidate.getAbsolutePath() + ".pending");
+            boolean sameAsOld = oldPath != null && candidate.getAbsolutePath().equals(oldPath);
+            if (!sameAsOld && !candidate.exists() && !candidatePending.exists()
+                    && !ActiveRecordingRegistry.isActive(candidatePending)) {
+                return candidate.getAbsolutePath();
+            }
+        }
+        return new File(saveDir, fmt.format(new Date(baseMs + 10_000L)) + "_" + cameraKey + ".mp4").getAbsolutePath();
+    }
+
+    private void handleDirectFallbackTerminalFailure(
+            String cameraKey,
+            String detail,
+            boolean duringInitialSessionWait) {
+        if (duringInitialSessionWait) {
+            startupTracker.recordCameraFailure(cameraKey, detail, false);
+            Runnable startReadyTask = null;
+            boolean allFailed = false;
+            synchronized (sessionLock) {
+                if (expectedSessionCount > 0) {
+                    expectedSessionCount--;
+                    if (sessionConfiguredCount >= expectedSessionCount && expectedSessionCount > 0) {
+                        startReadyTask = pendingRecordingStart;
+                        pendingRecordingStart = null;
+                        sessionConfiguredCount = 0;
+                        expectedSessionCount = 0;
+                    } else if (expectedSessionCount <= 0) {
+                        sessionConfiguredCount = 0;
+                        expectedSessionCount = 0;
+                        pendingRecordingStart = null;
+                        allFailed = true;
+                    }
+                }
+            }
+            if (startReadyTask != null) {
+                if (sessionTimeoutRunnable != null) {
+                    mainHandler.removeCallbacks(sessionTimeoutRunnable);
+                    sessionTimeoutRunnable = null;
+                }
+                mainHandler.postDelayed(startReadyTask, 300);
+            } else if (allFailed) {
+                if (sessionTimeoutRunnable != null) {
+                    mainHandler.removeCallbacks(sessionTimeoutRunnable);
+                    sessionTimeoutRunnable = null;
+                }
+                boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                failRecordingStartupWithUserMessage(
+                        "Direct->GL fallback failed for all cameras: " + detail,
+                        RecordingStorageAccess.formatUserStartupFailureMessage(detail, missingAllFiles));
+            }
+            return;
+        }
+
+        if (startupTracker.isTracking()) {
+            RecordingStartupTracker.Outcome outcome = startupTracker.recordCameraFailure(cameraKey, detail, false);
+            if (outcome.shouldCancelWatchdog) {
+                startupWatchdog.cancel();
+            }
+            if (outcome.allFailed) {
+                boolean missingAllFiles = RecordingStorageAccess.isMissingAllFilesAccessOnAndroid11Plus(context);
+                failRecordingStartupWithUserMessage(
+                        "Direct->GL fallback failed on all cameras: " + detail,
+                        RecordingStorageAccess.formatUserStartupFailureMessage(detail, missingAllFiles));
+                return;
+            }
+            if (outcome.partialFailure) {
+                cleanupFailedCameraRecorder(cameraKey);
+                if (recordingStatusCallback != null) {
+                    final Set<String> activeCopy = new java.util.LinkedHashSet<>(outcome.writtenKeys);
+                    final Set<String> failedCopy = new java.util.LinkedHashSet<>(outcome.failedKeys);
+                    mainHandler.post(() -> recordingStatusCallback.onPartialRecordingStart(activeCopy, failedCopy));
+                }
+            }
+            return;
+        }
+        cleanupFailedCameraRecorder(cameraKey);
+    }
+
+    private void releaseCodecRecordersAsync(List<CodecVideoRecorder> recordersToRelease) {
+        if (recordersToRelease == null || recordersToRelease.isEmpty()) {
+            return;
+        }
+        for (CodecVideoRecorder recorder : recordersToRelease) {
+            if (recorder != null) {
+                recorder.requestStop();
+            }
+        }
+        new Thread(() -> {
+            for (CodecVideoRecorder recorder : recordersToRelease) {
+                if (recorder != null) {
+                    try {
+                        recorder.release();
+                    } catch (Exception e) {
+                        AppLog.w(TAG, "Error releasing codec recorder asynchronously", e);
+                    }
+                }
+            }
+        }, "ReleaseCodecRecorders").start();
     }
 
     private RecordCallback createCodecRecordCallback(final String cameraKey) {
@@ -1923,6 +2331,15 @@ public class MultiCameraManager {
             @Override
             public void onRecordingRebuildRequested(String cameraId, String reason) {
                 AppLog.e(TAG, "Codec recording rebuild requested for camera " + cameraId + ", reason: " + reason);
+                String targetKey = (cameraKey != null && !cameraKey.isEmpty())
+                        ? cameraKey
+                        : resolveRecordingKeyByCameraId(cameraId);
+                if (targetKey != null && triggerDirectToGlFallbackIfEligible(targetKey, reason, false)) {
+                    return;
+                }
+                if (targetKey != null && startupTracker.isTracking()) {
+                    handleRecorderError("Codec", cameraId, "Direct recording rebuild failed: " + reason);
+                }
             }
 
             @Override
@@ -2149,13 +2566,11 @@ public class MultiCameraManager {
             }
         }
 
-        // 清理之前的录制器（只保留指定摄像头的）
-        for (Map.Entry<String, CodecVideoRecorder> entry : new ArrayList<>(codecRecorders.entrySet())) {
-            if (!cameraKeys.contains(entry.getKey())) {
-                entry.getValue().release();
-                codecRecorders.remove(entry.getKey());
-            }
-        }
+        cancelActivePrepareCoordinator("reprepareCodecRecording");
+        // 清理之前的录制器（异步释放，防止新旧实例残留）
+        List<CodecVideoRecorder> staleRecorders = new ArrayList<>(codecRecorders.values());
+        codecRecorders.clear();
+        releaseCodecRecordersAsync(staleRecorders);
 
         // 获取录制目录
         File saveDir = StorageHelper.getRecordingDir(context);
@@ -2166,101 +2581,16 @@ public class MultiCameraManager {
         // 生成新的时间戳
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(new Date());
 
-        // 为每个指定的摄像头准备录制
-        boolean prepareSuccess = true;
-        for (String key : cameraKeys) {
-            SingleCamera camera = cameras.get(key);
-            if (camera == null) {
-                continue;
-            }
+        AppConfig appConfig = new AppConfig(context);
+        int fps = appConfig.getActualFrameRate(25);
+        long segDurationMs = currentSegmentDurationMs > 0 ? currentSegmentDurationMs : appConfig.getSegmentDurationMs();
 
-            // 获取摄像头的实际预览分辨率
-            Size previewSize = camera.getPreviewSize();
-            if (previewSize == null) {
-                previewSize = new Size(1280, 800);
-            }
-
-            AppConfig appConfig = new AppConfig(context);
-            ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
-            int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
-            int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
-            int fps = appConfig.getActualFrameRate(25);
-            int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, fps);
-            long segDurationMs = currentSegmentDurationMs > 0 ? currentSegmentDurationMs : appConfig.getSegmentDurationMs();
-
-            // 创建软编码录制器
-            CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
-                    camera.getCameraId(),
-                    encodeWidth,
-                    encodeHeight
-            );
-
-            configureCodecRecorderCommon(
-                    key, camera, codecRecorder, segDurationMs,
-                    bitrate, fps, previewSize.getWidth(), previewSize.getHeight(),
-                    encodeWidth, encodeHeight, appConfig, adjConfig);
-            codecRecorder.setCallback(createCodecRecordCallback(key));
-
-            // 准备录制
-            String path = new File(saveDir, timestamp + "_" + key + ".mp4").getAbsolutePath();
-            android.graphics.SurfaceTexture surfaceTexture = codecRecorder.prepareRecording(path);
-            if (surfaceTexture == null) {
-                AppLog.e(TAG, "Failed to prepare codec recording for " + key);
-                prepareSuccess = false;
-                break;
-            }
-
-            // 将 SurfaceTexture 设置给 Camera
-            android.view.Surface recordSurface = new android.view.Surface(surfaceTexture);
-            camera.setRecordSurface(recordSurface, true);
-
-            registerCodecRecorder(key, codecRecorder);
-        }
-
-        if (!prepareSuccess) {
-            AppLog.e(TAG, "Failed to re-prepare codec recording");
-            for (CodecVideoRecorder recorder : codecRecorders.values()) {
-                recorder.release();
-            }
-            codecRecorders.clear();
+        if (!launchAsyncCodecPrepare(cameraKeys, saveDir, timestamp, segDurationMs, fps, true, true)) {
             isRecording = false;
             failRecordingStartupWithUserMessage(
                     "Failed to re-prepare codec recording",
                     "录像启动失败，请重试");
-            return;
         }
-
-        // 重新创建摄像头会话
-        synchronized (sessionLock) {
-            sessionConfiguredCount = 0;
-            expectedSessionCount = cameraKeys.size();
-            cameraSessionReady.clear();
-            cameraRecordingActive.clear();
-        }
-
-        for (String key : cameraKeys) {
-            SingleCamera camera = cameras.get(key);
-            if (camera != null) {
-                camera.recreateSession();
-            }
-        }
-
-        // 设置待处理的录制启动任务
-        final List<String> recordingKeys = new ArrayList<>(cameraKeys);
-        pendingRecordingStart = () -> executeCodecRecordingStart(recordingKeys, 0, true);
-
-        // 设置超时机制
-        sessionTimeoutRunnable = () -> {
-            AppLog.w(TAG, "Re-prepare session configuration timeout");
-            synchronized (sessionLock) {
-                final Runnable recordingTask = pendingRecordingStart;
-                if (recordingTask != null) {
-                    pendingRecordingStart = null;
-                    mainHandler.post(recordingTask);
-                }
-            }
-        };
-        mainHandler.postDelayed(sessionTimeoutRunnable, 3000);
     }
 
     /**
@@ -2279,6 +2609,7 @@ public class MultiCameraManager {
     }
 
     public void stopRecording(boolean skipRelayTransfer, Runnable onStopped) {
+        cancelActivePrepareCoordinator("stopRecording");
         startupWatchdog.cancel();
         startupTracker.reset(java.util.Collections.emptyList());
         currentRecordingKeys = java.util.Collections.emptyList();
@@ -2295,7 +2626,26 @@ public class MultiCameraManager {
         // 立即标记停止状态，防止新的录制请求
         final boolean wasRecording = isRecording;
         isRecording = false;
-        for (CodecVideoRecorder recorder : codecRecorders.values()) recorder.requestStop();
+        pendingDirectFallbackStartKeys.clear();
+        directFallbackGuard.reset();
+        if (!inFlightFallbackRecorders.isEmpty()) {
+            List<CodecVideoRecorder> inFlight = new ArrayList<>(inFlightFallbackRecorders.values());
+            inFlightFallbackRecorders.clear();
+            releaseCodecRecordersAsync(inFlight);
+        }
+        for (Map.Entry<String, CodecVideoRecorder> entry : codecRecorders.entrySet()) {
+            CodecVideoRecorder recorder = entry.getValue();
+            if (recorder == null) {
+                continue;
+            }
+            recorder.requestStop();
+            if (recorder.isDirectInputActive()) {
+                SingleCamera camera = cameras.get(entry.getKey());
+                if (camera != null) {
+                    camera.pauseRecordSurfaceDelivery();
+                }
+            }
+        }
 
         // 在后台线程执行停止操作，避免阻塞主线程
         new Thread(() -> {
@@ -2753,6 +3103,7 @@ public class MultiCameraManager {
      * 添加完善的清理逻辑和异常保护
      */
     public void release() {
+        cancelActivePrepareCoordinator("release");
         startupWatchdog.cancel();
         startupTracker.reset(java.util.Collections.emptyList());
         currentRecordingKeys = java.util.Collections.emptyList();
@@ -2800,6 +3151,18 @@ public class MultiCameraManager {
             }
             
             // 7. 释放 CodecVideoRecorder
+            pendingDirectFallbackStartKeys.clear();
+            directFallbackGuard.reset();
+            if (!inFlightFallbackRecorders.isEmpty()) {
+                for (CodecVideoRecorder inFlight : inFlightFallbackRecorders.values()) {
+                    try {
+                        inFlight.requestStop();
+                        inFlight.release();
+                    } catch (Exception ignored) {
+                    }
+                }
+                inFlightFallbackRecorders.clear();
+            }
             for (CodecVideoRecorder codecRecorder : codecRecorders.values()) {
                 try {
                     codecRecorder.release();
@@ -2836,6 +3199,11 @@ public class MultiCameraManager {
      */
     public boolean isRecording() {
         return isRecording;
+    }
+
+    /** 是否正在后台并发准备编码器。 */
+    public boolean isPreparingRecording() {
+        return preparingRecording;
     }
 
     /** UI recreation must also wait for final frame draining and file finalization. */
@@ -2986,7 +3354,7 @@ public class MultiCameraManager {
     private boolean isPhotoReady(SingleCamera camera, long requestedAtMs) {
         return camera != null && camera.isConnected()
                 && camera.getTextureView() != null && camera.getTextureView().isAvailable()
-                && camera.getLastFrameTimestampMs() >= requestedAtMs;
+                && camera.getLastPreviewFrameTimestampMs() >= requestedAtMs;
     }
 
     /** Configured cameras may be closed intentionally while preview is disabled. */
@@ -3166,6 +3534,73 @@ public class MultiCameraManager {
         return sb.toString();
     }
 
+    public boolean hasActiveDirectCodecRecorders() {
+        for (CodecVideoRecorder recorder : codecRecorders.values()) {
+            if (recorder != null && recorder.isDirectInputActive()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean hasPendingGlConfigChange() {
+        for (CodecVideoRecorder recorder : codecRecorders.values()) {
+            if (recorder != null && recorder.isPendingGlConfigChange()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private CodecVideoRecorder buildConfiguredCodecRecorder(
+            String key,
+            SingleCamera camera,
+            AppConfig appConfig,
+            long segmentDurationMs,
+            int targetFrameRate,
+            boolean runtimeGlFallback) {
+        Size previewSize = camera.getPreviewSize();
+        if (previewSize == null) {
+            AppLog.e(TAG, "Camera " + key + " preview size not available, using fallback 1280x800");
+            previewSize = new Size(1280, 800);
+        }
+
+        final int MAX_ENCODE_SIZE = 4096;
+        ImageAdjustmentConfig adjConfig = appConfig.getImageAdjustmentConfig(key);
+        int encodeWidth = adjConfig.scaleWidth(previewSize.getWidth());
+        int encodeHeight = adjConfig.scaleHeight(previewSize.getHeight());
+        if (encodeWidth > MAX_ENCODE_SIZE || encodeHeight > MAX_ENCODE_SIZE) {
+            float widthRatio = (float) MAX_ENCODE_SIZE / encodeWidth;
+            float heightRatio = (float) MAX_ENCODE_SIZE / encodeHeight;
+            float scaleFactor = Math.min(widthRatio, heightRatio);
+            encodeWidth = ((int) (encodeWidth * scaleFactor) / 2) * 2;
+            encodeHeight = ((int) (encodeHeight * scaleFactor) / 2) * 2;
+            if (encodeWidth < 2) encodeWidth = 2;
+            if (encodeHeight < 2) encodeHeight = 2;
+            AppLog.w(TAG, "Camera " + key + " codec resolution adjusted: " +
+                    previewSize.getWidth() + "x" + previewSize.getHeight() + " -> " +
+                    encodeWidth + "x" + encodeHeight + " (max: " + MAX_ENCODE_SIZE + ")");
+        }
+
+        int bitrate = appConfig.getActualBitrate(encodeWidth, encodeHeight, targetFrameRate);
+        CodecVideoRecorder codecRecorder = new CodecVideoRecorder(
+                camera.getCameraId(),
+                encodeWidth,
+                encodeHeight
+        );
+
+        Size sourceSize = camera.getPreviewSize();
+        int srcW = sourceSize != null ? sourceSize.getWidth() : encodeWidth;
+        int srcH = sourceSize != null ? sourceSize.getHeight() : encodeHeight;
+        boolean cameraSupportsDirect = camera.isDirectCodecInputSizeSupported(encodeWidth, encodeHeight);
+        configureCodecRecorderCommon(
+                key, camera, codecRecorder, segmentDurationMs,
+                bitrate, targetFrameRate, srcW, srcH, encodeWidth, encodeHeight,
+                appConfig, adjConfig, cameraSupportsDirect, runtimeGlFallback);
+        codecRecorder.setCallback(createCodecRecordCallback(key));
+        return codecRecorder;
+    }
+
     private void configureCodecRecorderCommon(
             String key,
             SingleCamera camera,
@@ -3178,7 +3613,9 @@ public class MultiCameraManager {
             int encodeWidth,
             int encodeHeight,
             AppConfig appConfig,
-            ImageAdjustmentConfig adjConfig) {
+            ImageAdjustmentConfig adjConfig,
+            boolean cameraSupportsDirect,
+            boolean runtimeGlFallback) {
         codecRecorder.setSourceSize(sourceWidth, sourceHeight);
         codecRecorder.setTimestampProvider(segmentTimestampProvider);
         codecRecorder.setSegmentDuration(segmentDurationMs);
@@ -3193,10 +3630,17 @@ public class MultiCameraManager {
         codecRecorder.setForceH264(appConfig.isForceH264Encoding());
         codecRecorder.setImageAdjustmentConfig(adjConfig);
         codecRecorder.setWatermarkOptions(appConfig.getWatermarkOptions());
+        codecRecorder.setDirectInputEnabled(appConfig.isDirectCodecInputEnabled());
+        codecRecorder.setCameraSupportsDirectInput(cameraSupportsDirect);
+        codecRecorder.setNativeSourceFrameRate(25);
+        codecRecorder.setRuntimeGlFallback(runtimeGlFallback);
 
         AppLog.d(TAG, "Codec recording params for " + key + ": src=" +
                 sourceWidth + "x" + sourceHeight + " -> encode=" +
                 encodeWidth + "x" + encodeHeight +
-                " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate));
+                " @ " + targetFrameRate + "fps, " + AppConfig.formatBitrate(bitrate)
+                + ", directSwitch=" + appConfig.isDirectCodecInputEnabled()
+                + ", cameraDirectCap=" + cameraSupportsDirect
+                + ", runtimeGlFallback=" + runtimeGlFallback);
     }
 }

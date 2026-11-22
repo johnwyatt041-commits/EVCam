@@ -1073,7 +1073,7 @@ public class MainActivity extends AppCompatActivity implements
                 textureReadyCount--;
                 AppLog.d(TAG, "TextureView " + cameraKey + " destroyed, remaining: " + textureReadyCount);
                 if (cameraManager != null) {
-                    cameraManager.onPreviewTextureDestroyed(cameraKey);
+                    cameraManager.onPreviewTextureDestroyed(cameraKey, surface);
                 }
                 return true;
             }
@@ -4534,7 +4534,9 @@ public class MainActivity extends AppCompatActivity implements
             cameraManager.setMainPreviewEnabled(appConfig.isMainPreviewEnabled());
         }
         if (previewModeController != null) {
-            previewModeController.start();
+            boolean onRecordingSection = uiShell == null || uiShell.getCurrentRoot() == R.id.nav_recording;
+            previewModeController.start(com.kooo.evcam.ui.PreviewModeController.shouldStartSurroundHostEligible(
+                    isInBackground, onRecordingSection));
             previewModeController.syncFromPreferences();
         }
         updateSurroundLifecycleInActivity();

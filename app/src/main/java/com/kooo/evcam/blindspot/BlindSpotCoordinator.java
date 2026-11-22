@@ -145,6 +145,83 @@ public final class BlindSpotCoordinator {
                 || standalonePreviewShowing;
     }
 
+    /** 判断 AVM 避让是否处于“始终隐藏主屏（all）”模式。 */
+    public static boolean isAvmAvoidanceAllMode(
+            boolean avmAvoidanceEnabled,
+            String avmTargetActivity) {
+        return avmAvoidanceEnabled
+                && avmTargetActivity != null
+                && "all".equalsIgnoreCase(avmTargetActivity.trim());
+    }
+
+    /** 判断当前补盲配置下 AVM 避让是否真的会对任何主屏功能产生影响（纯副屏模式下无需空跑前台服务）。 */
+    public static boolean hasActiveAvmAvoidanceFeature(
+            boolean blindSpotGlobalEnabled,
+            boolean avmAvoidanceEnabled,
+            boolean mainFloatingEnabled,
+            boolean turnSignalLinkageEnabled,
+            boolean mainBlindSpotEnabled) {
+        if (!blindSpotGlobalEnabled || !avmAvoidanceEnabled) {
+            return false;
+        }
+        return mainFloatingEnabled || (turnSignalLinkageEnabled && mainBlindSpotEnabled);
+    }
+
+    /**
+     * 判断后台是否确有需要每秒轮询 UsageStatsManager（AVM 前台检测）的活跃需求。
+     * 日常既未开常驻主悬浮窗、又无进行中的转向灯信号/可见主屏窗时，停止每秒轮询以消除后台空转。
+     */
+    public static boolean shouldPollAvmUsageStats(
+            boolean blindSpotGlobalEnabled,
+            boolean avmAvoidanceEnabled,
+            String avmTargetActivity,
+            boolean mainFloatingEnabled,
+            boolean turnSignalLinkageEnabled,
+            boolean mainBlindSpotEnabled,
+            boolean hasActiveTurnSignal,
+            boolean hasVisibleMainWindow,
+            boolean selfInForeground,
+            boolean canShowMainOverlay) {
+        if (!blindSpotGlobalEnabled || !avmAvoidanceEnabled) {
+            return false;
+        }
+        if (avmTargetActivity == null || avmTargetActivity.trim().isEmpty()) {
+            return false;
+        }
+        if ("all".equalsIgnoreCase(avmTargetActivity.trim())) {
+            return false;
+        }
+        if (selfInForeground || !canShowMainOverlay) {
+            return false;
+        }
+        if (mainFloatingEnabled) {
+            return true;
+        }
+        if (turnSignalLinkageEnabled && mainBlindSpotEnabled && hasActiveTurnSignal) {
+            return true;
+        }
+        return hasVisibleMainWindow;
+    }
+
+    /**
+     * 判断是否需要预创建独立主屏转向补盲悬浮窗（左/右）。
+     * 仅副屏模式、复用常驻主悬浮窗、AVM "all" 始终隐藏模式或无主屏浮窗权限时均跳过预创建。
+     */
+    public static boolean shouldPreCreateMainBlindSpotWindows(
+            boolean blindSpotGlobalEnabled,
+            boolean turnSignalLinkageEnabled,
+            boolean mainBlindSpotEnabled,
+            boolean turnSignalReuseMainFloating,
+            boolean avmAvoidanceAllMode,
+            boolean canShowMainOverlay) {
+        return blindSpotGlobalEnabled
+                && turnSignalLinkageEnabled
+                && mainBlindSpotEnabled
+                && !turnSignalReuseMainFloating
+                && !avmAvoidanceAllMode
+                && canShowMainOverlay;
+    }
+
     public synchronized void reset() {
         activeDirection = null;
         suppressionController.reset();

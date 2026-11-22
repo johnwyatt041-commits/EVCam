@@ -204,6 +204,39 @@ public final class OverlayWindowParamsFactory {
     }
 
     /**
+     * 轻量纯 2D 悬浮按钮规格（不含 TextureView 视频流）：
+     * 有标准悬浮窗权限时优先使用 TYPE_APPLICATION_OVERLAY（2038），仅无悬浮窗权限且无障碍激活时回退 2032，
+     * 并移除 FLAG_LAYOUT_IN_SCREEN 与 FLAG_HARDWARE_ACCELERATED，降低车机退后台时的整屏闪屏风险。
+     */
+    public static WindowSpec resolveLightweightMainOverlaySpec(
+            boolean hasOverlayPermission,
+            boolean preferAccessibilityOverlay,
+            boolean accessibilityServiceActive,
+            int sdkInt,
+            boolean touchable) {
+        int windowType;
+        boolean usingAccessibility = false;
+        if (sdkInt >= Build.VERSION_CODES.O) {
+            if (!hasOverlayPermission && preferAccessibilityOverlay && accessibilityServiceActive) {
+                windowType = TYPE_ACCESSIBILITY_OVERLAY;
+                usingAccessibility = true;
+            } else {
+                windowType = TYPE_APPLICATION_OVERLAY;
+            }
+        } else {
+            windowType = TYPE_PHONE_LEGACY;
+        }
+
+        int flags = FLAG_NOT_FOCUSABLE
+                | FLAG_NOT_TOUCH_MODAL
+                | FLAG_ALT_FOCUSABLE_IM;
+        if (!touchable) {
+            flags |= FLAG_NOT_TOUCHABLE;
+        }
+        return new WindowSpec(windowType, flags, usingAccessibility);
+    }
+
+    /**
      * 副屏（EVCC）专用窗口参数规格：必须使用 DisplayContext 的 TYPE_APPLICATION_OVERLAY，禁止 2032。
      */
     public static WindowSpec resolveSecondaryDisplayOverlaySpec(int sdkInt) {
@@ -240,6 +273,17 @@ public final class OverlayWindowParamsFactory {
         );
     }
 
+    public static WindowSpec resolveLightweightMainOverlaySpec(Context context, boolean touchable) {
+        boolean hasOverlayPermission = context != null && WakeUpHelper.hasOverlayPermission(context);
+        return resolveLightweightMainOverlaySpec(
+                hasOverlayPermission,
+                shouldUseAccessibilityOverlay(context),
+                KeepAliveAccessibilityService.isAccessibilityServiceActive(),
+                Build.VERSION.SDK_INT,
+                touchable
+        );
+    }
+
     public static WindowManager.LayoutParams createMainParams(
             Context context,
             int width,
@@ -248,6 +292,26 @@ public final class OverlayWindowParamsFactory {
             int y,
             boolean touchable) {
         WindowSpec spec = resolveMainOverlaySpec(context, touchable);
+        return buildLayoutParams(spec, width, height, x, y);
+    }
+
+    public static WindowManager.LayoutParams createLightweightMainParams(
+            Context context,
+            int width,
+            int height,
+            int x,
+            int y,
+            boolean touchable) {
+        WindowSpec spec = resolveLightweightMainOverlaySpec(context, touchable);
+        return buildLayoutParams(spec, width, height, x, y);
+    }
+
+    private static WindowManager.LayoutParams buildLayoutParams(
+            WindowSpec spec,
+            int width,
+            int height,
+            int x,
+            int y) {
         WindowManager.LayoutParams params = new WindowManager.LayoutParams(
                 width,
                 height,
@@ -267,17 +331,7 @@ public final class OverlayWindowParamsFactory {
             int x,
             int y) {
         WindowSpec spec = resolveSecondaryDisplayOverlaySpec(Build.VERSION.SDK_INT);
-        WindowManager.LayoutParams params = new WindowManager.LayoutParams(
-                width,
-                height,
-                spec.windowType,
-                spec.flags,
-                PixelFormat.TRANSLUCENT
-        );
-        params.gravity = Gravity.TOP | Gravity.START;
-        params.x = x;
-        params.y = y;
-        return params;
+        return buildLayoutParams(spec, width, height, x, y);
     }
 
     /**
@@ -294,6 +348,32 @@ public final class OverlayWindowParamsFactory {
             return null;
         }
         WindowSpec desiredSpec = resolveMainOverlaySpec(context, (params.flags & FLAG_NOT_TOUCHABLE) == 0);
+        return attachWithSpec(context, fallbackWm, view, params, desiredSpec, onDetachedFallback);
+    }
+
+    /**
+     * 安全添加轻量纯 2D 主屏悬浮窗：不升级为 2032/硬件加速全屏层，减少车机 HWC 合成抖动。
+     */
+    public static AttachedOverlay attachLightweightMainOverlay(
+            Context context,
+            WindowManager fallbackWm,
+            View view,
+            WindowManager.LayoutParams params,
+            Runnable onDetachedFallback) {
+        if (context == null || fallbackWm == null || view == null || params == null) {
+            return null;
+        }
+        WindowSpec desiredSpec = resolveLightweightMainOverlaySpec(context, (params.flags & FLAG_NOT_TOUCHABLE) == 0);
+        return attachWithSpec(context, fallbackWm, view, params, desiredSpec, onDetachedFallback);
+    }
+
+    private static AttachedOverlay attachWithSpec(
+            Context context,
+            WindowManager fallbackWm,
+            View view,
+            WindowManager.LayoutParams params,
+            WindowSpec desiredSpec,
+            Runnable onDetachedFallback) {
         params.type = desiredSpec.windowType;
         params.flags = desiredSpec.flags;
         if (isAccessibilityOverlayParams(params)) {

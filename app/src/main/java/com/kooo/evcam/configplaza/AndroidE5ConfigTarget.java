@@ -250,6 +250,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
         Map<String, Object> m = new LinkedHashMap<>();
         m.put("recording_mode", appConfig.getRecordingMode());
         m.put("force_h264_encoding", appConfig.isForceH264Encoding());
+        m.put("direct_codec_input_enabled", appConfig.isDirectCodecInputEnabled());
         m.put("target_resolution", appConfig.getTargetResolution());
         m.put("bitrate_level", appConfig.getBitrateLevel());
         m.put("framerate_level", appConfig.getFramerateLevel());
@@ -301,6 +302,7 @@ public final class AndroidE5ConfigTarget implements E5ConfigApplier.ConfigTarget
     private void writeRecording(@NonNull Map<String, Object> v) {
         appConfig.setRecordingMode(str(v, "recording_mode", AppConfig.RECORDING_MODE_AUTO));
         appConfig.setForceH264Encoding(bool(v, "force_h264_encoding", false));
+        appConfig.setDirectCodecInputEnabled(bool(v, "direct_codec_input_enabled", true));
         appConfig.setTargetResolution(str(v, "target_resolution", AppConfig.RESOLUTION_DEFAULT));
         appConfig.setBitrateLevel(str(v, "bitrate_level", AppConfig.BITRATE_MEDIUM));
         appConfig.setFramerateLevel(str(v, "framerate_level", AppConfig.FRAMERATE_STANDARD));

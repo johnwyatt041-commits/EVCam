@@ -213,6 +213,7 @@ public class AppConfig implements CameraMirrorPolicy.Store {
 
     // 视频编码器配置
     private static final String KEY_FORCE_H264_ENCODING = "force_h264_encoding";  // 强制使用 H.264 编码器（关闭默认使用 H.265/HEVC）
+    private static final String KEY_DIRECT_CODEC_INPUT_ENABLED = "direct_codec_input_enabled";  // 无水印无调色直连编码跳过 GL 开关
     
     // 录制摄像头选择配置
     private static final String KEY_RECORDING_CAMERA_FRONT_ENABLED = "recording_camera_front_enabled";  // 前摄像头参与录制
@@ -2194,6 +2195,22 @@ public class AppConfig implements CameraMirrorPolicy.Store {
      */
     public boolean isForceH264Encoding() {
         return prefs.getBoolean(KEY_FORCE_H264_ENCODING, false);
+    }
+
+    /**
+     * 设置是否启用无水印无调色直连编码（跳过 GL）
+     * @param enabled true 表示满足条件时直接由 Camera2 写入 MediaCodec 输入 Surface；false 表示强制回退 GL 路径
+     */
+    public void setDirectCodecInputEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_DIRECT_CODEC_INPUT_ENABLED, enabled).apply();
+        AppLog.d(TAG, "无水印直连编码（跳过 GL）: " + (enabled ? "启用" : "禁用（强制 GL）"));
+    }
+
+    /**
+     * 获取是否启用无水印无调色直连编码（默认 true）
+     */
+    public boolean isDirectCodecInputEnabled() {
+        return prefs.getBoolean(KEY_DIRECT_CODEC_INPUT_ENABLED, true);
     }
 
     // ==================== 录制摄像头选择配置相关方法 ====================

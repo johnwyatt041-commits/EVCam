@@ -229,10 +229,14 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     }
 
     public void start() {
-        surroundHostEligible = true;
+        start(true);
+    }
+
+    public void start(boolean hostEligible) {
+        surroundHostEligible = hostEligible;
         applyStateToLayoutAndShell();
         syncModeDSideSubscriptions();
-        applyVisibilityMaskToCameras(true);
+        applyVisibilityMaskToCameras(hostEligible);
         refreshShortcutsOverlay();
     }
 
@@ -362,7 +366,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
                 ? PreviewLayoutModel.LEFT : PreviewLayoutModel.RIGHT;
         applyStateToLayoutAndShell();
         applyVisibilityMaskToCameras(false);
-        callbacks.onRebindVisibleTextureViews();
+        if (surroundHostEligible) {
+            callbacks.onRebindVisibleTextureViews();
+        }
     }
 
     /** 在 Mode D 右侧画面内循环切换联动方式：随方向盘 -> 随转向灯 -> 手动切换 -> 随方向盘。 */
@@ -565,7 +571,9 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         modeDRightSideIndex = nextSide;
         applyStateToLayoutAndShell();
         applyVisibilityMaskToCameras(false);
-        callbacks.onRebindVisibleTextureViews();
+        if (surroundHostEligible) {
+            callbacks.onRebindVisibleTextureViews();
+        }
         AppLog.d(TAG, "Mode D side switched (" + reason + "): side="
                 + (nextSide == PreviewLayoutModel.RIGHT ? "right" : "left"));
     }
@@ -914,6 +922,11 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
                                                    boolean hostEligible,
                                                    boolean mainPreviewEnabled) {
         return mode == PreviewMode.MODE_A && hostEligible && mainPreviewEnabled;
+    }
+
+    public static boolean shouldStartSurroundHostEligible(boolean isInBackground,
+                                                        boolean onRecordingSection) {
+        return !isInBackground && onRecordingSection;
     }
 
     public static boolean shouldShowModeAPreviewDisabledGuide(@Nullable PreviewMode mode,

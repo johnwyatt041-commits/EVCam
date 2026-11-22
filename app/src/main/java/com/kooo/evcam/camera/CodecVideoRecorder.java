@@ -69,8 +69,22 @@ public class CodecVideoRecorder {
     
     private static final int DRAIN_BATCH_SIZE = 8;
     private static final long EOS_DRAIN_TIMEOUT_MS = 1500;
+    private static final long DIRECT_PRE_START_DRAIN_INTERVAL_MS = 30L;
+    private static final long DIRECT_NO_OUTPUT_STALL_MS = 5000L;
     private final MuxerTimestampClock muxerClock = new MuxerTimestampClock();
     private long inputFrameCallbacks = 0;
+
+    // M2: 无水印无调色直连编码跳过 GL 路径状态
+    private volatile boolean directInputEnabled = false;
+    private volatile boolean forceGlPipeline = false;
+    private volatile boolean runtimeGlFallback = false;
+    private volatile boolean cameraSupportsDirectInput = true;
+    private volatile int nativeSourceFrameRate = 25;
+    private volatile DirectEncodingPolicy.PathMode activePathMode = DirectEncodingPolicy.PathMode.GL;
+    private volatile DirectEncodingPolicy.FallbackReason pathFallbackReason = DirectEncodingPolicy.FallbackReason.SWITCH_DISABLED;
+    private volatile boolean pendingGlConfigChange = false;
+    private volatile boolean awaitingInitialKeyFrame = false;
+    private long directSkippedPreKeyFrames = 0;
 
     private final String cameraId;
     private final int width;
@@ -105,9 +119,19 @@ public class CodecVideoRecorder {
     // 状态
     private final AtomicBoolean isRecording = new AtomicBoolean(false);  // 使用 AtomicBoolean 确保线程安全
     private final AtomicBoolean drainWakeupPending = new AtomicBoolean(false);
+    private final Object prepareReleaseLock = new Object();
+    private final AtomicBoolean releaseFinalized = new AtomicBoolean(false);
     private volatile boolean isReleased = false;
     private volatile boolean stopRequested;
+    private volatile String lastPrepareErrorMessage;
     private int consecutiveEmptyDrains = 0;
+
+    private static final class PrepareCancelledException extends RuntimeException {
+    }
+
+    public String getLastPrepareErrorMessage() {
+        return lastPrepareErrorMessage;
+    }
 
     static long computeNextDrainDelayMs(boolean gotOutput, int inFlightFrames, int emptyDrainCount) {
         if (gotOutput) {
@@ -117,6 +141,49 @@ public class CodecVideoRecorder {
             return emptyDrainCount <= 2 ? 15L : 30L;
         }
         return 120L;
+    }
+
+    static long computeNextDrainDelayMs(
+            boolean gotOutput,
+            int inFlightFrames,
+            int emptyDrainCount,
+            boolean directInput) {
+        if (!directInput) {
+            return computeNextDrainDelayMs(gotOutput, inFlightFrames, emptyDrainCount);
+        }
+        if (gotOutput) {
+            return 10L;
+        }
+        if (emptyDrainCount <= 2) {
+            return 20L;
+        }
+        if (emptyDrainCount <= 6) {
+            return 40L;
+        }
+        return 80L;
+    }
+
+    private final Runnable preStartDrain = () -> {
+        synchronized (codecLock) {
+            if (isReleased || stopRequested || isRecording.get()
+                    || !isDirectInputActive() || !this.encoderHealthy || encoder == null) {
+                return;
+            }
+            drainPreStartEncoderLocked();
+        }
+        Handler handler = drainHandler;
+        if (!isReleased && !stopRequested && !isRecording.get()
+                && isDirectInputActive() && this.encoderHealthy && handler != null) {
+            handler.postDelayed(this.preStartDrain, DIRECT_PRE_START_DRAIN_INTERVAL_MS);
+        }
+    };
+
+    private void schedulePreStartDrain() {
+        Handler handler = drainHandler;
+        if (handler != null && isDirectInputActive() && !isReleased && !stopRequested && !isRecording.get()) {
+            handler.removeCallbacks(preStartDrain);
+            handler.post(preStartDrain);
+        }
     }
 
     private final Runnable delayedDrain = () -> {
@@ -132,7 +199,11 @@ public class CodecVideoRecorder {
             consecutiveEmptyDrains++;
         }
         if (!isReleased && !stopRequested && isRecording.get() && drainHandler != null) {
-            long nextDelay = computeNextDrainDelayMs(gotOutput, this.framesWithoutEncoderOutput, this.consecutiveEmptyDrains);
+            long nextDelay = computeNextDrainDelayMs(
+                    gotOutput,
+                    this.framesWithoutEncoderOutput,
+                    this.consecutiveEmptyDrains,
+                    isDirectInputActive());
             drainHandler.postDelayed(this.delayedDrain, nextDelay);
         }
     };
@@ -224,6 +295,81 @@ public class CodecVideoRecorder {
         }
     }
 
+    public void setDirectInputEnabled(boolean enabled) {
+        this.directInputEnabled = enabled;
+    }
+
+    public boolean isDirectInputEnabled() {
+        return directInputEnabled;
+    }
+
+    public void setForceGlPipeline(boolean force) {
+        this.forceGlPipeline = force;
+    }
+
+    public void setRuntimeGlFallback(boolean fallback) {
+        this.runtimeGlFallback = fallback;
+    }
+
+    public void setCameraSupportsDirectInput(boolean supported) {
+        this.cameraSupportsDirectInput = supported;
+    }
+
+    public void setNativeSourceFrameRate(int fps) {
+        this.nativeSourceFrameRate = Math.max(0, fps);
+    }
+
+    public boolean isDirectInputActive() {
+        return activePathMode == DirectEncodingPolicy.PathMode.DIRECT;
+    }
+
+    public DirectEncodingPolicy.PathMode getActivePathMode() {
+        return activePathMode;
+    }
+
+    public DirectEncodingPolicy.FallbackReason getPathFallbackReason() {
+        return pathFallbackReason;
+    }
+
+    public boolean isPendingGlConfigChange() {
+        return pendingGlConfigChange;
+    }
+
+    DirectEncodingPolicy.Decision evaluateDirectEncodingDecision(boolean allowDirect) {
+        int effectiveTargetFps = blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate;
+        return DirectEncodingPolicy.evaluate(
+                allowDirect && directInputEnabled,
+                forceGlPipeline,
+                runtimeGlFallback,
+                watermarkEnabled,
+                vehicleStatusWatermarkEnabled,
+                watermarkOptions,
+                imageAdjustmentConfig,
+                sourceWidth,
+                sourceHeight,
+                width,
+                height,
+                cameraSupportsDirectInput,
+                blindSpotOptimizeMode,
+                effectiveTargetFps,
+                nativeSourceFrameRate);
+    }
+
+    private void evaluateDynamicConfigChangeIfDirect(String source) {
+        if (activePathMode != DirectEncodingPolicy.PathMode.DIRECT) {
+            pendingGlConfigChange = false;
+            return;
+        }
+        DirectEncodingPolicy.Decision next = evaluateDirectEncodingDecision(true);
+        boolean needsGl = !next.isDirect();
+        pendingGlConfigChange = needsGl;
+        if (needsGl && isRecording.get() && !isReleased && !stopRequested) {
+            AppLog.i(TAG, "Camera " + cameraId + " dynamic " + source
+                    + " change requires GL (" + next.reason.code
+                    + "); keeping active direct CaptureSession intact, will apply on next recording");
+        }
+    }
+
     public void setImageAdjustmentConfig(ImageAdjustmentConfig config) {
         this.imageAdjustmentConfig = config != null ? config : ImageAdjustmentConfig.disabled();
         Handler handler = encoderHandler;
@@ -235,6 +381,7 @@ public class CodecVideoRecorder {
                 }
             });
         }
+        evaluateDynamicConfigChangeIfDirect("image_adjustment");
     }
 
     public void setWatermarkOptions(VehicleStatusWatermark.WatermarkOptions options) {
@@ -242,6 +389,7 @@ public class CodecVideoRecorder {
         this.watermarkEnabled = options != null && options.showDateTime;
         this.vehicleStatusWatermarkEnabled = options != null && options.needsVehicleSource();
         updateWatermarkOnEncoder();
+        evaluateDynamicConfigChangeIfDirect("watermark_options");
     }
 
     public void setVehicleStatusWatermarkEnabled(boolean enabled) {
@@ -259,6 +407,7 @@ public class CodecVideoRecorder {
                     current.style);
         }
         updateWatermarkOnEncoder();
+        evaluateDynamicConfigChangeIfDirect("vehicle_status_watermark");
     }
 
     private void updateVehicleStatusWatermark() {
@@ -311,6 +460,7 @@ public class CodecVideoRecorder {
         if (eglEncoder != null) {
             eglEncoder.setWatermarkEnabled(enabled);
         }
+        evaluateDynamicConfigChangeIfDirect("timestamp_watermark");
         AppLog.d(TAG, "Camera " + cameraId + " Watermark " + (enabled ? "enabled" : "disabled"));
     }
 
@@ -422,13 +572,7 @@ public class CodecVideoRecorder {
     }
 
     /**
-     * 准备录制
-     * 
-     * 警告：此方法包含阻塞操作（CountDownLatch.await），不建议在主线程调用
-     * 如果必须在主线程调用，可能导致 ANR。建议在后台线程调用或使用 prepareRecordingAsync()
-     * 
-     * @param filePath 输出文件路径
-     * @return 用于 Camera 输出的 SurfaceTexture
+     * 准备录制（兼容旧接口，固定走 GL 路径并返回 SurfaceTexture）
      */
     public SurfaceTexture prepareRecording(String filePath) {
         // 检查是否在主线程调用（可能导致 ANR）
@@ -436,17 +580,51 @@ public class CodecVideoRecorder {
             AppLog.w(TAG, "Camera " + cameraId + " WARNING: prepareRecording() called on MAIN THREAD! " +
                     "This may cause ANR due to blocking operations. Consider using prepareRecordingAsync().");
         }
-        
-        if (isRecording.get()) {
-            AppLog.w(TAG, "Camera " + cameraId + " is already recording");
-            return inputSurfaceTexture;
+        Surface prepared = prepareRecordingSurfaceInternal(filePath, true, false);
+        return prepared != null ? inputSurfaceTexture : null;
+    }
+
+    /**
+     * 准备录制输出 Surface（M2：满足条件时返回直连 MediaCodec 输入 Surface 跳过 GL；否则回退 GL SurfaceTexture）
+     */
+    public Surface prepareRecordingSurface(String filePath) {
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            AppLog.w(TAG, "Camera " + cameraId + " WARNING: prepareRecordingSurface() called on MAIN THREAD! " +
+                    "This may cause ANR due to blocking operations. Consider using prepareRecordingSurfaceAsync().");
+        }
+        return prepareRecordingSurfaceInternal(filePath, true, true);
+    }
+
+    private Surface prepareRecordingSurfaceInternal(
+            String filePath,
+            boolean notifyCallbackOnError,
+            boolean allowDirect) {
+        synchronized (prepareReleaseLock) {
+            if (stopRequested || isReleased) {
+                lastPrepareErrorMessage = "Cancelled";
+                return null;
+            }
+            if (isRecording.get()) {
+                AppLog.w(TAG, "Camera " + cameraId + " is already recording");
+                return getRecordSurface();
+            }
         }
 
-        AppLog.d(TAG, "Camera " + cameraId + " Preparing codec recording: " + width + "x" + height);
+        final DirectEncodingPolicy.Decision decision = evaluateDirectEncodingDecision(allowDirect);
+        this.activePathMode = decision.mode;
+        this.pathFallbackReason = decision.reason;
+        this.pendingGlConfigChange = false;
+        this.awaitingInitialKeyFrame = false;
+        this.directSkippedPreKeyFrames = 0;
 
-        // 保存录制参数
+        AppLog.i(TAG, "Camera " + cameraId + " Preparing codec recording: " + width + "x" + height
+                + ", src=" + sourceWidth + "x" + sourceHeight
+                + ", path=" + decision.mode.logTag
+                + ", reason=" + decision.reason.code);
+
+        // 保存录制参数（切勿无条件清除已置位的 stopRequested，避免与中途取消竞态）
         this.currentFilePath = filePath;
-        this.stopRequested = false;
+        this.lastPrepareErrorMessage = null;
         this.segmentIndex = 0;
         this.recordedFrameCount = 0;
         this.inputFrameCallbacks = 0;
@@ -477,9 +655,61 @@ public class CodecVideoRecorder {
             this.cameraPosition = "unknown";
         }
 
+        HandlerThread localEncoderThread = null;
+        Handler localEncoderHandler = null;
+        HandlerThread localDrainThread = null;
+        Handler localDrainHandler = null;
         try {
-            // 创建编码线程
-            encoderThread = new HandlerThread("Encoder-" + cameraId) {
+            if (stopRequested || isReleased) {
+                throw new PrepareCancelledException();
+            }
+
+            // 创建 MediaCodec 编码器
+            createEncoder();
+            if (stopRequested || isReleased) {
+                throw new PrepareCancelledException();
+            }
+
+            // 创建 MediaMuxer
+            createMuxer(filePath);
+            if (stopRequested || isReleased) {
+                throw new PrepareCancelledException();
+            }
+
+            final Surface encInputSurface = encoderInputSurface;
+            if (encInputSurface == null || !encInputSurface.isValid()) {
+                throw new IllegalStateException("Encoder input surface is invalid");
+            }
+
+            localDrainThread = new HandlerThread("CodecDrain-" + cameraId);
+            localDrainThread.start();
+            localDrainHandler = new Handler(localDrainThread.getLooper());
+
+            if (decision.isDirect()) {
+                boolean cancelled;
+                synchronized (prepareReleaseLock) {
+                    cancelled = stopRequested || isReleased;
+                    if (!cancelled) {
+                        encoderThread = null;
+                        encoderHandler = null;
+                        drainThread = localDrainThread;
+                        drainHandler = localDrainHandler;
+                        eglEncoder = null;
+                        inputSurfaceTexture = null;
+                        textureId = 0;
+                    }
+                }
+                if (cancelled) {
+                    releaseLocalGlAndThreads(null, null, localDrainThread, null, null);
+                    throw new PrepareCancelledException();
+                }
+                schedulePreStartDrain();
+                AppLog.i(TAG, "Camera " + cameraId + " Direct codec recording prepared (GL skipped), surface=" + encInputSurface);
+                return encInputSurface;
+            }
+
+            // 创建编码线程（先以局部引用构建，完成后在锁内原子发布，防与并发 release() 竞争）
+            localEncoderThread = new HandlerThread("Encoder-" + cameraId) {
                 @Override
                 protected void onLooperPrepared() {
                     // Encoding is time-sensitive; do not throttle it as background file I/O.
@@ -487,39 +717,36 @@ public class CodecVideoRecorder {
                     AppLog.d(TAG, "Camera " + cameraId + " Encoding thread uses normal priority");
                 }
             };
-            encoderThread.start();
-            encoderHandler = new Handler(encoderThread.getLooper());
-            drainThread = new HandlerThread("CodecDrain-" + cameraId);
-            drainThread.start();
-            drainHandler = new Handler(drainThread.getLooper());
-
-            // 创建 MediaCodec 编码器
-            createEncoder();
-
-            // 创建 MediaMuxer
-            createMuxer(filePath);
+            localEncoderThread.start();
+            localEncoderHandler = new Handler(localEncoderThread.getLooper());
 
             // 在编码线程上初始化 EGL 和 SurfaceTexture（重要：必须在同一线程上）
             // 使用 CountDownLatch 等待初始化完成
             final java.util.concurrent.CountDownLatch latch = new java.util.concurrent.CountDownLatch(1);
             final int[] resultTextureId = {0};
             final Exception[] initException = {null};
+            final EglSurfaceEncoder[] holderEgl = {null};
+            final SurfaceTexture[] holderSt = {null};
+            final Handler targetEncoderHandler = localEncoderHandler;
 
-            encoderHandler.post(() -> {
+            localEncoderHandler.post(() -> {
                 try {
+                    if (stopRequested || isReleased) {
+                        throw new PrepareCancelledException();
+                    }
                     // 创建 EGL 渲染器（在编码线程上）
-                    eglEncoder = new EglSurfaceEncoder(cameraId, width, height);
-                    eglEncoder.setTargetFrameRate(blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate);
-                    resultTextureId[0] = eglEncoder.initialize(encoderInputSurface);
-                    textureId = resultTextureId[0];
+                    EglSurfaceEncoder localEgl = new EglSurfaceEncoder(cameraId, width, height);
+                    localEgl.setTargetFrameRate(blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate);
+                    int texId = localEgl.initialize(encInputSurface);
+                    resultTextureId[0] = texId;
 
                     // 创建 SurfaceTexture 供 Camera 输出（在编码线程上，绑定到 EGL context）
-                    inputSurfaceTexture = new SurfaceTexture(textureId);
-                    inputSurfaceTexture.setDefaultBufferSize(sourceWidth, sourceHeight);
+                    SurfaceTexture localSt = new SurfaceTexture(texId);
+                    localSt.setDefaultBufferSize(sourceWidth, sourceHeight);
 
                     // 设置帧可用回调（在编码线程上）
                     // 直接在回调中处理帧，避免 Handler 死锁
-                    inputSurfaceTexture.setOnFrameAvailableListener(surfaceTexture -> {
+                    localSt.setOnFrameAvailableListener(surfaceTexture -> {
                         if (isReleased) return;
                         if (stopRequested || !isRecording.get() || !encoderHealthy) {
                             if (eglEncoder != null) eglEncoder.consumeFrame();
@@ -540,26 +767,30 @@ public class CodecVideoRecorder {
                             AppLog.e(TAG, "Camera " + cameraId + " Error processing frame", e);
                             encoderHealthy = false;
                         }
-                    }, encoderHandler);
+                    }, targetEncoderHandler);
 
                     // 设置 EGL 渲染器的输入
-                    eglEncoder.setInputSurfaceTexture(inputSurfaceTexture);
-                    eglEncoder.setImageAdjustmentConfig(imageAdjustmentConfig);
+                    localEgl.setInputSurfaceTexture(localSt);
+                    localEgl.setImageAdjustmentConfig(imageAdjustmentConfig);
 
                     // 设置水印（优先使用统一四模块水印配置，兼容旧接口）
                     VehicleStatusWatermark.WatermarkOptions opts = watermarkOptions;
                     if (opts != null) {
                         if (opts.hasAnyEnabled() && isRecording.get()) {
-                            eglEncoder.setWatermarkOptions(opts);
+                            localEgl.setWatermarkOptions(opts);
                         }
                     } else if (watermarkEnabled) {
-                        eglEncoder.setWatermarkEnabled(true);
+                        localEgl.setWatermarkEnabled(true);
                     }
 
-                    AppLog.d(TAG, "Camera " + cameraId + " EGL/SurfaceTexture initialized on encoder thread, textureId=" + textureId + ", watermark=" + watermarkEnabled);
+                    holderEgl[0] = localEgl;
+                    holderSt[0] = localSt;
+                    AppLog.d(TAG, "Camera " + cameraId + " EGL/SurfaceTexture initialized on encoder thread, textureId=" + texId + ", watermark=" + watermarkEnabled);
 
                 } catch (Exception e) {
-                    AppLog.e(TAG, "Camera " + cameraId + " Failed to initialize EGL on encoder thread", e);
+                    if (!(e instanceof PrepareCancelledException)) {
+                        AppLog.e(TAG, "Camera " + cameraId + " Failed to initialize EGL on encoder thread", e);
+                    }
                     initException[0] = e;
                 } finally {
                     latch.countDown();
@@ -576,17 +807,98 @@ public class CodecVideoRecorder {
                 throw initException[0];
             }
 
+            boolean cancelled;
+            synchronized (prepareReleaseLock) {
+                cancelled = stopRequested || isReleased;
+                if (!cancelled) {
+                    encoderThread = localEncoderThread;
+                    encoderHandler = localEncoderHandler;
+                    drainThread = localDrainThread;
+                    drainHandler = localDrainHandler;
+                    eglEncoder = holderEgl[0];
+                    inputSurfaceTexture = holderSt[0];
+                    textureId = resultTextureId[0];
+                }
+            }
+            if (cancelled) {
+                releaseLocalGlAndThreads(localEncoderHandler, localEncoderThread, localDrainThread, holderEgl[0], holderSt[0]);
+                throw new PrepareCancelledException();
+            }
+
             AppLog.d(TAG, "Camera " + cameraId + " Codec recording prepared, textureId=" + textureId);
+            return getRecordSurface();
 
-            return inputSurfaceTexture;
-
+        } catch (PrepareCancelledException ignored) {
+            releaseLocalGlAndThreads(localEncoderHandler, localEncoderThread, localDrainThread, null, null);
+            lastPrepareErrorMessage = "Cancelled";
+            isReleased = true;
+            stopRequested = true;
+            cleanupAllocatedResources();
+            return null;
         } catch (Exception e) {
+            releaseLocalGlAndThreads(localEncoderHandler, localEncoderThread, localDrainThread, null, null);
+            String detail = RecordingStorageAccess.describeThrowable(e);
+            if (detail == null || detail.isEmpty()) {
+                detail = e.getMessage();
+            }
+            if (detail == null || detail.isEmpty()) {
+                detail = e.getClass().getSimpleName();
+            }
+            lastPrepareErrorMessage = detail;
             AppLog.e(TAG, "Camera " + cameraId + " Failed to prepare codec recording", e);
-            release();
-            if (callback != null) {
-                callback.onRecordError(cameraId, e.getMessage());
+            isReleased = true;
+            stopRequested = true;
+            cleanupAllocatedResources();
+            if (notifyCallbackOnError && callback != null) {
+                callback.onRecordError(cameraId, detail);
             }
             return null;
+        }
+    }
+
+    private void releaseLocalGlAndThreads(
+            Handler localEncoderHandler,
+            HandlerThread localEncoderThread,
+            HandlerThread localDrainThread,
+            EglSurfaceEncoder localEgl,
+            SurfaceTexture localSt) {
+        if (localEgl != null && localEncoderHandler != null && localEncoderHandler != encoderHandler) {
+            final java.util.concurrent.CountDownLatch glLatch = new java.util.concurrent.CountDownLatch(1);
+            Runnable task = () -> {
+                try {
+                    localEgl.release();
+                } finally {
+                    glLatch.countDown();
+                }
+            };
+            if (Looper.myLooper() == localEncoderHandler.getLooper()) {
+                task.run();
+            } else if (localEncoderHandler.post(task)) {
+                try {
+                    glLatch.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }
+        if (localSt != null && localSt != inputSurfaceTexture) {
+            localSt.release();
+        }
+        if (localDrainThread != null && localDrainThread != drainThread) {
+            localDrainThread.quitSafely();
+            try {
+                localDrainThread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+        if (localEncoderThread != null && localEncoderThread != encoderThread) {
+            localEncoderThread.quitSafely();
+            try {
+                localEncoderThread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
         }
     }
     
@@ -602,36 +914,110 @@ public class CodecVideoRecorder {
          */
         void onPrepareComplete(boolean success, SurfaceTexture surfaceTexture, String errorMessage);
     }
-    
+
     /**
-     * 异步准备录制（推荐使用）
-     * 
-     * 此方法在后台线程执行准备操作，完成后在主线程回调
-     * 避免在主线程执行阻塞操作导致 ANR
-     * 
-     * @param filePath 输出文件路径
-     * @param callback 准备完成回调
+     * 准备录制输出 Surface 回调接口（兼容 GL 与直连输入双路径）
+     */
+    public interface PrepareSurfaceCallback {
+        void onPrepareComplete(boolean success, Surface recordSurface, boolean directPath, String errorMessage);
+    }
+
+    /**
+     * 异步准备录制（兼容旧接口，固定走 GL 路径）
      */
     public void prepareRecordingAsync(String filePath, PrepareCallback callback) {
+        final Handler main = new Handler(Looper.getMainLooper());
+        prepareRecordingAsync(filePath, main::post, callback);
+    }
+
+    void prepareRecordingAsync(
+            String filePath,
+            java.util.concurrent.Executor callbackExecutor,
+            PrepareCallback callback) {
+        final java.util.concurrent.Executor executor = callbackExecutor != null
+                ? callbackExecutor
+                : new Handler(Looper.getMainLooper())::post;
         new Thread(() -> {
+            SurfaceTexture result = null;
+            String error = null;
+            boolean success = false;
             try {
-                SurfaceTexture result = prepareRecording(filePath);
-                if (callback != null) {
-                    // 在主线程回调
-                    new Handler(Looper.getMainLooper()).post(() -> {
-                        if (result != null) {
-                            callback.onPrepareComplete(true, result, null);
-                        } else {
-                            callback.onPrepareComplete(false, null, "Preparation failed");
-                        }
-                    });
+                Surface prepared = prepareRecordingSurfaceInternal(filePath, false, false);
+                if (stopRequested || isReleased) {
+                    if (prepared != null) {
+                        release();
+                    }
+                    result = null;
+                    error = "Cancelled";
+                } else if (prepared != null && inputSurfaceTexture != null) {
+                    result = inputSurfaceTexture;
+                    success = true;
+                } else {
+                    error = (lastPrepareErrorMessage != null && !lastPrepareErrorMessage.isEmpty())
+                            ? lastPrepareErrorMessage
+                            : "Preparation failed";
                 }
             } catch (Exception e) {
                 AppLog.e(TAG, "Camera " + cameraId + " prepareRecordingAsync failed", e);
-                if (callback != null) {
-                    new Handler(Looper.getMainLooper()).post(() -> 
-                        callback.onPrepareComplete(false, null, e.getMessage()));
+                String detail = RecordingStorageAccess.describeThrowable(e);
+                error = (detail != null && !detail.isEmpty()) ? detail : e.getMessage();
+            }
+            if (callback != null) {
+                final boolean finalSuccess = success;
+                final SurfaceTexture finalResult = result;
+                final String finalError = error;
+                executor.execute(() -> callback.onPrepareComplete(finalSuccess, finalResult, finalError));
+            }
+        }, "CodecRecorderPrepare-" + cameraId).start();
+    }
+
+    /**
+     * 异步准备录制输出 Surface（支持无水印无调色直连编码跳过 GL）
+     */
+    public void prepareRecordingSurfaceAsync(String filePath, PrepareSurfaceCallback callback) {
+        final Handler main = new Handler(Looper.getMainLooper());
+        prepareRecordingSurfaceAsync(filePath, main::post, callback);
+    }
+
+    void prepareRecordingSurfaceAsync(
+            String filePath,
+            java.util.concurrent.Executor callbackExecutor,
+            PrepareSurfaceCallback callback) {
+        final java.util.concurrent.Executor executor = callbackExecutor != null
+                ? callbackExecutor
+                : new Handler(Looper.getMainLooper())::post;
+        new Thread(() -> {
+            Surface result = null;
+            String error = null;
+            boolean success = false;
+            boolean directPath = false;
+            try {
+                result = prepareRecordingSurfaceInternal(filePath, false, true);
+                if (stopRequested || isReleased) {
+                    if (result != null) {
+                        release();
+                        result = null;
+                    }
+                    error = "Cancelled";
+                } else if (result != null && result.isValid()) {
+                    success = true;
+                    directPath = isDirectInputActive();
+                } else {
+                    error = (lastPrepareErrorMessage != null && !lastPrepareErrorMessage.isEmpty())
+                            ? lastPrepareErrorMessage
+                            : "Preparation failed";
                 }
+            } catch (Exception e) {
+                AppLog.e(TAG, "Camera " + cameraId + " prepareRecordingSurfaceAsync failed", e);
+                String detail = RecordingStorageAccess.describeThrowable(e);
+                error = (detail != null && !detail.isEmpty()) ? detail : e.getMessage();
+            }
+            if (callback != null) {
+                final boolean finalSuccess = success;
+                final Surface finalResult = result;
+                final boolean finalDirect = directPath;
+                final String finalError = error;
+                executor.execute(() -> callback.onPrepareComplete(finalSuccess, finalResult, finalDirect, finalError));
             }
         }, "CodecRecorderPrepare-" + cameraId).start();
     }
@@ -641,8 +1027,9 @@ public class CodecVideoRecorder {
      */
     public boolean startRecording() {
         if (stopRequested || isReleased) return false;
-        if (encoder == null || eglEncoder == null) {
-            AppLog.e(TAG, "Camera " + cameraId + " Encoder not prepared");
+        final boolean isDirect = isDirectInputActive();
+        if (encoder == null || (!isDirect && eglEncoder == null) || (isDirect && encoderInputSurface == null)) {
+            AppLog.e(TAG, "Camera " + cameraId + " Encoder not prepared (direct=" + isDirect + ")");
             return false;
         }
 
@@ -651,36 +1038,39 @@ public class CodecVideoRecorder {
             return false;
         }
 
-        AppLog.d(TAG, "Camera " + cameraId + " Starting codec recording");
+        AppLog.i(TAG, "Camera " + cameraId + " Starting codec recording: path=" + activePathMode.logTag
+                + ", reason=" + pathFallbackReason.code);
 
         // 记录分段开始时间（用于 PTS 计算）
         encodedOutputFrameCount = 0;
-        
+
         // 重置首次写入状态
         hasFirstWrite = false;
         lastFileSize = 0;
-        
+        directSkippedPreKeyFrames = 0;
+        lastEncoderOutputTime = System.currentTimeMillis();
+
+        if (isDirect) {
+            Handler dHandler = drainHandler;
+            if (dHandler != null) {
+                dHandler.removeCallbacks(preStartDrain);
+            }
+            synchronized (codecLock) {
+                awaitingInitialKeyFrame = true;
+                drainPreStartEncoderLocked();
+                requestSyncFrameLocked();
+            }
+        } else {
+            awaitingInitialKeyFrame = false;
+        }
+
         isRecording.set(true);
         updateVehicleStatusWatermark();
         scheduleDrain();
 
-        // 注意：不再使用单独的编码循环
-        // 帧的处理直接在 onFrameAvailable 回调中完成（该回调在 encoderHandler 上执行）
-        // 这样避免了 Handler 死锁问题
-
         // 【重要】分段定时器延迟到首次写入后启动
-        // 这样可以确保：
-        // 1. 摄像头启动慢或需要修复时，用户只会感觉"启动慢"而不是录制空视频
-        // 2. 钉钉指定时长录制时，实际录制时长是有效的
-        // scheduleNextSegment() 将在 scheduleFileSizeCheck() 检测到首次写入时调用
-
-        // 启动首次写入超时检查
         scheduleFirstWriteTimeout();
-
-        // 启动文件大小检查
         scheduleFileSizeCheck();
-
-        // 启动编码器健康检查
         scheduleEncoderHealthCheck();
 
         if (callback != null && segmentIndex == 0) {
@@ -702,60 +1092,72 @@ public class CodecVideoRecorder {
             return;
         }
 
-        AppLog.d(TAG, "Camera " + cameraId + " Stopping codec recording");
+        AppLog.d(TAG, "Camera " + cameraId + " Stopping codec recording (path=" + activePathMode.logTag + ")");
 
         // 立即标记停止状态，防止新帧处理
         isRecording.set(false);
         segmentRequested = false;
         drainWakeupPending.set(false);
-        if (drainHandler != null) drainHandler.removeCallbacks(delayedDrain);
+        if (drainHandler != null) {
+            drainHandler.removeCallbacks(delayedDrain);
+            drainHandler.removeCallbacks(preStartDrain);
+        }
         recoveryAttempts = 0;
 
-        // 在编码线程上执行停止操作
-        if (encoderHandler != null) {
+        // 在编码线程（直连路径为 drain 线程）上执行停止操作
+        Handler stopExecutorHandler = (encoderHandler != null) ? encoderHandler : drainHandler;
+        Runnable stopTaskBase = () -> {
+            if (eglEncoder != null) eglEncoder.setVehicleStatusWatermarkEnabled(false);
+            // 发送结束信号给编码器
+            if (encoder != null) {
+                try {
+                    encoder.signalEndOfInputStream();
+                    // 排空编码器
+                    drainEncoder(true);
+                } catch (Exception e) {
+                    AppLog.e(TAG, "Camera " + cameraId + " Error signaling end of stream", e);
+                }
+            }
+
+            // 停止 muxer
+            if (muxerStarted && muxer != null) {
+                try {
+                    muxer.stop();
+                } catch (Exception e) {
+                    AppLog.e(TAG, "Camera " + cameraId + " Error stopping muxer", e);
+                }
+                muxerStarted = false;
+            }
+            logRecordingStats();
+
+            AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped on worker thread, frames recorded: " + recordedFrameCount);
+        };
+
+        if (stopExecutorHandler != null) {
             final java.util.concurrent.CountDownLatch stopped = new java.util.concurrent.CountDownLatch(1);
             Runnable stopTask = () -> {
                 try {
-                    if (eglEncoder != null) eglEncoder.setVehicleStatusWatermarkEnabled(false);
-                    // 发送结束信号给编码器
-                    if (encoder != null) {
-                        try {
-                            encoder.signalEndOfInputStream();
-                            // 排空编码器
-                            drainEncoder(true);
-                        } catch (Exception e) {
-                            AppLog.e(TAG, "Camera " + cameraId + " Error signaling end of stream", e);
-                        }
-                    }
-
-                    // 停止 muxer
-                    if (muxerStarted && muxer != null) {
-                        try {
-                            muxer.stop();
-                        } catch (Exception e) {
-                            AppLog.e(TAG, "Camera " + cameraId + " Error stopping muxer", e);
-                        }
-                        muxerStarted = false;
-                    }
-                    logRecordingStats();
-
-                    AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped on encoder thread, frames recorded: " + recordedFrameCount);
+                    stopTaskBase.run();
                 } catch (Exception e) {
-                    AppLog.e(TAG, "Camera " + cameraId + " Error in stopRecording on encoder thread", e);
+                    AppLog.e(TAG, "Camera " + cameraId + " Error in stopRecording on worker thread", e);
                 } finally {
                     stopped.countDown();
                 }
             };
-            if (Looper.myLooper() == encoderHandler.getLooper()) {
+            if (Looper.myLooper() == stopExecutorHandler.getLooper()) {
                 stopTask.run();
             } else {
-                if (!encoderHandler.post(stopTask)) stopTask.run();
+                if (!stopExecutorHandler.post(stopTask)) stopTask.run();
                 try {
-                    stopped.await();
+                    if (!stopped.await(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                        AppLog.w(TAG, "Camera " + cameraId + " Timed out awaiting stopRecording task");
+                    }
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                 }
             }
+        } else {
+            stopTaskBase.run();
         }
 
         // 等待已排队的异步分段收尾落盘完成，再统一验证并清理文件
@@ -781,119 +1183,186 @@ public class CodecVideoRecorder {
     public void requestStop() { stopRequested = true; }
 
     /**
-     * 释放资源
+     * 释放资源（幂等，且可安全收敛与并发 prepareRecordingAsync 的交错资源）
      */
     public void release() {
-        if (isReleased) {
-            return;
-        }
-
-        AppLog.d(TAG, "Camera " + cameraId + " Releasing CodecVideoRecorder");
-
+        boolean firstRelease = releaseFinalized.compareAndSet(false, true);
         isReleased = true;
         stopRequested = true;
 
-        if (isRecording.get()) {
-            stopRecording();
+        if (firstRelease) {
+            AppLog.d(TAG, "Camera " + cameraId + " Releasing CodecVideoRecorder");
+            if (isRecording.get()) {
+                stopRecording();
+            }
+        }
+
+        cleanupAllocatedResources();
+
+        if (firstRelease) {
+            AppLog.d(TAG, "Camera " + cameraId + " CodecVideoRecorder released");
+        }
+    }
+
+    private void cleanupAllocatedResources() {
+        cancelMonitoringTimers();
+
+        EglSurfaceEncoder eglToRelease;
+        Handler encoderHandlerForGl;
+        Surface cachedSurfToRelease;
+        SurfaceTexture inputStToRelease;
+        MediaCodec encoderToRelease;
+        Surface encoderInputToRelease;
+        AsyncMuxerWriter muxerToRelease;
+        boolean wasMuxerStarted;
+        Handler drainHandlerToClear;
+        HandlerThread drainThreadToQuit;
+        Handler encoderHandlerToClear;
+        HandlerThread encoderThreadToQuit;
+        HandlerThread segmentThreadToQuit;
+
+        synchronized (prepareReleaseLock) {
+            eglToRelease = eglEncoder;
+            eglEncoder = null;
+            encoderHandlerForGl = encoderHandler;
+
+            cachedSurfToRelease = cachedRecordSurface;
+            cachedRecordSurface = null;
+
+            inputStToRelease = inputSurfaceTexture;
+            inputSurfaceTexture = null;
+
+            encoderToRelease = encoder;
+            encoder = null;
+
+            encoderInputToRelease = encoderInputSurface;
+            encoderInputSurface = null;
+
+            muxerToRelease = muxer;
+            muxer = null;
+            wasMuxerStarted = muxerStarted;
+            muxerStarted = false;
+
+            drainHandlerToClear = drainHandler;
+            drainHandler = null;
+            drainThreadToQuit = drainThread;
+            drainThread = null;
+
+            encoderHandlerToClear = encoderHandler;
+            encoderHandler = null;
+            encoderThreadToQuit = encoderThread;
+            encoderThread = null;
+
+            segmentThreadToQuit = segmentThread;
+            segmentThread = null;
+            segmentHandler = null;
         }
 
         // GL objects must be destroyed on their owning thread, after its last frame callback.
-        if (eglEncoder != null && encoderHandler != null) {
+        if (eglToRelease != null && encoderHandlerForGl != null) {
             final java.util.concurrent.CountDownLatch glReleased = new java.util.concurrent.CountDownLatch(1);
+            final EglSurfaceEncoder targetEgl = eglToRelease;
             Runnable task = () -> {
-                try { if (eglEncoder != null) eglEncoder.release(); }
-                finally { eglEncoder = null; glReleased.countDown(); }
+                try {
+                    targetEgl.release();
+                } finally {
+                    glReleased.countDown();
+                }
             };
-            if (Looper.myLooper() == encoderHandler.getLooper()) task.run();
-            else if (encoderHandler.post(task)) {
-                try { glReleased.await(); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
+            if (Looper.myLooper() == encoderHandlerForGl.getLooper()) {
+                task.run();
+            } else if (encoderHandlerForGl.post(task)) {
+                try {
+                    glReleased.await(2, java.util.concurrent.TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
             }
         }
 
         // 释放缓存的录制 Surface（必须在 SurfaceTexture 之前释放）
-        if (cachedRecordSurface != null) {
-            cachedRecordSurface.release();
-            cachedRecordSurface = null;
+        if (cachedSurfToRelease != null) {
+            cachedSurfToRelease.release();
         }
 
         // 释放 SurfaceTexture
-        if (inputSurfaceTexture != null) {
-            inputSurfaceTexture.release();
-            inputSurfaceTexture = null;
+        if (inputStToRelease != null) {
+            inputStToRelease.release();
         }
 
         // 释放编码器
-        if (encoder != null) {
+        if (encoderToRelease != null) {
             try {
-                encoder.stop();
-            } catch (Exception e) {
-                // Ignore
+                encoderToRelease.stop();
+            } catch (Exception ignored) {
             }
-            encoder.release();
-            encoder = null;
+            encoderToRelease.release();
         }
 
         // 释放编码器输入 Surface
-        if (encoderInputSurface != null) {
-            encoderInputSurface.release();
-            encoderInputSurface = null;
+        if (encoderInputToRelease != null) {
+            encoderInputToRelease.release();
         }
 
         // 释放 muxer
-        if (muxer != null) {
+        if (muxerToRelease != null) {
             try {
-                if (muxerStarted) {
-                    muxer.stop();
+                if (wasMuxerStarted) {
+                    muxerToRelease.stop();
                 }
-            } catch (Exception e) {
-                // Ignore
+            } catch (Exception ignored) {
             }
-            try { muxer.release(); }
-            catch (Exception e) { AppLog.w(TAG, "Writer close failed; pending file retained: " + e.getMessage()); }
-            muxer = null;
+            try {
+                muxerToRelease.release();
+            } catch (Exception e) {
+                AppLog.w(TAG, "Writer close failed; pending file retained: " + e.getMessage());
+            }
         }
 
         // 停止编码线程
-        if (drainHandler != null) drainHandler.removeCallbacksAndMessages(null);
-        if (drainThread != null) {
-            drainThread.quitSafely();
-            try { drainThread.join(1000); } catch (InterruptedException e) { Thread.currentThread().interrupt(); }
-            drainThread = null;
-            drainHandler = null;
+        if (drainHandlerToClear != null) {
+            drainHandlerToClear.removeCallbacksAndMessages(null);
         }
-        if (encoderThread != null) {
-            encoderThread.quitSafely();
+        if (drainThreadToQuit != null) {
+            drainThreadToQuit.quitSafely();
             try {
-                encoderThread.join(1000);
+                drainThreadToQuit.join(1000);
             } catch (InterruptedException e) {
-                // Ignore
+                Thread.currentThread().interrupt();
             }
-            encoderThread = null;
-            encoderHandler = null;
+        }
+        if (encoderHandlerToClear != null) {
+            encoderHandlerToClear.removeCallbacksAndMessages(null);
+        }
+        if (encoderThreadToQuit != null) {
+            encoderThreadToQuit.quitSafely();
+            try {
+                encoderThreadToQuit.join(1000);
+            } catch (InterruptedException ignored) {
+            }
         }
 
-        // 清理分段处理线程（仅取消监控定时器，允许已排队的分段收尾任务执行完毕）
-        cancelMonitoringTimers();
-        if (segmentThread != null) {
-            segmentThread.quitSafely();
+        // 清理分段处理线程
+        if (segmentThreadToQuit != null) {
+            segmentThreadToQuit.quitSafely();
             try {
-                segmentThread.join(3000);  // 等待异步分段收尾完成
+                segmentThreadToQuit.join(3000);  // 等待异步分段收尾完成
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 AppLog.w(TAG, "Camera " + cameraId + " segment thread join interrupted");
             }
-            segmentThread = null;
         }
-        segmentHandler = null;
-
-        AppLog.d(TAG, "Camera " + cameraId + " CodecVideoRecorder released");
     }
 
     /**
      * 获取录制用的 Surface（供 Camera 使用）
-     * 使用缓存模式避免重复创建 Surface 导致内存泄漏
+     * 直连路径返回 MediaCodec.createInputSurface()；GL 路径缓存包装 SurfaceTexture 的 Surface
      */
     public Surface getRecordSurface() {
+        if (activePathMode == DirectEncodingPolicy.PathMode.DIRECT) {
+            Surface direct = encoderInputSurface;
+            return (direct != null && direct.isValid()) ? direct : null;
+        }
         if (inputSurfaceTexture == null) {
             return null;
         }
@@ -948,14 +1417,38 @@ public class CodecVideoRecorder {
         RecordingEncoderSelector.Result selected = RecordingEncoderSelector.create(width, height,
                 effectiveFrameRate, avcBitrate, hevcBitrate, forceH264, keyFrameIntervalSeconds, hardwareOnly,
                 e5Compatibility);
-        encoder = selected.codec;
-        mimeType = selected.mime;
-        outputFormat = null;
+        MediaCodec localCodec = selected.codec;
+        Surface localInputSurface = null;
+        try {
+            localInputSurface = localCodec.createInputSurface();
+            localCodec.start();
+        } catch (Exception e) {
+            if (localInputSurface != null) {
+                localInputSurface.release();
+            }
+            try {
+                localCodec.release();
+            } catch (Exception ignored) {
+            }
+            throw e;
+        }
 
-        encoderInputSurface = encoder.createInputSurface();
-        encoder.start();
-
-        bufferInfo = new MediaCodec.BufferInfo();
+        synchronized (prepareReleaseLock) {
+            if (stopRequested || isReleased) {
+                localInputSurface.release();
+                try {
+                    localCodec.stop();
+                } catch (Exception ignored) {
+                }
+                localCodec.release();
+                throw new PrepareCancelledException();
+            }
+            encoder = localCodec;
+            mimeType = selected.mime;
+            outputFormat = null;
+            encoderInputSurface = localInputSurface;
+            bufferInfo = new MediaCodec.BufferInfo();
+        }
 
         AppLog.d(TAG, "Camera " + cameraId + " Encoder created: " + width + "x" + height +
                 " @ " + effectiveFrameRate + "fps" + (blindSpotOptimizeMode ? "(补盲优化)" : "") +
@@ -1051,11 +1544,21 @@ public class CodecVideoRecorder {
      * 创建 MediaMuxer
      */
     private void createMuxer(String filePath) throws IOException {
-        muxer = new AsyncMuxerWriter(filePath, this::handleMuxerFailure);
-        videoTrackIndex = -1;
-        muxerStarted = false;
-        muxerClock.reset();
-        encodedOutputFrameCount = 0;
+        AsyncMuxerWriter localMuxer = new AsyncMuxerWriter(filePath, this::handleMuxerFailure);
+        synchronized (prepareReleaseLock) {
+            if (stopRequested || isReleased) {
+                try {
+                    localMuxer.release();
+                } catch (Exception ignored) {
+                }
+                throw new PrepareCancelledException();
+            }
+            muxer = localMuxer;
+            videoTrackIndex = -1;
+            muxerStarted = false;
+            muxerClock.reset();
+            encodedOutputFrameCount = 0;
+        }
 
         AppLog.d(TAG, "Camera " + cameraId + " Muxer created: " + filePath);
     }
@@ -1074,6 +1577,7 @@ public class CodecVideoRecorder {
             cancelMonitoringTimers();
             if (drainHandler != null) {
                 drainHandler.removeCallbacks(delayedDrain);
+                drainHandler.removeCallbacks(preStartDrain);
             }
             AppLog.e(TAG, "Camera " + cameraId + " Fatal startup write error, aborting rebuild: " + detail);
         }
@@ -1115,6 +1619,49 @@ public class CodecVideoRecorder {
 
     // GL submission and output draining have separate owning threads.
 
+    void drainPreStartEncoderLocked() {
+        if (encoder == null || bufferInfo == null) {
+            return;
+        }
+        int processed = 0;
+        try {
+            while (processed < DRAIN_BATCH_SIZE) {
+                int index = encoder.dequeueOutputBuffer(bufferInfo, 0);
+                if (index == MediaCodec.INFO_TRY_AGAIN_LATER) {
+                    break;
+                }
+                if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
+                    outputFormat = encoder.getOutputFormat();
+                    encoderHealthy = true;
+                    continue;
+                }
+                if (index < 0) {
+                    continue;
+                }
+                try {
+                    processed++;
+                } finally {
+                    encoder.releaseOutputBuffer(index, false);
+                }
+            }
+        } catch (Exception e) {
+            AppLog.e(TAG, "Camera " + cameraId + " Error draining pre-start direct encoder", e);
+            encoderHealthy = false;
+        }
+    }
+
+    private void requestSyncFrameLocked() {
+        try {
+            android.os.Bundle parameters = new android.os.Bundle();
+            parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
+            if (encoder != null) {
+                encoder.setParameters(parameters);
+            }
+        } catch (Exception e) {
+            AppLog.w(TAG, "Sync-frame request unavailable; waiting for natural key frame");
+        }
+    }
+
     private void drainEncoder(boolean endOfStream) {
         drainEncoderWithResult(endOfStream);
     }
@@ -1148,7 +1695,7 @@ public class CodecVideoRecorder {
                 }
                 if (index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED) {
                     outputFormat = encoder.getOutputFormat();
-                    if (!muxerStarted && muxer != null) {
+                    if (!awaitingInitialKeyFrame && !muxerStarted && muxer != null) {
                         videoTrackIndex = muxer.addTrack(outputFormat);
                         muxer.start();
                         muxerStarted = true;
@@ -1162,23 +1709,39 @@ public class CodecVideoRecorder {
                     ByteBuffer data = encoder.getOutputBuffer(index);
                     if (data != null && bufferInfo.size > 0
                             && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_CODEC_CONFIG) == 0) {
-                        if (!muxerStarted) throw new IllegalStateException("Muxer not started");
-                        if (!endOfStream && segmentRequested
-                                && (bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
-                            rotateMuxerAtKeyFrame();
+                        boolean isKeyFrame = (bufferInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0;
+                        if (awaitingInitialKeyFrame && !isKeyFrame) {
+                            directSkippedPreKeyFrames++;
+                        } else {
+                            if (awaitingInitialKeyFrame) {
+                                awaitingInitialKeyFrame = false;
+                            }
+                            if (!muxerStarted) {
+                                if (outputFormat != null && muxer != null) {
+                                    videoTrackIndex = muxer.addTrack(outputFormat);
+                                    muxer.start();
+                                    muxerStarted = true;
+                                    encoderHealthy = true;
+                                } else {
+                                    throw new IllegalStateException("Muxer not started");
+                                }
+                            }
+                            if (!endOfStream && segmentRequested && isKeyFrame) {
+                                rotateMuxerAtKeyFrame();
+                            }
+                            long correctedBefore = muxerClock.getCorrectedSamples();
+                            bufferInfo.presentationTimeUs = muxerClock.normalize(bufferInfo.presentationTimeUs);
+                            if (muxerClock.getCorrectedSamples() != correctedBefore) {
+                                AppLog.w(TAG, "Camera " + cameraId + " Corrected non-monotonic encoder PTS");
+                            }
+                            data.position(bufferInfo.offset);
+                            data.limit(bufferInfo.offset + bufferInfo.size);
+                            muxer.writeSampleData(videoTrackIndex, data, bufferInfo);
+                            encodedOutputFrameCount++;
+                            framesWithoutEncoderOutput = 0;
+                            lastEncoderOutputTime = System.currentTimeMillis();
+                            gotOutput = true;
                         }
-                        long correctedBefore = muxerClock.getCorrectedSamples();
-                        bufferInfo.presentationTimeUs = muxerClock.normalize(bufferInfo.presentationTimeUs);
-                        if (muxerClock.getCorrectedSamples() != correctedBefore) {
-                            AppLog.w(TAG, "Camera " + cameraId + " Corrected non-monotonic encoder PTS");
-                        }
-                        data.position(bufferInfo.offset);
-                        data.limit(bufferInfo.offset + bufferInfo.size);
-                        muxer.writeSampleData(videoTrackIndex, data, bufferInfo);
-                        encodedOutputFrameCount++;
-                        framesWithoutEncoderOutput = 0;
-                        lastEncoderOutputTime = System.currentTimeMillis();
-                        gotOutput = true;
                     }
                 } finally {
                     encoder.releaseOutputBuffer(index, false);
@@ -1196,24 +1759,38 @@ public class CodecVideoRecorder {
     private void logRecordingStats() {
         long durationUs = muxerClock.getLastPtsUs();
         double actualFps = durationUs > 0 ? (encodedOutputFrameCount - 1) * 1_000_000.0 / durationUs : 0;
-        AppLog.i(TAG, "Recording stats camera=" + cameraId + ", size=" + width + "x" + height
+        boolean direct = isDirectInputActive();
+        AppLog.i(TAG, "Recording stats camera=" + cameraId + ", path=" + activePathMode.logTag
+                + ", fallbackReason=" + pathFallbackReason.code
+                + ", size=" + width + "x" + height
                 + ", codec=" + mimeType + ", targetFps=" + frameRate
                 + ", actualFps=" + String.format(Locale.US, "%.2f", actualFps)
                 + ", segmentFrames=" + encodedOutputFrameCount + ", durationUs=" + durationUs
                 + ", inputCallbacks=" + inputFrameCallbacks + ", submittedFrames=" + recordedFrameCount
+                + ", preKeySkips=" + directSkippedPreKeyFrames
                 + ", correctedPts=" + muxerClock.getCorrectedSamples());
-        AppLog.i(TAG, "Recording timing camera=" + cameraId + ", glAvgUs="
-                + (recordedFrameCount == 0 ? 0 : totalGlUs / recordedFrameCount)
-                + ", glMaxUs=" + maxGlUs + ", " + (muxer == null ? "noWriter" : muxer.stats()));
-        AppLog.i(TAG, "Recording codec poll camera=" + cameraId + ", avgUs="
-                + (codecPolls == 0 ? 0 : totalCodecPollUs / codecPolls) + ", maxUs=" + maxCodecPollUs);
-        if (eglEncoder != null) AppLog.i(TAG, "Recording input camera=" + cameraId + ", " + eglEncoder.frameStats());
+        long glAvg = (direct || recordedFrameCount == 0) ? 0 : totalGlUs / recordedFrameCount;
+        long glMax = direct ? 0 : maxGlUs;
+        AppLog.i(TAG, "Recording timing camera=" + cameraId + ", path=" + activePathMode.logTag
+                + ", glAvgUs=" + glAvg
+                + ", glMaxUs=" + glMax + ", " + (muxer == null ? "noWriter" : muxer.stats()));
+        AppLog.i(TAG, "Recording codec poll camera=" + cameraId + ", path=" + activePathMode.logTag
+                + ", avgUs=" + (codecPolls == 0 ? 0 : totalCodecPollUs / codecPolls) + ", maxUs=" + maxCodecPollUs);
+        if (direct) {
+            AppLog.i(TAG, "Recording input camera=" + cameraId + ", path=direct, glSkipped=true, preKeySkips="
+                    + directSkippedPreKeyFrames);
+        } else if (eglEncoder != null) {
+            AppLog.i(TAG, "Recording input camera=" + cameraId + ", path=gl, " + eglEncoder.frameStats());
+        }
     }
 
     public String startupDiagnostics() {
         AsyncMuxerWriter writer = muxer;
-        String base = "camera=" + cameraId + ", started=" + isRecording.get() + ", inputCallbacks=" + inputFrameCallbacks
+        String base = "camera=" + cameraId + ", path=" + activePathMode.logTag
+                + ", fallbackReason=" + pathFallbackReason.code
+                + ", started=" + isRecording.get() + ", inputCallbacks=" + inputFrameCallbacks
                 + ", submitted=" + recordedFrameCount + ", encoded=" + encodedOutputFrameCount
+                + ", awaitingKey=" + awaitingInitialKeyFrame + ", preKeySkips=" + directSkippedPreKeyFrames
                 + ", muxerStarted=" + muxerStarted + ", written=" + (writer == null ? 0 : writer.getWrittenSamples())
                 + ", healthy=" + encoderHealthy + ", fatalWriteError=" + fatalWriteError
                 + ", e5Compatibility=" + e5Compatibility;
@@ -1229,22 +1806,32 @@ public class CodecVideoRecorder {
      * 3. 这样可以确保实际录制的视频时长达到设定的分段时长
      */
     private void scheduleNextSegment() {
+        Handler segHandler = segmentHandler;
+        if (segHandler == null) {
+            return;
+        }
         if (segmentRunnable != null) {
-            segmentHandler.removeCallbacks(segmentRunnable);
+            segHandler.removeCallbacks(segmentRunnable);
         }
 
         segmentRunnable = () -> {
-            if (isRecording.get() && encoderHandler != null) {
-                AppLog.d(TAG, "Camera " + cameraId + " Scheduling segment switch on encoder thread");
-                // 在编码线程上执行切换，避免线程冲突
-                encoderHandler.post(() -> switchToNextSegment());
+            if (!isRecording.get() || isReleased || stopRequested) {
+                return;
+            }
+            Handler targetHandler = encoderHandler != null ? encoderHandler : drainHandler;
+            if (targetHandler != null) {
+                AppLog.d(TAG, "Camera " + cameraId + " Scheduling segment switch on "
+                        + (encoderHandler != null ? "encoder" : "drain") + " thread");
+                targetHandler.post(this::switchToNextSegment);
+            } else {
+                switchToNextSegment();
             }
         };
 
         // 延迟执行（使用配置的分段时长 + 补偿时间）
         // 补偿编码器初始化延迟和停止时的帧丢失
         long actualDelayMs = segmentDurationMs + SEGMENT_DURATION_COMPENSATION_MS;
-        segmentHandler.postDelayed(segmentRunnable, actualDelayMs);
+        segHandler.postDelayed(segmentRunnable, actualDelayMs);
         AppLog.d(TAG, "Camera " + cameraId + " Scheduled next segment in " + (segmentDurationMs / 1000) + " seconds (actual delay: " + actualDelayMs + "ms)");
     }
 
@@ -1253,13 +1840,7 @@ public class CodecVideoRecorder {
         if (!isRecording.get() || isReleased || stopRequested || segmentRequested) return;
         segmentRequested = true;
         synchronized (codecLock) {
-            try {
-                android.os.Bundle parameters = new android.os.Bundle();
-                parameters.putInt(MediaCodec.PARAMETER_KEY_REQUEST_SYNC_FRAME, 0);
-                if (encoder != null) encoder.setParameters(parameters);
-            } catch (Exception e) {
-                AppLog.w(TAG, "Sync-frame request unavailable; waiting for natural key frame");
-            }
+            requestSyncFrameLocked();
         }
     }
 
@@ -1356,6 +1937,10 @@ public class CodecVideoRecorder {
 
     private void attemptRecoveryLocked() {
         if (stopRequested || isReleased || fatalWriteError) return;
+        if (isDirectInputActive()) {
+            AppLog.w(TAG, "Camera " + cameraId + " Skipping in-place encoder recovery on direct input path");
+            return;
+        }
         AppLog.d(TAG, "Camera " + cameraId + " Attempting recovery (attempt " + recoveryAttempts + "/" + MAX_RECOVERY_ATTEMPTS + ")");
         
         boolean recoverySuccess = false;
@@ -1395,6 +1980,10 @@ public class CodecVideoRecorder {
             segmentHandler.post(() -> scheduleNextSegment());
             
         } catch (Exception e) {
+            if (e instanceof PrepareCancelledException || stopRequested || isReleased) {
+                isRecording.set(false);
+                return;
+            }
             AppLog.e(TAG, "Camera " + cameraId + " Recovery attempt failed", e);
             isRecording.set(false);
             
@@ -1451,10 +2040,16 @@ public class CodecVideoRecorder {
             // 检查编码器健康状态
             boolean needsRecovery = false;
             String reason = "";
+            boolean directActive = isDirectInputActive();
 
             if (!encoderHealthy) {
                 needsRecovery = true;
                 reason = "encoder marked unhealthy";
+            } else if (directActive) {
+                if (hasFirstWrite && (System.currentTimeMillis() - lastEncoderOutputTime) > DIRECT_NO_OUTPUT_STALL_MS) {
+                    needsRecovery = true;
+                    reason = "direct encoder output stalled";
+                }
             } else if (!muxerStarted && recordedFrameCount > MAX_FRAMES_WITHOUT_OUTPUT) {
                 // Muxer 从未启动，但已经处理了很多帧
                 needsRecovery = true;
@@ -1466,7 +2061,15 @@ public class CodecVideoRecorder {
             }
 
             if (needsRecovery) {
-                AppLog.w(TAG, "Camera " + cameraId + " Encoder health check FAILED: " + reason);
+                AppLog.w(TAG, "Camera " + cameraId + " Encoder health check FAILED: " + reason
+                        + " (path=" + activePathMode.logTag + ")");
+                if (directActive) {
+                    encoderHealthy = false;
+                    if (callback != null) {
+                        callback.onRecordingRebuildRequested(cameraId, "direct_health_failed:" + reason);
+                    }
+                    return;
+                }
                 AppLog.w(TAG, "Camera " + cameraId + " Attempting to rebuild encoder...");
 
                 // 在编码线程上执行重建
@@ -1492,6 +2095,10 @@ public class CodecVideoRecorder {
 
     private void rebuildEncoderLocked() {
         if (stopRequested || isReleased || fatalWriteError) return;
+        if (isDirectInputActive()) {
+            AppLog.w(TAG, "Camera " + cameraId + " Skipping in-place encoder rebuild on direct input path");
+            return;
+        }
         AppLog.d(TAG, "Camera " + cameraId + " Rebuilding encoder due to health check failure");
 
         // 暂停录制
@@ -1576,6 +2183,9 @@ public class CodecVideoRecorder {
             segmentHandler.post(() -> scheduleNextSegment());
 
         } catch (Exception e) {
+            if (e instanceof PrepareCancelledException || stopRequested || isReleased) {
+                return;
+            }
             AppLog.e(TAG, "Camera " + cameraId + " Failed to rebuild encoder", e);
 
             // 重建失败，启动恢复重试机制

@@ -159,6 +159,12 @@ public class PreviewModeControllerTest {
         // Background Settings/Playback pages defer camera visibility mask churn until returning to recording.
         assertTrue(PreviewModeController.shouldApplyVisibilityMaskImmediately(true));
         assertFalse(PreviewModeController.shouldApplyVisibilityMaskImmediately(false));
+
+        // onResume only starts surround host eligibility when foreground AND on recording section.
+        assertTrue(PreviewModeController.shouldStartSurroundHostEligible(false, true));
+        assertFalse(PreviewModeController.shouldStartSurroundHostEligible(false, false));
+        assertFalse(PreviewModeController.shouldStartSurroundHostEligible(true, true));
+        assertFalse(PreviewModeController.shouldStartSurroundHostEligible(true, false));
     }
 
     @Test
