@@ -1,11 +1,11 @@
 # 录像与预览性能优化
 
-最后更新：2026-11-22 12:38:25 +08:00
-最后核对：2026-11-22 12:38:25 +08:00
+最后更新：2026-11-22 12:47:10 +08:00
+最后核对：2026-11-22 12:47:10 +08:00
 任务/执行者：optimize-recording-preview-perf / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：第一批 9 项 + 第二批第 1 项轻量化已完成并准备封包 `build24`（`1.6.6-test-11221230`，离线 `650` 测与双风味构建/Lint `0` errors 通过；待银河 E5 实车验证）
-当前结论：已完成第一批 9 项录像/预览优化及普通多窗预览轻量化（共 10 项，`1.6.6-test-11221230`），涵盖 GL 管线去同步与去冗余绑定、分段异步收尾、排空防空轮询、默认 HEVC 码率生效、水印零分配、中转降优、360 模式 A VBO/IBO+OES 合并限频+Shader 优化、隐藏计时器停刷及默认关闭窗格圆角裁剪；剩余 4 项架构/实车兼容项已列明验证判据待实车定性。
+状态：已提交源码 `9f90c63` 并本地封包 **`build24`**（tag `v1.6.6-test-11221230-build24`，`1.6.6-test-11221230`，离线 `650` 测与双风味构建/Lint `0` errors 通过；待银河 E5 实车验证）
+当前结论：已完成第一批 9 项录像/预览优化及普通多窗预览轻量化（共 10 项，`9f90c63` / `build24`），涵盖 GL 管线去同步与去冗余绑定、分段异步收尾、排空防空轮询、默认 HEVC 码率生效、水印零分配、中转降优、360 模式 A VBO/IBO+OES 合并限频+Shader 优化、隐藏计时器停刷及默认关闭窗格圆角裁剪；剩余 4 项架构/实车兼容项已列明实车日志判据待实测后决定。
 
 ## 已修复清单（共 10 项）
 
@@ -26,21 +26,21 @@
 ## 待评估/待修复清单（架构级 / 需实车验证）
 
 1. **普通预览彻底合一（深度架构，仅实车仍觉 UI 卡顿时考虑）**：将 4×`TextureView` 替换为单 `SurfaceView`/`GLSurfaceView` 统一四格渲染（需同步改造 `takePicture()` 脱离 `textureView.getBitmap()`）。
-2. **A 版多路录制共享单个 GL 线程与 `EGLContext`**：合并 3~4 套独立 GL 上下文，需结合实车 `glAvgUs`/`glMaxUs` 与 GPU 负载判断是否值得改。
-3. **Camera2 物理流减半 / 预览小尺寸流**：评估 E5 HAL 是否支持 `recordSurface` 共享预览 `OutputConfiguration` 或预览降尺寸（需结合实车 `captureFps`/`sensorMaxGapMs` 决定）。
-4. **E5 硬件编码器实时参数 A/B 验证（遵守 `P004`）**：实车逐项验证 `KEY_MAX_B_FRAMES = 0`、`KEY_PRIORITY = 0`、`KEY_OPERATING_RATE` 的兼容性与延迟收益。
-5. **无水印/无调色直连编码与 A/B 方案对照**：结合实车日志（`software`、`actualFps`、`glAvgUs`、`writerMaxUs`）决定是否推进直连或默认使用 B 版合成。
+2. **A 版多路录制共享单个 GL 线程与 `EGLContext`**：合并 3~4 套独立 GL 上下文，按实车 `glAvgUs`/`glMaxUs`（是否 `> 4000~8000us`）判断是否需要。
+3. **Camera2 物理流减半 / 预览小尺寸流**：评估 E5 HAL 是否支持 `recordSurface` 共享预览 `OutputConfiguration` 或预览降尺寸，按实车 `captureFps`/`sensorMaxGapMs` 判断。
+4. **E5 硬件编码器实时参数 A/B 验证（遵守 `P004`）**：实车对照 `correctedPts` 与 `codec poll maxUs` 逐项验证 `KEY_MAX_B_FRAMES = 0`、`KEY_PRIORITY = 0`、`KEY_OPERATING_RATE`。
+5. **无水印/无调色直连编码与 A/B 方案对照**：按实车 `software=false/true`、`actualFps`、`glAvgUs`、`writerMaxUs` 决定是否推进直连或切换 B 版合成。
 
-## 验证证据（2026-11-22 12:38:25 +08:00）
+## 验证与封包证据（2026-11-22 12:47:10 +08:00）
 
-- **已通过（离线）**：新增 6 项单测（[RecordingBitrateTest.java](../../app/src/test/java/com/kooo/evcam/camera/RecordingBitrateTest.java)、[CodecDrainTest.java](../../app/src/test/java/com/kooo/evcam/camera/CodecDrainTest.java)、[VehicleStatusWatermarkTest.java](../../app/src/test/java/com/kooo/evcam/camera/VehicleStatusWatermarkTest.java)、[SurroundRenderThrottleTest.java](../../app/src/test/java/com/kooo/evcam/surround/SurroundRenderThrottleTest.java)、[SettingsCatalogAndAppearanceTest.java](../../app/src/test/java/com/kooo/evcam/ui/SettingsCatalogAndAppearanceTest.java)）；`tools/verify.ps1` 双风味 **`650` 测 `0` 失败/`0` 错误/`0` 跳过**（`build-20261122-123107-542.log`），`assembleDebug`/`assembleRelease` 全过，`lintIndependentDebug`/`lintCompositeDebug` 均为 **`0` errors**（`2227` warnings）。
+- **已通过（离线）**：新增 6 项单测；`tools/verify.ps1` 双风味 **`650` 测 `0` 失败/`0` 跳过**（`build-20261122-123107-542.log`），`lintIndependentDebug`/`lintCompositeDebug` 均为 **`0` errors**（`2227` warnings）；两份 APK 通过 `apksigner verify` v2 校验（`A-Independent` `7,974,176` B / `17d33d08...`；`B-Composite` `7,990,560` B / `b5510b8f...`；`mappings.zip` `13,450,455` B / `2afa620d...`），`build22` 已归档至 `outputs/archive/`。
 - **未执行**：尚未在银河 E5 实车验证帧率、温度、360 模式 A 与多窗预览流畅度。
 
 ## 最近记录
 
-- 2026-11-22 12:38:25 +08:00 | 完成普通多窗预览轻量化（共 10 项优化，`1.6.6-test-11221230`） | 新增默认关闭的「预览窗格圆角裁剪」开关、去 `clipToOutline`/overdraw 与冗余 `invalidateOutline()`、非编辑态 `setWillNotDraw(true)` 及 `setOpaque(true)`；双风味 `650` 测与构建/Lint `0` errors 全过，准备提交封包 `build24` | [EditablePreviewLayout.java](../../app/src/main/java/com/kooo/evcam/ui/EditablePreviewLayout.java)
-- 2026-11-22 09:35:21 +08:00 | 完成第一批 9 项录像与预览性能优化（`1.6.6-test-11220924`） | 落地 GL 去同步/去冗余绑定、分段异步收尾、排空防空轮询、HEVC 码率生效、水印零分配、中转降优、360 VBO/IBO+OES 合并限频+Shader 优化及隐藏计时器停刷；双风味 `648` 测与构建/Lint `0` errors 全过 | [SurroundGlRenderer.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundGlRenderer.java)
+- 2026-11-22 12:47:10 +08:00 | 本地封包 `build24` 并归档 `build22`（`1.6.6-test-11221230`） | 源码 `9f90c63` 打标 `v1.6.6-test-11221230-build24`，生成 A/B APK、`mappings.zip`、`SHA256.txt`、`manifest.json`、`notes.md` 并通过 `apksigner` v2 与标定/原生库哈希核验 | [EVCam-E5-build24-1.6.6-test-11221230-notes.md](../../outputs/EVCam-E5-build24-1.6.6-test-11221230-notes.md)
+- 2026-11-22 12:38:25 +08:00 | 完成普通多窗预览轻量化并提交源码 `9f90c63`（共 10 项优化，`1.6.6-test-11221230`） | 新增默认关闭的「预览窗格圆角裁剪」开关、去 `clipToOutline`/overdraw 与冗余 `invalidateOutline()`、非编辑态 `setWillNotDraw(true)` 及 `setOpaque(true)`；双风味 `650` 测与构建/Lint `0` errors 全过 | [EditablePreviewLayout.java](../../app/src/main/java/com/kooo/evcam/ui/EditablePreviewLayout.java)
 
 ## 下一步
 
-1. 提交推送源码、封包 `build24`，安装至银河 E5 实车采集会话日志，依据 2/3/4/5 验证指标决定后续是否需要深度架构改造。
+1. 安装 `build24` 至银河 E5 实车采集会话日志，依据 2/3/4/5 验证指标决定后续是否需要深度架构改造。

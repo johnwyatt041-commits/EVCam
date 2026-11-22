@@ -1,16 +1,16 @@
 # 项目进度
 
-最后更新/核对：2026-11-22 12:38:25 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已完成第一批 9 项 + 普通多窗预览轻量化共 10 项性能优化 `1.6.6-test-11221230`，双风味 `650` 测、Debug/Release 构建与 Lint `0` errors 全过，正在提交封包 `build24`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-22 12:47:10 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已提交源码 **`9f90c63`** 并本地封包 **`build24`** `v1.6.6-test-11221230-build24`，`1.6.6-test-11221230`，双风味 `650` 测、`0` Lint error 与 `apksigner` v2 校验全过；`build22` 已归档至 `outputs/archive/`，待银河 E5 实车验证）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；源码基线 `1.6.6-test-11221230`（`versionCode = 86`，待完成 `build24` 提交与封包） |
-| 本地交付 | `outputs/` 顶层保留 **`build22`** + **`build23`**（封包 `build24` 后将归档 `build22`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11220818-build23`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11220818-build23)（6 资产上传并核验远端 SHA256 一致） |
-| 离线与设备验证 | 当前版本（`1.6.6-test-11221230`）已通过 `verify.ps1` 双风味 `650` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease`、双风味 Lint `0` errors（`2227` warnings）；**尚未上实车测试** |
+| 分支与提交 | `codex/e5-recording-startup-fix`；源码基线 **`9f90c63`**（tag `v1.6.6-test-11221230-build24`，`versionCode = 86`） |
+| 本地交付 | `outputs/` 顶层保留 **`build23`** + **`build24`**（各 6 文件，共 12 文件；`build22` 已归档至 `outputs/archive/`） |
+| GitHub | `johnwyatt041-commits/EVCam` 最新已发布 Pre-release：[`v1.6.6-test-11220818-build23`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11220818-build23)（`build24` 已在本地完成封包打标） |
+| 离线与设备验证 | `build24`（`9f90c63`）已通过 `verify.ps1` 双风味 `650` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease`、双风味 Lint `0` errors（`2227` warnings）与 `apksigner` v2 校验；**尚未上实车测试** |
 | 实车状态 | 待安装 `build24` 上银河 E5 实车验证 10 项性能优化、U 盘测速、`build22` 6 项可靠性修复及网卡/视图E/补盲/飞书/`build21` 360 |
 
 ## 当前结论与确认边界
@@ -31,7 +31,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-22 12:38:25 +08:00 | 完成 10 项录像与预览性能优化（`1.6.6-test-11221230`） | 第一批 9 项 + 普通多窗预览默认去圆角裁剪与防冗余合成优化全部完成；双风味 `650` 测与构建/Lint `0` errors 全过，准备提交封包 `build24` | [性能优化清单](tasks/optimize-recording-preview-perf.md)
+- 2026-11-22 12:47:10 +08:00 | 提交源码 `9f90c63` 并本地封包 build24（`1.6.6-test-11221230`） | 第一批 9 项 + 普通多窗预览默认去圆角裁剪与防冗余合成共 10 项优化全部完成；打标 `v1.6.6-test-11221230-build24`，A/B APK 与 `mappings.zip` 等 6 资产落盘、`build22` 归档，双风味 `650` 测与 Lint `0` errors 全过 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-22 09:00:57 +08:00 | 封包发布 build23 并推送 GitHub Pre-release（`1.6.6-test-11220818`） | 源码 `bb34e66` 打标 `v1.6.6-test-11220818-build23` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build21` 归档，`638` 测与 Lint `0` errors，待实车测试 | [U盘速度检测](tasks/add-usb-speed-test.md)
 - 2026-11-22 08:55:30 +08:00 | 提交并推送 U 盘手动写入速度检测至 GitHub fork（`1.6.6-test-11220818`） | 在记录仪存储位置新增「U盘写入速度检测」卡片，基于 `FileChannel.force(true)` 真实落盘测速并评估直写/中转达标状态，提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`638` 测与 Lint `0` errors 全过 | [U盘速度检测](tasks/add-usb-speed-test.md)
 - 2026-11-22 07:52:49 +08:00 | 封包发布 build22 并推送 GitHub Pre-release（`1.6.6-test-11212325`） | 源码 `215753f` 打标 `v1.6.6-test-11212325-build22` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build20` 归档，`624` 测与 Lint `0` errors，待实车测试 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
