@@ -48,6 +48,8 @@ import com.kooo.evcam.vehicle.rule.VehicleTriggerRule;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 3. 记录仪设置界面 Fragment
@@ -107,6 +109,13 @@ public class RecorderSettingsFragment extends Fragment {
     private SwitchMaterial relayWriteSwitch;
     private TextView relayWriteDescText;
     private boolean isInitializingRelayWrite = false;
+
+    // U盘写入速度检测相关
+    private TextView usbSpeedRequirementText;
+    private TextView usbSpeedResultText;
+    private Button usbSpeedTestButton;
+    private final AtomicInteger usbSpeedTestSeq = new AtomicInteger(0);
+    private UsbSpeedTester.TestHandle activeUsbSpeedTest;
     
     // 存储清理配置相关
     private EditText videoStorageLimitEdit;
@@ -780,12 +789,14 @@ public class RecorderSettingsFragment extends Fragment {
                         
                         // 始终更新描述文字（可能U盘状态变化或空间变化）
                         updateStorageLocationDescriptionAsync(currentLocation);
+                        updateUsbSpeedRequirementText();
                     });
                 }
             }).start();
             
             // 更新存储占用大小显示（已经是异步的）
             updateStorageUsedSizeDisplay();
+            updateUsbSpeedRequirementText();
         }
         
         // 更新悬浮窗开关状态
@@ -875,6 +886,7 @@ public class RecorderSettingsFragment extends Fragment {
                 
                 // 更新录制摄像头选择的 UI（摄像头数量由 AppConfig.getCameraCount() 自动根据车型返回）
                 updateRecordingCameraSelectionUI();
+                updateUsbSpeedRequirementText();
                 
                 if (getContext() != null) {
                     Toast.makeText(getContext(), "已切换为「" + modelName + "」，重启应用后生效", Toast.LENGTH_SHORT).show();
@@ -1154,6 +1166,7 @@ public class RecorderSettingsFragment extends Fragment {
             String position = getPositionFromCheckBox(buttonView);
             if (position != null) {
                 appConfig.setRecordingCameraEnabled(position, isChecked);
+                updateUsbSpeedRequirementText();
                 String cameraName = ((android.widget.CheckBox) buttonView).getText().toString();
                 String message = isChecked ? "已启用「" + cameraName + "」录制" : "已禁用「" + cameraName + "」录制";
                 Toast.makeText(getContext(), message, Toast.LENGTH_SHORT).show();
@@ -1384,6 +1397,7 @@ public class RecorderSettingsFragment extends Fragment {
                     
                     // 异步更新描述文字
                     updateStorageLocationDescriptionAsync(finalCurrentLocation);
+                    updateUsbSpeedRequirementText();
                     
                     storageLocationSpinner.post(() -> {
                         isInitializingStorageLocation = false;
@@ -1394,6 +1408,9 @@ public class RecorderSettingsFragment extends Fragment {
         
         // 初始化中转写入开关
         initRelayWriteConfig(view);
+
+        // 初始化 U盘写入速度检测
+        initUsbSpeedTestConfig(view);
     }
     
     /**
@@ -1465,6 +1482,171 @@ public class RecorderSettingsFragment extends Fragment {
             relayWriteDescText.setText("已关闭：视频直接写入U盘，可能因U盘速度慢导致录制卡顿");
             relayWriteDescText.setTextColor(ContextCompat.getColor(getContext(), R.color.text_secondary));
         }
+    }
+
+    /**
+     * 初始化 U盘写入速度检测卡片
+     */
+    private void initUsbSpeedTestConfig(View view) {
+        usbSpeedRequirementText = view.findViewById(R.id.tv_usb_speed_requirement);
+        usbSpeedResultText = view.findViewById(R.id.tv_usb_speed_result);
+        usbSpeedTestButton = view.findViewById(R.id.btn_usb_speed_test);
+
+        if (usbSpeedTestButton != null) {
+            usbSpeedTestButton.setOnClickListener(v -> startUsbSpeedTestWithConfirmIfNeeded());
+        }
+        updateUsbSpeedRequirementText();
+    }
+
+    /**
+     * 刷新 U盘测速需求说明（根据当前启用路数/分辨率/帧率/码率）
+     */
+    private void updateUsbSpeedRequirementText() {
+        if (usbSpeedRequirementText == null || appConfig == null) {
+            return;
+        }
+        MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+        UsbSpeedTester.RecordingRequirement req = UsbSpeedTester.estimateRequirement(appConfig, manager);
+        String prefix = hasExternalSdCard ? "已检测到 U 盘" : "未检测到 U 盘";
+        usbSpeedRequirementText.setText(String.format(
+                Locale.US,
+                "%s · 当前配置需直写 ≥ %.1f MB/s（中转 ≥ %.1f MB/s）\n%s",
+                prefix,
+                req.recommendedDirectMBps,
+                req.minRelayMBps,
+                req.summary
+        ));
+    }
+
+    private void startUsbSpeedTestWithConfirmIfNeeded() {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) {
+            return;
+        }
+        MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+        boolean directUsbRecording = manager != null
+                && manager.isRecording()
+                && appConfig.isUsingExternalSdCard()
+                && !appConfig.shouldUseRelayWrite();
+        if (directUsbRecording) {
+            new MaterialAlertDialogBuilder(ctx, R.style.Theme_Cam_MaterialAlertDialog)
+                    .setTitle("当前正在直接写入 U 盘录像")
+                    .setMessage("当前未开启「中转写入」，测速写入会短暂占用 U 盘带宽，可能影响正在进行的录像流畅度。是否继续测速？")
+                    .setPositiveButton("继续测速", (d, w) -> runUsbSpeedTestNow())
+                    .setNegativeButton("取消", null)
+                    .show();
+            return;
+        }
+        runUsbSpeedTestNow();
+    }
+
+    private void runUsbSpeedTestNow() {
+        Context ctx = getContext();
+        if (ctx == null || appConfig == null) {
+            return;
+        }
+        final Context appCtx = ctx.getApplicationContext();
+        final int seq = usbSpeedTestSeq.incrementAndGet();
+        if (activeUsbSpeedTest != null) {
+            activeUsbSpeedTest.cancel();
+        }
+        final UsbSpeedTester.TestHandle handle = new UsbSpeedTester.TestHandle();
+        activeUsbSpeedTest = handle;
+
+        if (usbSpeedTestButton != null) {
+            usbSpeedTestButton.setEnabled(false);
+            usbSpeedTestButton.setText("测速中...");
+        }
+        showUsbSpeedResultMessage("⏳ 正在对 U 盘执行持续落盘写入测速（约 2–10 秒），请勿拔出 U 盘...", R.color.text_secondary);
+
+        new Thread(() -> {
+            MultiCameraManager manager = CameraManagerHolder.getInstance().getCameraManager();
+            UsbSpeedTester.SpeedTestResult result = UsbSpeedTester.runUsbSpeedTest(
+                    appCtx,
+                    appConfig,
+                    manager,
+                    (percent, currentMBps, bytesWritten, targetBytes) -> {
+                        if (!isAdded() || getActivity() == null || handle.isCancelled()) {
+                            return;
+                        }
+                        getActivity().runOnUiThread(() -> {
+                            if (!isAdded() || getView() == null || seq != usbSpeedTestSeq.get()) {
+                                return;
+                            }
+                            String progressMsg = String.format(
+                                    Locale.US,
+                                    "⏳ 正在写入测速 %d%%（%.0f / %.0f MB · 当前 %.1f MB/s），请勿拔出 U 盘...",
+                                    percent,
+                                    bytesWritten / (1024.0 * 1024.0),
+                                    targetBytes / (1024.0 * 1024.0),
+                                    currentMBps
+                            );
+                            showUsbSpeedResultMessage(progressMsg, R.color.text_secondary);
+                        });
+                    },
+                    handle
+            );
+
+            if (!isAdded() || getActivity() == null) {
+                return;
+            }
+            getActivity().runOnUiThread(() -> {
+                if (!isAdded() || getView() == null || seq != usbSpeedTestSeq.get()) {
+                    return;
+                }
+                if (activeUsbSpeedTest == handle) {
+                    activeUsbSpeedTest = null;
+                }
+                if (usbSpeedTestButton != null) {
+                    usbSpeedTestButton.setEnabled(true);
+                    usbSpeedTestButton.setText("重新测速");
+                }
+                if (result.status == UsbSpeedTester.Status.CANCELLED) {
+                    return;
+                }
+
+                // 测速顺带刷新一次 U 盘挂载识别状态
+                boolean detectedNow = result.status != UsbSpeedTester.Status.UNAVAILABLE;
+                if (detectedNow != hasExternalSdCard) {
+                    hasExternalSdCard = detectedNow;
+                    if (storageDebugButton != null) {
+                        storageDebugButton.setVisibility(hasExternalSdCard ? View.GONE : View.VISIBLE);
+                    }
+                    updateUsbSpeedRequirementText();
+                    updateStorageLocationDescriptionAsync(appConfig.getStorageLocation());
+                }
+
+                int colorRes;
+                if (result.status == UsbSpeedTester.Status.MEETS_DIRECT) {
+                    colorRes = R.color.ui_success;
+                } else if (result.status == UsbSpeedTester.Status.RELAY_ONLY) {
+                    colorRes = R.color.ui_warning;
+                } else {
+                    colorRes = R.color.ui_danger;
+                }
+                showUsbSpeedResultMessage(result.detail, colorRes);
+                Toast.makeText(requireContext(), result.summary, Toast.LENGTH_SHORT).show();
+            });
+        }, "EVCam-UsbSpeedTest-" + seq).start();
+    }
+
+    private void showUsbSpeedResultMessage(String message, int colorResId) {
+        if (usbSpeedResultText == null || getContext() == null) {
+            return;
+        }
+        usbSpeedResultText.setVisibility(View.VISIBLE);
+        usbSpeedResultText.setText(message);
+        usbSpeedResultText.setTextColor(ContextCompat.getColor(getContext(), colorResId));
+    }
+
+    @Override
+    public void onDestroyView() {
+        usbSpeedTestSeq.incrementAndGet();
+        if (activeUsbSpeedTest != null) {
+            activeUsbSpeedTest.cancel();
+            activeUsbSpeedTest = null;
+        }
+        super.onDestroyView();
     }
     
     /**
@@ -1685,6 +1867,7 @@ public class RecorderSettingsFragment extends Fragment {
                     }
                     
                     // 重新检测并更新UI
+                    StorageHelper.clearCache();
                     hasExternalSdCard = StorageHelper.hasExternalSdCard(getContext());
                     if (storageDebugButton != null) {
                         storageDebugButton.setVisibility(hasExternalSdCard ? View.GONE : View.VISIBLE);
@@ -1701,6 +1884,7 @@ public class RecorderSettingsFragment extends Fragment {
                     }
                     String currentLocation = appConfig.getStorageLocation();
                     updateStorageLocationDescriptionAsync(currentLocation);
+                    updateUsbSpeedRequirementText();
                 })
                 .setNegativeButton("取消", null)
                 .show();
@@ -1941,6 +2125,7 @@ public class RecorderSettingsFragment extends Fragment {
                     int newFps = TARGET_FPS_VALUES[position];
                     if (newFps != appConfig.getTargetRecordingFps()) {
                         appConfig.setTargetRecordingFps(newFps);
+                        updateUsbSpeedRequirementText();
                         Toast.makeText(ctx, "录像目标帧率已设为「" + TARGET_FPS_LABELS[position] + "」，下次录制生效", Toast.LENGTH_SHORT).show();
                     }
                 }

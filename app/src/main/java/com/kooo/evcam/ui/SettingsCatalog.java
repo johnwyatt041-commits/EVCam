@@ -58,7 +58,7 @@ public final class SettingsCatalog {
             new Entry(ID_APPEARANCE, "1", "1. 外观与交互", "外观与交互",
                     "主题外观（跟随系统/深色/浅色）、默认启动页、开门退出二次确认", R.drawable.ic_nav_settings),
             new Entry(ID_RECORDER, "3", "3. 记录仪", "记录仪",
-                    "车型布局、录制模式、分段时长、摄像头选择、画质分辨率、存储与水印", R.drawable.ic_nav_recording),
+                    "车型布局、录制模式、分段时长、摄像头选择、画质分辨率、存储与U盘测速、水印", R.drawable.ic_nav_recording),
             new Entry(ID_SURROUND_360, "4", "4. 360 画面", "360 画面",
                     "360 全景模式 A、分视角、R 档自动预览返桌、E5 校准与离线车模", R.drawable.ic_nav_recording),
             new Entry(ID_BLIND_SPOT, "5", "5. 补盲", "补盲",

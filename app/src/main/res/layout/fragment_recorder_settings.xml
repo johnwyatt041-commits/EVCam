@@ -491,6 +491,64 @@
                 </LinearLayout>
 
                 <LinearLayout
+                    android:id="@+id/layout_usb_speed_test"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical"
+                    android:padding="16dp"
+                    android:background="@drawable/ui_card"
+                    android:layout_marginBottom="16dp">
+                    <LinearLayout
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:orientation="horizontal"
+                        android:gravity="center_vertical">
+                        <LinearLayout
+                            android:layout_width="0dp"
+                            android:layout_height="wrap_content"
+                            android:layout_weight="1"
+                            android:layout_marginEnd="16dp"
+                            android:orientation="vertical">
+                            <TextView
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="U盘写入速度检测"
+                                android:textColor="@color/text_primary"
+                                android:textSize="16sp"
+                                android:fontFamily="sans-serif-medium" />
+                            <TextView
+                                android:id="@+id/tv_usb_speed_requirement"
+                                android:layout_width="wrap_content"
+                                android:layout_height="wrap_content"
+                                android:text="点击右侧按钮测试 U 盘真实写入速度是否满足录制要求"
+                                android:textColor="@color/text_secondary"
+                                android:textSize="13sp"
+                                android:layout_marginTop="4dp" />
+                        </LinearLayout>
+                        <Button
+                            android:id="@+id/btn_usb_speed_test"
+                            android:layout_width="wrap_content"
+                            android:layout_height="wrap_content"
+                            android:text="开始测速"
+                            android:backgroundTint="@color/button_background"
+                            android:textColor="@color/button_text"
+                            android:elevation="0dp"
+                            android:fontFamily="sans-serif-medium"
+                            android:textAllCaps="false" />
+                    </LinearLayout>
+                    <TextView
+                        android:id="@+id/tv_usb_speed_result"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="12dp"
+                        android:paddingTop="10dp"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="13.5sp"
+                        android:lineSpacingExtra="4dp"
+                        android:visibility="gone" />
+                </LinearLayout>
+
+                <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:orientation="vertical"
