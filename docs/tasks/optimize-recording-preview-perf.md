@@ -1,11 +1,11 @@
 # 录像与预览性能优化
 
-最后更新：2026-11-22 12:47:10 +08:00
-最后核对：2026-11-22 12:47:10 +08:00
+最后更新：2026-11-22 13:03:30 +08:00
+最后核对：2026-11-22 13:03:30 +08:00
 任务/执行者：optimize-recording-preview-perf / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：已提交源码 `9f90c63` 并本地封包 **`build24`**（tag `v1.6.6-test-11221230-build24`，`1.6.6-test-11221230`，离线 `650` 测与双风味构建/Lint `0` errors 通过；待银河 E5 实车验证）
-当前结论：已完成第一批 9 项录像/预览优化及普通多窗预览轻量化（共 10 项，`9f90c63` / `build24`），涵盖 GL 管线去同步与去冗余绑定、分段异步收尾、排空防空轮询、默认 HEVC 码率生效、水印零分配、中转降优、360 模式 A VBO/IBO+OES 合并限频+Shader 优化、隐藏计时器停刷及默认关闭窗格圆角裁剪；剩余 4 项架构/实车兼容项已列明实车日志判据待实测后决定。
+状态：已封包发布 **`build24`**（[`v1.6.6-test-11221230-build24`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11221230-build24) / 源码 `9f90c63`，`650` 测与双风味构建/Lint `0` errors 通过；待银河 E5 实车验证）
+当前结论：已完成第一批 9 项录像/预览优化及普通多窗预览轻量化（共 10 项，`9f90c63` / `build24`），已推送至 GitHub fork Pre-release（6 资产远端 SHA256 核验一致）；剩余 4 项架构/实车兼容项已列明实车日志判据待实测后决定。
 
 ## 已修复清单（共 10 项）
 
@@ -38,7 +38,7 @@
 
 ## 最近记录
 
-- 2026-11-22 12:47:10 +08:00 | 本地封包 `build24` 并归档 `build22`（`1.6.6-test-11221230`） | 源码 `9f90c63` 打标 `v1.6.6-test-11221230-build24`，生成 A/B APK、`mappings.zip`、`SHA256.txt`、`manifest.json`、`notes.md` 并通过 `apksigner` v2 与标定/原生库哈希核验 | [EVCam-E5-build24-1.6.6-test-11221230-notes.md](../../outputs/EVCam-E5-build24-1.6.6-test-11221230-notes.md)
+- 2026-11-22 13:03:30 +08:00 | 封包发布 `build24` 至 GitHub Pre-release 并归档 `build22`（`1.6.6-test-11221230`） | 源码 `9f90c63` 打标 `v1.6.6-test-11221230-build24` 推送，A/B APK、`mappings.zip` 等 6 资产上传并核验远端 SHA256 一致 | [EVCam-E5-build24-1.6.6-test-11221230-notes.md](../../outputs/EVCam-E5-build24-1.6.6-test-11221230-notes.md)
 - 2026-11-22 12:38:25 +08:00 | 完成普通多窗预览轻量化并提交源码 `9f90c63`（共 10 项优化，`1.6.6-test-11221230`） | 新增默认关闭的「预览窗格圆角裁剪」开关、去 `clipToOutline`/overdraw 与冗余 `invalidateOutline()`、非编辑态 `setWillNotDraw(true)` 及 `setOpaque(true)`；双风味 `650` 测与构建/Lint `0` errors 全过 | [EditablePreviewLayout.java](../../app/src/main/java/com/kooo/evcam/ui/EditablePreviewLayout.java)
 
 ## 下一步
