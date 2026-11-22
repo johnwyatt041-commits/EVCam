@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-22 21:25:03 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已完成 [`S1~S4` + `M1~M2`](tasks/optimize-recording-preview-perf.md) 离线实现与验证，源码在 **`9f90c63`** 上待提交，版本 `1.6.6-test-11222113`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-22 21:40:18 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已完成 [`build25`](tasks/optimize-recording-preview-perf.md) 源码提交 `006ebb5`、标签 `v1.6.6-test-11222113-build25`、单 A 封包与 GitHub Pre-release 上传核验，版本 `1.6.6-test-11222113`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；已推远端最新 tag 为 **`v1.6.6-test-11221230-build24`**（`9f90c63`），当前工作区含单 A 版收敛 + **`S1~S4` + `M1~M2`** 改动（`1.6.6-test-11222113`，待提交） |
-| 本地交付 | `outputs/` 顶层保留 **`build23`** + **`build24`**（历史 `build22` 已归档至 `outputs/archive/`）；今后仅产出 A 版包 |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11221230-build24`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11221230-build24) |
-| 离线与设备验证 | **已通过单 A 版验证**（`verify.ps1` `374` 测 `0` 失败/`0` 错误/`0` 跳过 + A 版 Debug/Release + `:app:lintIndependentDebug` `0` errors）；**`build24` 实车日志已核实**，`S1~S4` 与 `M1~M2` 待实车复测 |
-| 实车状态 | 已收首份 `build24` E5 日志（`independent(A)`，`mode_d`）；`S1~S4` + `M1~M2` 已离线就绪，待决提交封包上车实测，另待测 U 盘测速、`build22` 补盲/网卡/飞书 |
+| 分支与提交 | `codex/e5-recording-startup-fix` 已推送 `006ebb5`；最新 tag 为 **`v1.6.6-test-11222113-build25`**（合入单 A 版收敛 + **`S1~S4` + `M1~M2`**） |
+| 本地交付 | `outputs/` 顶层保留 **`build24`** + **`build25`**（`build23` 已归档至 `outputs/archive/`）；仅产出 A 版 5 资产 |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11222113-build25`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11222113-build25)（5 资产 SHA256 核验一致） |
+| 离线与设备验证 | **已通过单 A 版验证**（`verify.ps1` `374` 测 `0` 失败/`0` 错误/`0` 跳过 + A 版 Debug/Release + `:app:lintIndependentDebug` `0` errors + `apksigner` v2）；**`build24` 实车日志已核实**，`build25` 待实车复测 |
+| 实车状态 | **`build25`**（`independent(A)`，`S1~S4` + `M1~M2`）已上 GitHub 待安装上车实测，另待测 U 盘测速、`build22` 补盲/网卡/飞书 |
 
 ## 当前结论与确认边界
 
@@ -27,15 +27,15 @@
 
 ## 下一步
 
-1. 待用户决定基于当前 **`S1~S4` + `M1~M2`**（`1.6.6-test-11222113`）提交代码与封包上车实测（复测开 `Debug 日志转 INFO`，对照 `path=direct` vs `path=gl` 与帧率），之后再按实车表现评估 `L1~L3`。
+1. 安装 **`build25`**（[`v1.6.6-test-11222113-build25`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11222113-build25)）上银河 E5 实测并开启 `Debug 日志转 INFO`，重点采集：`path=direct` vs `path=gl` 实测帧率、`Mode D`/退后台切换流畅度、悬浮按钮与后台闪屏表现，再按需评估 `L1~L3`。
 
 ## 最近更新（最多5条）
 
+- 2026-11-22 21:40:18 +08:00 | 封包发布 build25 并推送 GitHub Pre-release（`1.6.6-test-11222113`） | 源码 `006ebb5` 打标 `v1.6.6-test-11222113-build25` 推送，单 A 版 APK/`mappings.zip` 等 5 资产远端 SHA256 一致、`build23` 归档，通过 `374` 测与 Lint `0` errors，待实车测试 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-22 21:25:03 +08:00 | 完成 `optimize-recording-preview-perf` 第二组 `M2` 无水印无调色直连编码跳过 GL 与单 A 版离线验证（`1.6.6-test-11222113`） | 新增 `DirectEncodingPolicy` 与设置页可控开关，无水印且无/恒等调色时直连 `MediaCodec` 输入面并保留 `preStartDrain`/首 IDR 门控、跨段/S3/M1 契约与单路一次自动回退 GL；`verify.ps1` `374` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-22 20:41:35 +08:00 | 完成 `optimize-recording-preview-perf` 第二组 `M1` 预览隔离重建与单 A 版离线验证（`1.6.6-test-11222037`） | 新增 `RecordingPreviewSessionPolicy`，录制期切 Mode D/前后台/`TextureView` 销毁与 `Mode A` 改走 RepeatingRequest 热切/动态 `OutputConfiguration` 隔离整路重建；`verify.ps1` `357` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-22 20:06:06 +08:00 | 完成 `optimize-recording-preview-perf` 第一组 `S1~S4` 优化与单 A 版离线验证（`1.6.6-test-11222001`） | 悬浮窗防重排与轻量参数、VHAL 120s 静默重连消震荡、起录并发异步准备与取消清理、`BlindSpotService` 按需轮询/预创建落地；`verify.ps1` `342` 测全过且 `:app:lintIndependentDebug` `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-22 19:20:00 +08:00 | 正式下线 B 版（`composite`）并锁定全项目仅更新 A 版（`1.6.6-test-11221918`） | `app/build.gradle.kts` 移除 `composite` flavor、`verify.ps1` 收敛为 `Independent` 单风味测试/构建，并在 `AGENTS.md`/`START_HERE.md`/`DEVELOPMENT.md`/`REQUIREMENTS.md`/`ARCHITECTURE.md` 固化规则禁止再编发 B 版 | [AGENTS.md](../AGENTS.md)
-- 2026-11-22 19:04:00 +08:00 | 完成 `build24` 实车日志分析并拆分第二批优化清单（`S1~S4` / `M1~M2` / `L1~L3`） | 实证排除编码参数与切 B 版，锁定 `Mode D`/生命周期 `recreateSession` 与 3 路 GL 耗时为主因，登记后台偶发闪屏排查路径 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 
 ## 归档与按需索引
 

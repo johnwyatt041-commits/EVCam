@@ -1,7 +1,7 @@
 # 新增 U 盘手动写入速度检测
 
 最后更新：2026-11-22 09:00:57 +08:00
-最后核对：2026-11-22 09:00:57 +08:00
+最后核对：2026-11-22 21:40:18 +08:00
 任务/执行者：add-usb-speed-test / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
 状态：已封包发布 `build23`（[`v1.6.6-test-11220818-build23`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11220818-build23) / 源码 `bb34e66`，`638` 单测与 Lint `0` errors；待实车测试）
@@ -21,7 +21,7 @@
 
 ## 最近记录
 
-- 2026-11-22 09:00:57 +08:00 | 封包发布 build23 并推送 GitHub Pre-release（`1.6.6-test-11220818`） | 源码 `bb34e66` 打标 `v1.6.6-test-11220818-build23` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 核验一致、`build21` 归档至 `outputs/archive/`，待实车插 U 盘测试 | [EVCam-E5-build23-1.6.6-test-11220818-notes.md](../../outputs/EVCam-E5-build23-1.6.6-test-11220818-notes.md)
+- 2026-11-22 09:00:57 +08:00 | 封包发布 build23 并推送 GitHub Pre-release（`1.6.6-test-11220818`） | 源码 `bb34e66` 打标 `v1.6.6-test-11220818-build23` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 核验一致、`build21` 归档至 `outputs/archive/`，待实车插 U 盘测试 | [EVCam-E5-build23-1.6.6-test-11220818-notes.md](../../outputs/archive/EVCam-E5-build23-1.6.6-test-11220818-notes.md)
 - 2026-11-22 08:55:30 +08:00 | 提交并推送 U 盘手动写入速度检测至 GitHub fork（`1.6.6-test-11220818`） | 新增 `UsbSpeedTester`、设置页「U盘写入速度检测」卡片与 `UsbSpeedTesterTest`（7测），提交并推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`verify.ps1` 双风味 `638` 测与 Lint `0` errors 全过，待封包与实车插 U 盘实测 | [UsbSpeedTester.java](../../app/src/main/java/com/kooo/evcam/UsbSpeedTester.java)
 
 ## 下一步
