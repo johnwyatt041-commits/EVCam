@@ -1,17 +1,17 @@
 # 项目进度
 
-最后更新/核对：2026-11-22 08:55:30 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已将 U 盘写入速度检测 `1.6.6-test-11220818` 提交并推送 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`，离线 `638` 测、双风味构建与 Lint `0` errors 通过；最新已封包 Pre-release 为 **`build22`** [`v1.6.6-test-11212325-build22`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11212325-build22)，待打包/银河 E5 实车验证）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-22 09:00:57 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已封包发布 **`build23`** [`v1.6.6-test-11220818-build23`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11220818-build23) 至 `johnwyatt041-commits/EVCam` Pre-release，源码提交 **`bb34e66`**，`1.6.6-test-11220818`，`638` 测、`0` Lint error；`build21` 已归档至 `outputs/archive/`，待银河 E5 实车验证）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`；已同步至 `johnwyatt041-commits/EVCam`（`1.6.6-test-11220818`，`versionCode = 86`；`build22` Release 源码基线 `215753f`） |
-| 本地交付 | `outputs/` 顶层保留 **`build21`** + **`build22`**（各 6 文件，共 12 文件；`build20` 已归档至 `outputs/archive/`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11212325-build22`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11212325-build22)（分支已推送至 `1.6.6-test-11220818`） |
-| 离线与设备验证 | `1.6.6-test-11220818` 已通过 `verify.ps1` 双风味 `638` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease` 及双风味 Lint `0` errors（`2225` warnings）；**尚未上实车测试** |
-| 实车状态 | 待按需封包并上车验证 U 盘测速、`build22` 6 项可靠性修复（多路部分失败/U盘中转/`.pending`/动态清理/模式A/规则）及网卡、视图E、补盲、飞书、`build21` 360 |
+| 分支与提交 | `codex/e5-recording-startup-fix`；源码基线 **`bb34e66`**（tag `v1.6.6-test-11220818-build23`，`versionCode = 86`） |
+| 本地交付 | `outputs/` 顶层保留 **`build22`** + **`build23`**（各 6 文件，共 12 文件；`build21` 已归档至 `outputs/archive/`） |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11220818-build23`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11220818-build23)（6 资产上传并核验远端 SHA256 一致） |
+| 离线与设备验证 | `build23`（`bb34e66`）已通过 `verify.ps1` 双风味 `638` 测（`0` 失败/`0` 跳过）、`assembleDebug`/`assembleRelease`、双风味 Lint `0` errors（`2225` warnings）与 `apksigner` v2 校验；**尚未上实车测试** |
+| 实车状态 | 待安装 `build23` 验证 U 盘测速、`build22` 6 项可靠性修复（多路部分失败/U盘中转/`.pending`/动态清理/模式A/规则）及网卡、视图E、补盲、飞书、`build21` 360 |
 
 ## 当前结论与确认边界
 
@@ -30,11 +30,11 @@
 
 ## 最近更新（最多5条）
 
+- 2026-11-22 09:00:57 +08:00 | 封包发布 build23 并推送 GitHub Pre-release（`1.6.6-test-11220818`） | 源码 `bb34e66` 打标 `v1.6.6-test-11220818-build23` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build21` 归档，`638` 测与 Lint `0` errors，待实车测试 | [U盘速度检测](tasks/add-usb-speed-test.md)
 - 2026-11-22 08:55:30 +08:00 | 提交并推送 U 盘手动写入速度检测至 GitHub fork（`1.6.6-test-11220818`） | 在记录仪存储位置新增「U盘写入速度检测」卡片，基于 `FileChannel.force(true)` 真实落盘测速并评估直写/中转达标状态，提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`638` 测与 Lint `0` errors 全过 | [U盘速度检测](tasks/add-usb-speed-test.md)
 - 2026-11-22 07:52:49 +08:00 | 封包发布 build22 并推送 GitHub Pre-release（`1.6.6-test-11212325`） | 源码 `215753f` 打标 `v1.6.6-test-11212325-build22` 推送，A/B APK 与 `mappings.zip` 等 6 资产远端 SHA256 一致、`build20` 归档，`624` 测与 Lint `0` errors，待实车测试 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
 - 2026-11-22 07:34:13 +08:00 | 合流提交 4 轮累积改动并推送 GitHub（`215753f` / `1.6.6-test-11212325`） | 将补盲多屏/倒置坐标/飞书测试、`MODE_E`、回放分享网卡与 6 项录制/存储/模式 A/规则修复一并提交推送至 `johnwyatt041-commits/EVCam` `codex/e5-recording-startup-fix`；`624` 测与 Lint `0` errors | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
 - 2026-11-21 23:41:10 +08:00 | 完成多路录制启动、U盘中转与清理、模式A断联及压制规则忙等 6 项修复（`1.6.6-test-11212325`） | 6 项问题全核实修复，涵盖 `RecordingStartupTracker`、落盘核验+`.part` 拷贝、`ActiveRecordingRegistry`+启动 `.pending` 恢复、`StorageSpaceGuard` O(1) 动态清理、模式 A 状态机+OES 线程+看门狗及 `RuleRuntime.suppressed`；`624` 测与双风味构建/Lint `0` errors 全过 | [可靠性修复任务](tasks/fix-recording-storage-modea-rule-reliability.md)
-- 2026-11-21 15:33:53 +08:00 | 修复回放局域网分享“未检测到网卡”（`1.6.6-test-11211526`） | 对照 SmartCam V3.0.56 修复网卡匹配与逐接口容错，增加系统网络服务兜底、通配符端口回退、异步扫描、「热点设置」及状态竞态修复；`564` 测与双风味构建/Lint `0` errors 全过 | [回放分享网卡修复](tasks/fix-lan-share-nic-detection.md)
 
 ## 归档与按需索引
 
