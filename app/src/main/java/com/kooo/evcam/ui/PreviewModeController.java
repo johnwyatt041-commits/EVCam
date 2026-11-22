@@ -145,6 +145,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
             previewLayout.setOnManualSideToggleListener(this::toggleModeDSideManual);
             previewLayout.setOnModeDSideLinkageCycleListener(this::cycleModeDSideLinkageMode);
             previewLayout.setModeDSideLinkageMode(appConfig.getModeDSideLinkageMode());
+            previewLayout.setRoundedClipEnabled(appConfig.isPreviewRoundedClipEnabled());
         }
         if (modeAContainer != null) {
             modeAContainer.setVisibility(View.GONE);
@@ -300,6 +301,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
         applyVisibilityMaskToCameras(false);
         if (previewLayout != null) {
             previewLayout.setOverlayBgAlphaPercent(appConfig.getPreviewOverlayBgAlphaPercent());
+            previewLayout.setRoundedClipEnabled(appConfig.isPreviewRoundedClipEnabled());
         }
         if (surroundModeAView != null) {
             surroundModeAView.refreshFromPreferences();

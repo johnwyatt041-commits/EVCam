@@ -4,6 +4,7 @@ import android.content.Context;
 import android.os.Environment;
 import android.os.Handler;
 import android.os.HandlerThread;
+import android.os.Process;
 
 import com.kooo.evcam.camera.ActiveRecordingRegistry;
 import com.kooo.evcam.playback.VideoLockStore;
@@ -132,7 +133,7 @@ public class FileTransferManager {
             return;
         }
         
-        transferThread = new HandlerThread("FileTransfer");
+        transferThread = new HandlerThread("FileTransfer", Process.THREAD_PRIORITY_BACKGROUND);
         transferThread.start();
         transferHandler = new Handler(transferThread.getLooper());
         
@@ -736,16 +737,11 @@ public class FileTransferManager {
             fis = new FileInputStream(source);
             fos = new FileOutputStream(destination);
 
-            byte[] buffer = new byte[64 * 1024];
-            long transferred = 0;
+            byte[] buffer = new byte[256 * 1024];
             int read;
 
             while ((read = fis.read(buffer)) != -1) {
                 fos.write(buffer, 0, read);
-                transferred += read;
-                if (transferred % (1024 * 1024) == 0) {
-                    fos.flush();
-                }
             }
 
             fos.flush();

@@ -159,7 +159,17 @@ public final class VehicleStatusWatermark implements AutoCloseable {
 
     private RecordingVehicleSource.Lease lease;
     private WatermarkOptions options = WatermarkOptions.legacyVehicleStatusOnly();
-    private String previousCacheKey = "";
+    private boolean renderedOnce;
+    private boolean optionsDirty = true;
+    private long lastRenderedEpochSecond = Long.MIN_VALUE;
+    private int lastRenderedSpeedKmh = Integer.MIN_VALUE;
+    private VehicleSignalSnapshot.Gear lastRenderedGear;
+    private int lastRenderedTurnLeft = Integer.MIN_VALUE;
+    private int lastRenderedTurnRight = Integer.MIN_VALUE;
+    private final int[] cachedViewport = new int[4];
+    private int lastViewportOutputWidth = -1;
+    private int lastViewportOutputHeight = -1;
+    private Position lastViewportPosition;
     private int program;
     private int texture;
     private int positionAttr;
@@ -248,7 +258,7 @@ public final class VehicleStatusWatermark implements AutoCloseable {
         WatermarkOptions effective = newOptions != null ? newOptions : WatermarkOptions.disabled();
         if (!effective.equals(this.options)) {
             this.options = effective;
-            this.previousCacheKey = "";
+            this.optionsDirty = true;
             ensureVehicleSourceLeaseIfNeeded();
         }
     }
@@ -271,7 +281,7 @@ public final class VehicleStatusWatermark implements AutoCloseable {
             return;
         }
         long nowMs = System.currentTimeMillis();
-        long epochSecond = nowMs / 1000L;
+        long epochSecond = options.showDateTime ? (nowMs / 1000L) : 0L;
         VehicleStatus status = (statusSupplier != null && (options.showSpeed || options.showTurnSignal))
                 ? statusSupplier.get()
                 : VehicleStatus.UNKNOWN;
@@ -285,11 +295,23 @@ public final class VehicleStatusWatermark implements AutoCloseable {
             gear = VehicleSignalSnapshot.Gear.UNKNOWN;
         }
 
-        String cacheKey = buildCacheKey(options, epochSecond, status, gear);
+        int speedVal = options.showSpeed ? status.speedKmh : 0;
+        VehicleSignalSnapshot.Gear gearVal = options.showGear ? gear : VehicleSignalSnapshot.Gear.UNKNOWN;
+        int leftVal = options.showTurnSignal ? status.left : 0;
+        int rightVal = options.showTurnSignal ? status.right : 0;
+
+        boolean stateChanged = !renderedOnce
+                || optionsDirty
+                || epochSecond != lastRenderedEpochSecond
+                || speedVal != lastRenderedSpeedKmh
+                || gearVal != lastRenderedGear
+                || leftVal != lastRenderedTurnLeft
+                || rightVal != lastRenderedTurnRight;
+
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, texture);
 
-        if (!cacheKey.equals(previousCacheKey)) {
+        if (stateChanged) {
             String dateTimeText = options.showDateTime ? TimestampTextCache.get(nowMs) : "";
             renderBitmap(dateTimeText, status, gear);
             if (uploaded) {
@@ -298,11 +320,24 @@ public final class VehicleStatusWatermark implements AutoCloseable {
                 GLUtils.texImage2D(GLES20.GL_TEXTURE_2D, 0, bitmap, 0);
                 uploaded = true;
             }
-            previousCacheKey = cacheKey;
+            renderedOnce = true;
+            optionsDirty = false;
+            lastRenderedEpochSecond = epochSecond;
+            lastRenderedSpeedKmh = speedVal;
+            lastRenderedGear = gearVal;
+            lastRenderedTurnLeft = leftVal;
+            lastRenderedTurnRight = rightVal;
         }
 
-        int[] viewport = computeViewportRect(options.position, outputWidth, outputHeight, TEXTURE_WIDTH, TEXTURE_HEIGHT);
-        GLES20.glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        if (outputWidth != lastViewportOutputWidth
+                || outputHeight != lastViewportOutputHeight
+                || options.position != lastViewportPosition) {
+            computeViewportRectInto(options.position, outputWidth, outputHeight, TEXTURE_WIDTH, TEXTURE_HEIGHT, cachedViewport);
+            lastViewportOutputWidth = outputWidth;
+            lastViewportOutputHeight = outputHeight;
+            lastViewportPosition = options.position;
+        }
+        GLES20.glViewport(cachedViewport[0], cachedViewport[1], cachedViewport[2], cachedViewport[3]);
         GLES20.glUseProgram(program);
         GLES20.glUniform1i(samplerUniform, 0);
         vertices.position(0);
@@ -480,8 +515,24 @@ public final class VehicleStatusWatermark implements AutoCloseable {
             int outputHeight,
             int boxWidth,
             int boxHeight) {
+        int[] out = new int[4];
+        computeViewportRectInto(position, outputWidth, outputHeight, boxWidth, boxHeight, out);
+        return out;
+    }
+
+    static void computeViewportRectInto(
+            Position position,
+            int outputWidth,
+            int outputHeight,
+            int boxWidth,
+            int boxHeight,
+            int[] out) {
         if (outputWidth <= 0 || outputHeight <= 0 || boxWidth <= 0 || boxHeight <= 0) {
-            return new int[]{0, 0, 1, 1};
+            out[0] = 0;
+            out[1] = 0;
+            out[2] = 1;
+            out[3] = 1;
+            return;
         }
         Position pos = position != null ? position : Position.BOTTOM_RIGHT;
         int margin = Math.min(16, Math.max(4, Math.min(outputWidth, outputHeight) / 24));
@@ -495,7 +546,10 @@ public final class VehicleStatusWatermark implements AutoCloseable {
         int vy = (pos == Position.TOP_LEFT || pos == Position.TOP_RIGHT)
                 ? Math.max(margin, outputHeight - displayHeight - margin)
                 : margin;
-        return new int[]{vx, vy, displayWidth, displayHeight};
+        out[0] = vx;
+        out[1] = vy;
+        out[2] = displayWidth;
+        out[3] = displayHeight;
     }
 
     /**

@@ -19,6 +19,7 @@ import android.opengl.Matrix;
 import android.view.Surface;
 
 import com.kooo.evcam.AppLog;
+import com.kooo.evcam.BuildConfig;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -160,6 +161,8 @@ public class EglSurfaceEncoder {
     // 状态
     private boolean isInitialized = false;
     private boolean isReleased = false;
+    private boolean eglContextBound = false;
+    private long eglBoundThreadId = -1L;
 
     // 时间水印相关
     private boolean watermarkEnabled = false;
@@ -376,6 +379,7 @@ public class EglSurfaceEncoder {
             EGLExt.eglPresentationTimeANDROID(eglDisplay, eglSurface, ptsNs);
             return EGL14.eglSwapBuffers(eglDisplay, eglSurface);
         } catch (Exception e) {
+            eglContextBound = false;
             AppLog.e(TAG, "Camera " + cameraId + " Error drawing frame", e);
             return false;
         }
@@ -541,6 +545,8 @@ public class EglSurfaceEncoder {
         AppLog.d(TAG, "Camera " + cameraId + " Updating output surface");
 
         try {
+            eglContextBound = false;
+            eglBoundThreadId = -1L;
             // 销毁旧的 EGL Surface
             // 注意：当 surface 为 EGL_NO_SURFACE 时，context 必须也是 EGL_NO_CONTEXT，否则会报 EGL_BAD_MATCH
             if (eglSurface != EGL14.EGL_NO_SURFACE) {
@@ -613,6 +619,8 @@ public class EglSurfaceEncoder {
 
         isReleased = true;
         isInitialized = false;
+        eglContextBound = false;
+        eglBoundThreadId = -1L;
 
         try {
             // 释放 OpenGL 资源
@@ -917,12 +925,20 @@ public class EglSurfaceEncoder {
     }
 
     /**
-     * 设置为当前 EGL 上下文
+     * 设置为当前 EGL 上下文（单线程独占上下文已绑定时直接跳过冗余 eglMakeCurrent 调用）
      */
     private void makeCurrent() {
+        long currentTid = Thread.currentThread().getId();
+        if (eglContextBound && currentTid == eglBoundThreadId) {
+            return;
+        }
         if (!EGL14.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
+            eglContextBound = false;
+            eglBoundThreadId = -1L;
             throw new RuntimeException("eglMakeCurrent failed");
         }
+        eglContextBound = true;
+        eglBoundThreadId = currentTid;
     }
 
     /**
@@ -1002,9 +1018,12 @@ public class EglSurfaceEncoder {
     }
 
     /**
-     * 检查 OpenGL 错误
+     * 检查 OpenGL 错误（Release 版跳过逐帧 glGetError，避免打断移动端 Tile GPU 异步管线）
      */
     private void checkGlError(String op) {
+        if (!BuildConfig.DEBUG) {
+            return;
+        }
         int error;
         while ((error = GLES20.glGetError()) != GLES20.GL_NO_ERROR) {
             AppLog.e(TAG, "Camera " + cameraId + " " + op + ": glError " + error);

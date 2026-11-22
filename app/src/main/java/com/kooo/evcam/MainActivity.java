@@ -1473,12 +1473,14 @@ public class MainActivity extends AppCompatActivity implements
         
         if (tvRecordingStats != null && isRecording) {
             if (isRecordingStatsEnabled) {
-                // 显示状态（使用 alpha 恢复可见）
+                // 显示状态（使用 alpha 恢复可见）并立即恢复每秒刷新
                 tvRecordingStats.setAlpha(1.0f);
+                scheduleRecordingStatsTicker();
                 Toast.makeText(this, "录制状态显示已开启", Toast.LENGTH_SHORT).show();
             } else {
-                // 使用 alpha=0 隐藏，但保持 VISIBLE 状态以响应点击
+                // 使用 alpha=0 隐藏，保持 VISIBLE 以响应点击，同时暂停每秒无效重绘
                 tvRecordingStats.setAlpha(0.0f);
+                pauseRecordingStatsTicker();
                 Toast.makeText(this, "录制状态显示已关闭", Toast.LENGTH_SHORT).show();
             }
         }
@@ -1514,21 +1516,39 @@ public class MainActivity extends AppCompatActivity implements
             // 始终设为 VISIBLE，通过 alpha 控制可见性
             tvRecordingStats.setVisibility(View.VISIBLE);
             tvRecordingStats.setAlpha(isRecordingStatsEnabled ? 1.0f : 0.0f);
-            updateRecordingStatsDisplay();
         }
         
-        // 创建定时更新任务
+        // 创建定时更新任务（仅在状态显示开启时每秒刷新，隐藏态零无效 setText/重绘）
         recordingTimerRunnable = new Runnable() {
             @Override
             public void run() {
-                if (isRecording) {
+                if (isRecording && isRecordingStatsEnabled) {
                     updateRecordingStatsDisplay();
                     recordingTimerHandler.postDelayed(this, 1000);  // 每秒更新一次
                 }
             }
         };
         
-        recordingTimerHandler.post(recordingTimerRunnable);
+        if (isRecordingStatsEnabled) {
+            scheduleRecordingStatsTicker();
+        }
+    }
+
+    private void scheduleRecordingStatsTicker() {
+        if (recordingTimerHandler == null || recordingTimerRunnable == null) {
+            updateRecordingStatsDisplay();
+            return;
+        }
+        recordingTimerHandler.removeCallbacks(recordingTimerRunnable);
+        if (isRecording && isRecordingStatsEnabled) {
+            recordingTimerHandler.post(recordingTimerRunnable);
+        }
+    }
+
+    private void pauseRecordingStatsTicker() {
+        if (recordingTimerHandler != null && recordingTimerRunnable != null) {
+            recordingTimerHandler.removeCallbacks(recordingTimerRunnable);
+        }
     }
     
     /**
@@ -1552,7 +1572,7 @@ public class MainActivity extends AppCompatActivity implements
      * 更新录制状态显示
      */
     private void updateRecordingStatsDisplay() {
-        if (tvRecordingStats == null) {
+        if (tvRecordingStats == null || !isRecordingStatsEnabled) {
             return;
         }
         
@@ -1562,7 +1582,7 @@ public class MainActivity extends AppCompatActivity implements
         long minutes = totalSeconds / 60;
         long seconds = totalSeconds % 60;
         
-        // 格式化时间：MM:SS / 分段数（即使隐藏也更新文本，便于双击显示时立即看到正确时间）
+        // 格式化时间：MM:SS / 分段数
         String timeStr = String.format(java.util.Locale.getDefault(), "%02d:%02d / %d", minutes, seconds, currentSegmentCount);
         tvRecordingStats.setText(timeStr);
     }
@@ -1574,8 +1594,10 @@ public class MainActivity extends AppCompatActivity implements
         currentSegmentCount = newSegmentIndex + 1;  // 分段索引从0开始，显示从1开始
         AppLog.d(TAG, "分段切换: 第 " + currentSegmentCount + " 段");
         
-        // 立即更新显示
-        runOnUiThread(this::updateRecordingStatsDisplay);
+        // 仅在状态显示开启时立即刷新文本
+        if (isRecordingStatsEnabled) {
+            runOnUiThread(this::updateRecordingStatsDisplay);
+        }
     }
     
     /**
@@ -1584,9 +1606,14 @@ public class MainActivity extends AppCompatActivity implements
     public void refreshRecordingStatsSettings() {
         isRecordingStatsEnabled = appConfig.isRecordingStatsEnabled();
         
-        // 如果正在录制，根据新设置显示或隐藏（通过 alpha 控制，保持可点击）
+        // 如果正在录制，根据新设置显示或隐藏（通过 alpha 控制，保持可点击）并启停定时刷新
         if (isRecording && tvRecordingStats != null) {
             tvRecordingStats.setAlpha(isRecordingStatsEnabled ? 1.0f : 0.0f);
+            if (isRecordingStatsEnabled) {
+                scheduleRecordingStatsTicker();
+            } else {
+                pauseRecordingStatsTicker();
+            }
         }
     }
 

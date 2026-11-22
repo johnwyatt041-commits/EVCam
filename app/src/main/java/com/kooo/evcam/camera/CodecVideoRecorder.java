@@ -104,22 +104,54 @@ public class CodecVideoRecorder {
 
     // 状态
     private final AtomicBoolean isRecording = new AtomicBoolean(false);  // 使用 AtomicBoolean 确保线程安全
+    private final AtomicBoolean drainWakeupPending = new AtomicBoolean(false);
     private volatile boolean isReleased = false;
     private volatile boolean stopRequested;
+    private int consecutiveEmptyDrains = 0;
+
+    static long computeNextDrainDelayMs(boolean gotOutput, int inFlightFrames, int emptyDrainCount) {
+        if (gotOutput) {
+            return 10L;
+        }
+        if (inFlightFrames > 0) {
+            return emptyDrainCount <= 2 ? 15L : 30L;
+        }
+        return 120L;
+    }
+
     private final Runnable delayedDrain = () -> {
+        drainWakeupPending.set(false);
+        boolean gotOutput;
         synchronized (codecLock) {
             if (isReleased || stopRequested || !isRecording.get() || !this.encoderHealthy || encoder == null) return;
-            drainEncoderWithResult(false);
+            gotOutput = drainEncoderWithResult(false);
+        }
+        if (gotOutput) {
+            consecutiveEmptyDrains = 0;
+        } else {
+            consecutiveEmptyDrains++;
         }
         if (!isReleased && !stopRequested && isRecording.get() && drainHandler != null) {
-            drainHandler.postDelayed(this.delayedDrain, 10);
+            long nextDelay = computeNextDrainDelayMs(gotOutput, this.framesWithoutEncoderOutput, this.consecutiveEmptyDrains);
+            drainHandler.postDelayed(this.delayedDrain, nextDelay);
         }
     };
 
     private void scheduleDrain() {
-        if (drainHandler != null) {
-            drainHandler.removeCallbacks(delayedDrain);
-            drainHandler.post(delayedDrain);
+        Handler handler = drainHandler;
+        if (handler != null) {
+            drainWakeupPending.set(true);
+            consecutiveEmptyDrains = 0;
+            handler.removeCallbacks(delayedDrain);
+            handler.post(delayedDrain);
+        }
+    }
+
+    private void notifyDrainFrameSubmitted() {
+        Handler handler = drainHandler;
+        if (handler != null && drainWakeupPending.compareAndSet(false, true)) {
+            handler.removeCallbacks(delayedDrain);
+            handler.post(delayedDrain);
         }
     }
     private volatile String currentFilePath;
@@ -149,7 +181,7 @@ public class CodecVideoRecorder {
     private static final long FIRST_CHECK_DELAY_MS = 500;  // 首次检查延迟（更快检测首次写入）
     private volatile Runnable fileSizeCheckRunnable;
     private long recordedFrameCount = 0;
-    private List<String> recordedFilePaths = new ArrayList<>();  // 本次录制的所有文件路径
+    private List<String> recordedFilePaths = new java.util.concurrent.CopyOnWriteArrayList<>();  // 本次录制的所有文件路径
     
     // 首次写入检测（与 VideoRecorder 保持一致）
     private static final long FIRST_WRITE_TIMEOUT_MS = 10000;  // 首次写入超时（10秒）
@@ -502,6 +534,7 @@ public class CodecVideoRecorder {
                                 long glUs = (System.nanoTime() - frameStart) / 1000;
                                 totalGlUs += glUs;
                                 maxGlUs = Math.max(maxGlUs, glUs);
+                                notifyDrainFrameSubmitted();
                             }
                         } catch (Exception e) {
                             AppLog.e(TAG, "Camera " + cameraId + " Error processing frame", e);
@@ -674,6 +707,7 @@ public class CodecVideoRecorder {
         // 立即标记停止状态，防止新帧处理
         isRecording.set(false);
         segmentRequested = false;
+        drainWakeupPending.set(false);
         if (drainHandler != null) drainHandler.removeCallbacks(delayedDrain);
         recoveryAttempts = 0;
 
@@ -723,6 +757,9 @@ public class CodecVideoRecorder {
                 }
             }
         }
+
+        // 等待已排队的异步分段收尾落盘完成，再统一验证并清理文件
+        awaitPendingSegmentFinalizations(3000L);
 
         // 验证并清理所有录制的文件
         List<String> deletedFiles = validateAndCleanupAllFiles();
@@ -835,14 +872,12 @@ public class CodecVideoRecorder {
             encoderHandler = null;
         }
 
-        // 清理分段处理线程
-        if (segmentHandler != null) {
-            segmentHandler.removeCallbacksAndMessages(null);
-        }
+        // 清理分段处理线程（仅取消监控定时器，允许已排队的分段收尾任务执行完毕）
+        cancelMonitoringTimers();
         if (segmentThread != null) {
             segmentThread.quitSafely();
             try {
-                segmentThread.join(1000);  // 1秒超时
+                segmentThread.join(3000);  // 等待异步分段收尾完成
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 AppLog.w(TAG, "Camera " + cameraId + " segment thread join interrupted");
@@ -906,9 +941,9 @@ public class CodecVideoRecorder {
         int effectiveFrameRate = blindSpotOptimizeMode ? BLIND_SPOT_OPTIMIZED_FPS : frameRate;
         if (eglEncoder != null) eglEncoder.setTargetFrameRate(effectiveFrameRate);
 
-        // 码率：HEVC 模式使用优化后码率；H.264 兼容模式使用显式配置值
-        int avcBitrate = forceH264 ? bitRate : calculateOptimalBitrate(MIME_TYPE_H264);
-        int hevcBitrate = calculateOptimalBitrate(MIME_TYPE_HEVC);
+        // 码率：显式配置了 bitRate 时统一尊重用户码率等级（HEVC 按 55% 效率折算），未配置时回退自动估算
+        int avcBitrate = resolveTargetBitrate(MIME_TYPE_H264);
+        int hevcBitrate = resolveTargetBitrate(MIME_TYPE_HEVC);
 
         RecordingEncoderSelector.Result selected = RecordingEncoderSelector.create(width, height,
                 effectiveFrameRate, avcBitrate, hevcBitrate, forceH264, keyFrameIntervalSeconds, hardwareOnly,
@@ -929,6 +964,26 @@ public class CodecVideoRecorder {
                 (forceH264 ? " [兼容模式]" : ""));
     }
 
+
+    /**
+     * 解析目标编码格式的最终码率：
+     * 1. 若调用方已按用户设置（低/标准/高）显式传入 bitRate > 0，优先尊重该配置（HEVC 按 55% 效率折算）
+     * 2. 否则回退到 calculateOptimalBitrate() 自动估算
+     */
+    int resolveTargetBitrate(String targetMime) {
+        if (bitRate <= 0) {
+            return calculateOptimalBitrate(targetMime);
+        }
+        boolean isHevc = MIME_TYPE_HEVC.equals(targetMime);
+        long resolved = isHevc ? Math.round(bitRate * 0.55) : (long) bitRate;
+        int maxAllowed = isHevc ? MAX_HEVC_BITRATE : MAX_BITRATE;
+        int minAllowed = 500_000;
+        resolved = Math.max(minAllowed, Math.min(resolved, maxAllowed));
+        if (isHevc) {
+            resolved = ((resolved + 50_000) / 100_000) * 100_000;
+        }
+        return (int) resolved;
+    }
 
     /**
      * 计算最优码率
@@ -1212,10 +1267,9 @@ public class CodecVideoRecorder {
     private void rotateMuxerAtKeyFrame() throws IOException {
         if (outputFormat == null) return;
         segmentRequested = false;
-        String completedPath = currentFilePath;
-        muxer.stop();
+        final AsyncMuxerWriter previousMuxer = this.muxer;
+        final String completedPath = this.currentFilePath;
         logRecordingStats();
-        muxer.release();
         segmentIndex++;
         currentFilePath = generateSegmentPath();
         recordedFilePaths.add(currentFilePath);
@@ -1225,11 +1279,49 @@ public class CodecVideoRecorder {
         muxerStarted = true;
         lastFileSize = 0;
         final int index = segmentIndex;
-        if (segmentHandler != null) segmentHandler.post(() -> {
-            validateAndCleanupFile(completedPath);
-            if (callback != null) callback.onSegmentSwitch(cameraId, index, completedPath);
-            scheduleNextSegment();
-        });
+        Runnable finalizePrevious = () -> {
+            boolean published = true;
+            if (previousMuxer != null) {
+                try {
+                    previousMuxer.stop();
+                } catch (Exception e) {
+                    published = false;
+                    AppLog.e(TAG, "Camera " + cameraId + " Async segment finalize failed: " + completedPath, e);
+                } finally {
+                    try {
+                        previousMuxer.release();
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+            if (published) {
+                validateAndCleanupFile(completedPath);
+                if (callback != null) callback.onSegmentSwitch(cameraId, index, completedPath);
+            }
+            if (isRecording.get() && !stopRequested && !isReleased) {
+                scheduleNextSegment();
+            }
+        };
+        Handler segHandler = segmentHandler;
+        if (segHandler != null && segHandler.post(finalizePrevious)) {
+            return;
+        }
+        finalizePrevious.run();
+    }
+
+    private void awaitPendingSegmentFinalizations(long timeoutMs) {
+        Handler segHandler = segmentHandler;
+        if (segHandler == null || Looper.myLooper() == segHandler.getLooper()) {
+            return;
+        }
+        final java.util.concurrent.CountDownLatch drained = new java.util.concurrent.CountDownLatch(1);
+        if (segHandler.post(drained::countDown)) {
+            try {
+                drained.await(Math.max(1L, timeoutMs), java.util.concurrent.TimeUnit.MILLISECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
     }
     
     /**

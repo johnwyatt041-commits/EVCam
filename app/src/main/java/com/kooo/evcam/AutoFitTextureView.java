@@ -24,6 +24,8 @@ public class AutoFitTextureView extends TextureView {
 
     public AutoFitTextureView(Context context, AttributeSet attrs, int defStyle) {
         super(context, attrs, defStyle);
+        // 显式标记不透明，确保 HWUI 走最快不透明外部纹理合成通道（跳过 alpha 混合）
+        setOpaque(true);
     }
 
     /**

@@ -122,6 +122,13 @@ public class VehicleStatusWatermarkTest {
         assertTrue(bl[0] < 0f && bl[5] < 0f);
         // BOTTOM_RIGHT: right>0, top<0
         assertTrue(br[2] > 0f && br[5] < 0f);
+
+        int[] reusable = new int[4];
+        for (VehicleStatusWatermark.Position pos : VehicleStatusWatermark.Position.values()) {
+            int[] expected = VehicleStatusWatermark.computeViewportRect(pos, 1280, 800, 960, 92);
+            VehicleStatusWatermark.computeViewportRectInto(pos, 1280, 800, 960, 92, reusable);
+            assertArrayEquals(expected, reusable);
+        }
     }
 
     @Test

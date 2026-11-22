@@ -139,6 +139,7 @@ public final class SurroundModeAView extends FrameLayout {
     private final TextView btnWheelExpandFloating;
     private final int pillRadiusPx;
     private int overlayBgAlphaPercent = AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT;
+    private boolean roundedClipEnabled = false;
 
     private final VehicleSignalHub.Listener signalListener = snapshot -> mainHandler.post(() -> {
         if (snapshot == null) return;
@@ -156,6 +157,7 @@ public final class SurroundModeAView extends FrameLayout {
     public SurroundModeAView(@NonNull Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
         this.appConfig = new AppConfig(context);
+        this.roundedClipEnabled = appConfig.isPreviewRoundedClipEnabled();
         this.density = getResources().getDisplayMetrics().density;
         this.surroundPillTextPx = getResources().getDimension(R.dimen.ui_surround_pill_text_size)
                 * UiScaleController.getSavedScaleFactor(context);
@@ -596,6 +598,13 @@ public final class SurroundModeAView extends FrameLayout {
         boolean guidanceEnabled = appConfig.isPreviewGuidanceEnabled();
         float roadWidthScale = appConfig.getSurroundRoadGuidanceWidthScale();
         this.overlayBgAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
+        boolean nextRoundedClip = appConfig.isPreviewRoundedClipEnabled();
+        if (this.roundedClipEnabled != nextRoundedClip) {
+            this.roundedClipEnabled = nextRoundedClip;
+            applyPaneContainerStyle(topDetailOverlay, nextRoundedClip);
+            applyPaneContainerStyle(bottomLeftOverlay, nextRoundedClip);
+            applyPaneContainerStyle(bottomRightOverlay, nextRoundedClip);
+        }
         boolean showOverlayButtons = appConfig.isPreviewViewShortcutsEnabled()
                 && appConfig.isSurroundOverlayButtonsVisible();
 
@@ -678,21 +687,30 @@ public final class SurroundModeAView extends FrameLayout {
 
     private FrameLayout createPaneContainer(@NonNull Context context) {
         FrameLayout frame = new FrameLayout(context);
-        frame.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, Outline outline) {
-                if (view.getWidth() > 0 && view.getHeight() > 0) {
-                    outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
+        applyPaneContainerStyle(frame, roundedClipEnabled);
+        return frame;
+    }
+
+    private void applyPaneContainerStyle(@NonNull FrameLayout frame, boolean rounded) {
+        if (rounded) {
+            frame.setOutlineProvider(new ViewOutlineProvider() {
+                @Override
+                public void getOutline(View view, Outline outline) {
+                    if (view.getWidth() > 0 && view.getHeight() > 0) {
+                        outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), dp(12));
+                    }
                 }
-            }
-        });
-        frame.setClipToOutline(true);
+            });
+            frame.setClipToOutline(true);
+        } else {
+            frame.setClipToOutline(false);
+            frame.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+        }
         GradientDrawable border = new GradientDrawable();
         border.setColor(Color.TRANSPARENT);
-        border.setCornerRadius(dp(12));
+        border.setCornerRadius(rounded ? dp(12) : 0f);
         border.setStroke(Math.max(1, dp(1)), 0x33FFFFFF);
         frame.setBackground(border);
-        return frame;
     }
 
     private void applyOverlayButtonStyling(@NonNull SurroundViewMode configuredTop,

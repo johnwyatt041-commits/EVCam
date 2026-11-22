@@ -135,6 +135,8 @@ public final class EditablePreviewLayout extends ViewGroup {
     private boolean inFrameControlsVisible = true;
     private int overlayBgAlphaPercent = AppConfig.DEFAULT_PREVIEW_OVERLAY_BG_ALPHA_PERCENT;
     private boolean mainPreviewEnabled = true;
+    private boolean roundedClipEnabled = false;
+    private static final int LIGHTWEIGHT_PANE_BG_COLOR = 0xFF0B0F17;
     private final boolean[] cameraAvailable = {true, true, true, true};
     private final TextView[] emptyCameraHints = new TextView[PreviewLayoutModel.PANE_COUNT];
     private TextView btnMainFeedSwitch;
@@ -177,6 +179,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         preferences = context.getSharedPreferences("e5_preview_layout_v1", Context.MODE_PRIVATE);
         appConfig = new AppConfig(context);
         overlayBgAlphaPercent = appConfig.getPreviewOverlayBgAlphaPercent();
+        roundedClipEnabled = appConfig.isPreviewRoundedClipEnabled();
 
         for (Map.Entry<PreviewMode, ModeStorageSpec> e : STORAGE_SPECS.entrySet()) {
             modeModels.put(e.getKey(), new PreviewLayoutModel(e.getValue().defaultPreset));
@@ -188,7 +191,8 @@ public final class EditablePreviewLayout extends ViewGroup {
         handle.setColor(ContextCompat.getColor(context, R.color.button_accent));
         arrow.setColor(ContextCompat.getColor(context, R.color.ui_on_accent));
         arrow.setStrokeWidth(2 * density);
-        setWillNotDraw(false);
+        // 非编辑态不需要 EditablePreviewLayout 自身 draw pass，仅进入编辑态时开启绘制选框/手柄
+        setWillNotDraw(true);
 
         pinchDetector = new ScaleGestureDetector(context, new ScaleGestureDetector.SimpleOnScaleGestureListener() {
             @Override
@@ -326,10 +330,33 @@ public final class EditablePreviewLayout extends ViewGroup {
         applyOverlayBackgroundAlpha();
     }
 
+    public void setRoundedClipEnabled(boolean enabled) {
+        if (this.roundedClipEnabled == enabled) return;
+        this.roundedClipEnabled = enabled;
+        for (int i = 0; i < getChildCount(); i++) {
+            configurePaneOutline(getChildAt(i));
+        }
+        if (editing) {
+            invalidate();
+        }
+    }
+
+    public boolean isRoundedClipEnabled() {
+        return roundedClipEnabled;
+    }
+
     private void configurePaneOutline(View child) {
         if (child == null) return;
-        child.setOutlineProvider(paneOutlineProvider);
-        child.setClipToOutline(true);
+        if (roundedClipEnabled) {
+            child.setBackgroundResource(R.drawable.ui_card);
+            child.setOutlineProvider(paneOutlineProvider);
+            child.setClipToOutline(true);
+            child.invalidateOutline();
+        } else {
+            child.setClipToOutline(false);
+            child.setOutlineProvider(ViewOutlineProvider.BACKGROUND);
+            child.setBackgroundColor(LIGHTWEIGHT_PANE_BG_COLOR);
+        }
     }
 
     private void initInFrameOverlays() {
@@ -831,11 +858,13 @@ public final class EditablePreviewLayout extends ViewGroup {
             int mw = child.getMeasuredWidth();
             int mh = child.getMeasuredHeight();
             child.layout(x, y, x + mw, y + mh);
-            child.invalidateOutline();
             if (lastPaneWidths[idx] != mw || lastPaneHeights[idx] != mh) {
                 lastPaneWidths[idx] = mw;
                 lastPaneHeights[idx] = mh;
                 boundsChanged = true;
+                if (roundedClipEnabled) {
+                    child.invalidateOutline();
+                }
             }
         }
         if (boundsChanged && transformInvalidatedListener != null) {
@@ -906,6 +935,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         }
 
         editing = true;
+        setWillNotDraw(false);
         cropEditMode = false;
         opacityPreviewMode = false;
         selected = findFirstVisiblePane();
@@ -995,6 +1025,7 @@ public final class EditablePreviewLayout extends ViewGroup {
             }
         }
         editing = false;
+        setWillNotDraw(true);
         cropEditMode = false;
         opacityPreviewMode = false;
         dragOriginSnapshot = null;
@@ -1179,6 +1210,7 @@ public final class EditablePreviewLayout extends ViewGroup {
         super.dispatchDraw(canvas);
         if (!editing || opacityPreviewMode) return;
         float size = 32 * density;
+        float frameRadius = roundedClipEnabled ? cornerRadiusPx : 0f;
         for (int i = 0; i < getChildCount(); i++) {
             View child = getChildAt(i);
             if (child.getVisibility() != View.VISIBLE) continue;
@@ -1188,8 +1220,8 @@ public final class EditablePreviewLayout extends ViewGroup {
                     child.getTop() + 1,
                     child.getRight() - 1,
                     child.getBottom() - 1,
-                    cornerRadiusPx,
-                    cornerRadiusPx,
+                    frameRadius,
+                    frameRadius,
                     border);
             if (!cropEditMode) {
                 float x = child.getRight() - size;

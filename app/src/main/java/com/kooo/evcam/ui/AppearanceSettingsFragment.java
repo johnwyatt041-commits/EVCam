@@ -64,6 +64,8 @@ public class AppearanceSettingsFragment extends Fragment
     private boolean suppressShortcutListener = false;
     private SwitchMaterial guidanceEnabledSwitch;
     private boolean suppressGuidanceListener = false;
+    private SwitchMaterial previewRoundedClipSwitch;
+    private boolean suppressRoundedClipListener = false;
     private SwitchMaterial accessibilityOverlaySwitch;
     private SwitchMaterial confirmDoorExitSwitch;
     private Button btnDoorExit3s;
@@ -110,6 +112,7 @@ public class AppearanceSettingsFragment extends Fragment
         btnCornerNavHidden = view.findViewById(R.id.btn_corner_nav_hidden);
         viewShortcutsSwitch = view.findViewById(R.id.switch_view_shortcuts);
         guidanceEnabledSwitch = view.findViewById(R.id.switch_appearance_guidance_enabled);
+        previewRoundedClipSwitch = view.findViewById(R.id.switch_preview_rounded_clip);
         accessibilityOverlaySwitch = view.findViewById(R.id.switch_accessibility_overlay);
         confirmDoorExitSwitch = view.findViewById(R.id.switch_confirm_door_exit);
         btnDoorExit3s = view.findViewById(R.id.btn_door_exit_3s);
@@ -194,6 +197,19 @@ public class AppearanceSettingsFragment extends Fragment
                 if (suppressGuidanceListener) return;
                 if (appConfig != null) {
                     appConfig.setPreviewGuidanceEnabled(isChecked);
+                    notifyHostPreviewSettingsChanged();
+                }
+            });
+        }
+
+        if (appConfig != null && previewRoundedClipSwitch != null) {
+            suppressRoundedClipListener = true;
+            previewRoundedClipSwitch.setChecked(appConfig.isPreviewRoundedClipEnabled());
+            suppressRoundedClipListener = false;
+            previewRoundedClipSwitch.setOnCheckedChangeListener((buttonView, isChecked) -> {
+                if (suppressRoundedClipListener) return;
+                if (appConfig != null) {
+                    appConfig.setPreviewRoundedClipEnabled(isChecked);
                     notifyHostPreviewSettingsChanged();
                 }
             });
@@ -432,6 +448,11 @@ public class AppearanceSettingsFragment extends Fragment
             suppressGuidanceListener = true;
             guidanceEnabledSwitch.setChecked(appConfig.isPreviewGuidanceEnabled());
             suppressGuidanceListener = false;
+        }
+        if (previewRoundedClipSwitch != null && appConfig != null) {
+            suppressRoundedClipListener = true;
+            previewRoundedClipSwitch.setChecked(appConfig.isPreviewRoundedClipEnabled());
+            suppressRoundedClipListener = false;
         }
 
         String cornerMode = appConfig != null

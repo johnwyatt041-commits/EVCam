@@ -150,6 +150,20 @@ public class SettingsCatalogAndAppearanceTest {
     }
 
     @Test
+    public void previewRoundedClipDefaultsFalseAndPersists() {
+        Map<String, Object> store = new HashMap<>();
+        AppConfig config = createAppConfig(store);
+
+        assertFalse(config.isPreviewRoundedClipEnabled());
+        config.setPreviewRoundedClipEnabled(true);
+        assertTrue(config.isPreviewRoundedClipEnabled());
+        assertEquals(Boolean.TRUE, store.get("preview_rounded_clip_enabled"));
+
+        config.setPreviewRoundedClipEnabled(false);
+        assertFalse(config.isPreviewRoundedClipEnabled());
+    }
+
+    @Test
     public void doorExitDelaySecondsNormalizesAndPersists() {
         Map<String, Object> store = new HashMap<>();
         AppConfig config = createAppConfig(store);

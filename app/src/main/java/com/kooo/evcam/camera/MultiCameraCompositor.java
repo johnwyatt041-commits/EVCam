@@ -49,6 +49,7 @@ final class MultiCameraCompositor implements AutoCloseable {
     private int program, positionLocation, uvLocation, matrixLocation, samplerLocation;
     private boolean drawQueued;
     private boolean paused;
+    private boolean eglContextBound;
     private volatile boolean closed;
     private long lastDraw, frames, maxSwapUs, lastLog, firstLatch;
 
@@ -97,6 +98,7 @@ final class MultiCameraCompositor implements AutoCloseable {
                 new int[]{EGL14.EGL_CONTEXT_CLIENT_VERSION,2,EGL14.EGL_NONE},0);
         window = EGL14.eglCreateWindowSurface(display, config[0], output, new int[]{EGL14.EGL_NONE},0);
         if (!EGL14.eglMakeCurrent(display, window, window, context)) throw new IllegalStateException("Compositor EGL bind failed");
+        eglContextBound = true;
         int vertex = shader(GLES20.GL_VERTEX_SHADER, VS), fragment = shader(GLES20.GL_FRAGMENT_SHADER, FS);
         program = GLES20.glCreateProgram();
         GLES20.glAttachShader(program, vertex); GLES20.glAttachShader(program, fragment);
@@ -131,7 +133,10 @@ final class MultiCameraCompositor implements AutoCloseable {
         drawQueued=false;
         if (closed) return;
         try {
-            if (!EGL14.eglMakeCurrent(display,window,window,context)) throw new IllegalStateException("Composite EGL lost");
+            if (!eglContextBound) {
+                if (!EGL14.eglMakeCurrent(display,window,window,context)) throw new IllegalStateException("Composite EGL lost");
+                eglContextBound = true;
+            }
             long now=System.nanoTime(); boolean updated=false;
             for (Input input : inputs.values()) if (input.pending) {
                 input.pending=false; input.texture.updateTexImage(); input.texture.getTransformMatrix(input.matrix);
@@ -180,7 +185,7 @@ final class MultiCameraCompositor implements AutoCloseable {
                 AppLog.i("Compositor","size="+width+"x"+height+", frames="+frames+", inputs="+counts+", maxSwapUs="+maxSwapUs);
                 lastLog=now;
             }
-        } catch (Exception e) { paused=true; AppLog.e("Compositor","Composite output paused after failure",e); }
+        } catch (Exception e) { eglContextBound=false; paused=true; AppLog.e("Compositor","Composite output paused after failure",e); }
     }
 
     private void onGl(Runnable action) throws Exception {
@@ -209,6 +214,7 @@ final class MultiCameraCompositor implements AutoCloseable {
                 if (input.id!=0) GLES20.glDeleteTextures(1,new int[]{input.id},0);
             }
             if (program!=0) GLES20.glDeleteProgram(program);
+            eglContextBound=false;
             EGL14.eglMakeCurrent(display,EGL14.EGL_NO_SURFACE,EGL14.EGL_NO_SURFACE,EGL14.EGL_NO_CONTEXT);
             if (window!=EGL14.EGL_NO_SURFACE) EGL14.eglDestroySurface(display,window);
             if (context!=EGL14.EGL_NO_CONTEXT) EGL14.eglDestroyContext(display,context);

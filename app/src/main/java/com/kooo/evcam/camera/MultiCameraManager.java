@@ -3186,7 +3186,10 @@ public class MultiCameraManager {
         codecRecorder.setFrameRate(targetFrameRate);
         codecRecorder.setE5Compatibility(RecordingDeviceProfile.isE5(appConfig.getCarModel()));
         camera.setRecordingFrameRate(targetFrameRate);
-        codecRecorder.setQualityLevel(3);
+        String bitrateLevel = appConfig.getBitrateLevel();
+        int qualityLevel = AppConfig.BITRATE_LOW.equals(bitrateLevel) ? 0
+                : (AppConfig.BITRATE_HIGH.equals(bitrateLevel) ? 2 : 1);
+        codecRecorder.setQualityLevel(qualityLevel);
         codecRecorder.setForceH264(appConfig.isForceH264Encoding());
         codecRecorder.setImageAdjustmentConfig(adjConfig);
         codecRecorder.setWatermarkOptions(appConfig.getWatermarkOptions());

@@ -92,50 +92,53 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private static final String BIRD_FRAGMENT_SHADER =
             "#extension GL_OES_EGL_image_external : require\n"
-                    + "precision highp float;\n"
+                    + "precision mediump float;\n"
                     + "uniform samplerExternalOES uTexFront;\n"
                     + "uniform samplerExternalOES uTexBack;\n"
                     + "uniform samplerExternalOES uTexLeft;\n"
                     + "uniform samplerExternalOES uTexRight;\n"
-                    + "uniform mat4 uMatFront;\n"
-                    + "uniform mat4 uMatBack;\n"
-                    + "uniform mat4 uMatLeft;\n"
-                    + "uniform mat4 uMatRight;\n"
-                    + "uniform vec4 uMirrorFront;\n"  // (scaleX, offsetX, scaleY, offsetY)
-                    + "uniform vec4 uMirrorBack;\n"
-                    + "uniform vec4 uMirrorLeft;\n"
-                    + "uniform vec4 uMirrorRight;\n"
-                    + "varying vec2 vPrimaryUv;\n"
-                    + "varying vec2 vSecondaryUv;\n"
+                    + "uniform highp mat4 uMatFront;\n"
+                    + "uniform highp mat4 uMatBack;\n"
+                    + "uniform highp mat4 uMatLeft;\n"
+                    + "uniform highp mat4 uMatRight;\n"
+                    + "uniform highp vec4 uMirrorFront;\n"  // (scaleX, offsetX, scaleY, offsetY)
+                    + "uniform highp vec4 uMirrorBack;\n"
+                    + "uniform highp vec4 uMirrorLeft;\n"
+                    + "uniform highp vec4 uMirrorRight;\n"
+                    + "varying highp vec2 vPrimaryUv;\n"
+                    + "varying highp vec2 vSecondaryUv;\n"
                     + "varying float vPrimaryIdx;\n"
                     + "varying float vSecondaryIdx;\n"
                     + "varying float vBlendWeight;\n"
                     + "varying float vUnderCarWeight;\n"
-                    + "vec2 applyMirror(vec2 uv, vec4 m) {\n"
+                    + "highp vec2 applyMirror(highp vec2 uv, highp vec4 m) {\n"
                     + "    return vec2(uv.x * m.x + m.y, uv.y * m.z + m.w);\n"
                     + "}\n"
-                    + "vec3 sampleOes(float idx, vec2 uv) {\n"
-                    + "    vec2 safeUv = clamp(uv, 0.001, 0.999);\n"
+                    + "vec3 sampleOes(float idx, highp vec2 uv) {\n"
+                    + "    highp vec2 safeUv = clamp(uv, 0.001, 0.999);\n"
                     + "    if (idx < 0.5) {\n"
-                    + "        vec2 mapped = (uMatFront * vec4(applyMirror(safeUv, uMirrorFront), 0.0, 1.0)).xy;\n"
+                    + "        highp vec2 mapped = (uMatFront * vec4(applyMirror(safeUv, uMirrorFront), 0.0, 1.0)).xy;\n"
                     + "        return texture2D(uTexFront, mapped).rgb;\n"
                     + "    } else if (idx < 1.5) {\n"
-                    + "        vec2 mapped = (uMatBack * vec4(applyMirror(safeUv, uMirrorBack), 0.0, 1.0)).xy;\n"
+                    + "        highp vec2 mapped = (uMatBack * vec4(applyMirror(safeUv, uMirrorBack), 0.0, 1.0)).xy;\n"
                     + "        return texture2D(uTexBack, mapped).rgb;\n"
                     + "    } else if (idx < 2.5) {\n"
-                    + "        vec2 mapped = (uMatLeft * vec4(applyMirror(safeUv, uMirrorLeft), 0.0, 1.0)).xy;\n"
+                    + "        highp vec2 mapped = (uMatLeft * vec4(applyMirror(safeUv, uMirrorLeft), 0.0, 1.0)).xy;\n"
                     + "        return texture2D(uTexLeft, mapped).rgb;\n"
                     + "    } else {\n"
-                    + "        vec2 mapped = (uMatRight * vec4(applyMirror(safeUv, uMirrorRight), 0.0, 1.0)).xy;\n"
+                    + "        highp vec2 mapped = (uMatRight * vec4(applyMirror(safeUv, uMirrorRight), 0.0, 1.0)).xy;\n"
                     + "        return texture2D(uTexRight, mapped).rgb;\n"
                     + "    }\n"
                     + "}\n"
                     + "void main() {\n"
-                    + "    vec3 cPrimary = sampleOes(vPrimaryIdx, vPrimaryUv);\n"
-                    + "    vec3 cSecondary = sampleOes(vSecondaryIdx, vSecondaryUv);\n"
-                    + "    vec3 stitched = mix(cPrimary, cSecondary, clamp(vBlendWeight, 0.0, 1.0));\n"
+                    + "    vec3 stitched = sampleOes(vPrimaryIdx, vPrimaryUv);\n"
+                    + "    if (vBlendWeight > 0.001) {\n"
+                    + "        vec3 cSecondary = sampleOes(vSecondaryIdx, vSecondaryUv);\n"
+                    + "        stitched = mix(stitched, cSecondary, clamp(vBlendWeight, 0.0, 1.0));\n"
+                    + "    }\n"
                     + "    stitched = mix(stitched, vec3(0.08, 0.10, 0.13), clamp(vUnderCarWeight * 0.72, 0.0, 1.0));\n"
-                    + "    gl_FragColor = vec4(pow(clamp(stitched, 0.0, 1.0), vec3(0.92)), 1.0);\n"
+                    + "    vec3 c = clamp(stitched, 0.0, 1.0);\n"
+                    + "    gl_FragColor = vec4(c * (1.08 - 0.08 * c), 1.0);\n"
                     + "}\n";
 
     private static final String PATCH_VERTEX_SHADER =
@@ -152,19 +155,19 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private static final String PATCH_FRAGMENT_SHADER =
             "#extension GL_OES_EGL_image_external : require\n"
-                    + "precision highp float;\n"
+                    + "precision mediump float;\n"
                     + "uniform samplerExternalOES uOesTex;\n"
-                    + "uniform mat4 uTexMatrix;\n"
-                    + "uniform vec4 uMirror;\n"
-                    + "varying vec2 vTexCoord;\n"
+                    + "uniform highp mat4 uTexMatrix;\n"
+                    + "uniform highp vec4 uMirror;\n"
+                    + "varying highp vec2 vTexCoord;\n"
                     + "varying float vValid;\n"
                     + "void main() {\n"
-                    + "    vec2 baseUv = clamp(vTexCoord, 0.001, 0.999);\n"
-                    + "    vec2 mirrored = vec2(baseUv.x * uMirror.x + uMirror.y, baseUv.y * uMirror.z + uMirror.w);\n"
-                    + "    vec2 finalUv = (uTexMatrix * vec4(mirrored, 0.0, 1.0)).xy;\n"
-                    + "    vec3 rgb = texture2D(uOesTex, finalUv).rgb;\n"
+                    + "    highp vec2 baseUv = clamp(vTexCoord, 0.001, 0.999);\n"
+                    + "    highp vec2 mirrored = vec2(baseUv.x * uMirror.x + uMirror.y, baseUv.y * uMirror.z + uMirror.w);\n"
+                    + "    highp vec2 finalUv = (uTexMatrix * vec4(mirrored, 0.0, 1.0)).xy;\n"
+                    + "    vec3 c = clamp(texture2D(uOesTex, finalUv).rgb, 0.0, 1.0);\n"
                     + "    float mask = smoothstep(0.05, 0.35, vValid);\n"
-                    + "    gl_FragColor = vec4(pow(clamp(rgb, 0.0, 1.0), vec3(0.92)) * mask, 1.0);\n"
+                    + "    gl_FragColor = vec4(c * (1.08 - 0.08 * c) * mask, 1.0);\n"
                     + "}\n";
 
     private static final String CAR_VERTEX_SHADER =
@@ -220,7 +223,22 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             new AtomicBoolean(false)
     };
     private final AtomicLongArray lastOesFrameUptimeMs = new AtomicLongArray(4);
+    private static final long OES_MIN_RENDER_INTERVAL_MS = 33L;
+    private static final String[] CAMERA_SLOT_KEYS = {"front", "back", "left", "right"};
+    private final AtomicBoolean oesRenderScheduled = new AtomicBoolean(false);
+    private volatile long lastOesRenderDispatchUptimeMs = 0L;
+    private final Runnable oesCoalescedRenderRunnable = () -> {
+        oesRenderScheduled.set(false);
+        lastOesRenderDispatchUptimeMs = SystemClock.uptimeMillis();
+        requestRenderSafe();
+    };
     private final float[][] texMatrices = new float[4][16];
+    private final float[][] cachedMirrorUniforms = {
+            {1f, 0f, 1f, 0f},
+            {1f, 0f, 1f, 0f},
+            {1f, 0f, 1f, 0f},
+            {1f, 0f, 1f, 0f}
+    };
     @Nullable
     private HandlerThread oesCallbackThread;
     @Nullable
@@ -231,6 +249,42 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private int carProgram;
     private int colorProgram;
     private int carTextureId;
+
+    // 缓存的 GL Shader Location（onSurfaceCreated 一次性查询，渲染循环零 JNI 查找）
+    private int birdLocViewTransform = -1;
+    private int birdLocTexFront = -1;
+    private int birdLocTexBack = -1;
+    private int birdLocTexLeft = -1;
+    private int birdLocTexRight = -1;
+    private int birdLocMatFront = -1;
+    private int birdLocMatBack = -1;
+    private int birdLocMatLeft = -1;
+    private int birdLocMatRight = -1;
+    private int birdLocMirrorFront = -1;
+    private int birdLocMirrorBack = -1;
+    private int birdLocMirrorLeft = -1;
+    private int birdLocMirrorRight = -1;
+    private int birdLocPos = -1;
+    private int birdLocPrimaryUv = -1;
+    private int birdLocSecondaryUv = -1;
+    private int birdLocPrimaryIdx = -1;
+    private int birdLocSecondaryIdx = -1;
+    private int birdLocBlendWeight = -1;
+    private int birdLocUnderCarWeight = -1;
+
+    private int patchLocOesTex = -1;
+    private int patchLocTexMatrix = -1;
+    private int patchLocMirror = -1;
+    private int patchLocPos = -1;
+    private int patchLocTexCoord = -1;
+    private int patchLocValid = -1;
+
+    private int carLocTex = -1;
+    private int carLocPos = -1;
+    private int carLocTexCoord = -1;
+
+    private int colorLocPos = -1;
+    private int colorLocColor = -1;
 
     private int viewportWidth;
     private int viewportHeight;
@@ -275,9 +329,11 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     @Nullable
     private Bitmap pendingCarBitmap;
 
-    // 缓存的 GPU 缓冲
+    // 缓存的 GPU 缓冲（静态网格统一驻留 GPU VBO/IBO，每帧零 CPU->GPU 拷贝）
     private FloatBuffer birdVertexBuffer;
     private ShortBuffer birdIndexBuffer;
+    private int birdVboId;
+    private int birdIboId;
     private int birdIndexCount;
     private volatile boolean birdMeshIsWorldCm;
     @Nullable
@@ -297,6 +353,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private FloatBuffer roadVertexBuffer;
     private ShortBuffer roadIndexBuffer;
+    private int roadVboId;
+    private int roadIboId;
     private int roadIndexCount;
     @Nullable
     private SurroundCalibrationProfile cachedRoadProfile;
@@ -306,6 +364,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private final FloatBuffer[] wheelVertexBuffers = new FloatBuffer[4];
     private final ShortBuffer[] wheelIndexBuffers = new ShortBuffer[4];
+    private final int[] wheelVboIds = new int[4];
+    private final int[] wheelIboIds = new int[4];
     private final int[] wheelIndexCounts = new int[4];
     @Nullable
     private String cachedWheelAssetKey;
@@ -313,6 +373,10 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private SurroundCalibrationProfile cachedWheelProfile;
 
     private FloatBuffer carQuadBuffer;
+    private int carQuadVboId;
+    private double cachedCarQuadHalfW = Double.NaN;
+    private double cachedCarQuadMinY = Double.NaN;
+    private double cachedCarQuadSpanY = Double.NaN;
     private FloatBuffer birdGuidanceBuffer;
     private int[] birdGuidanceCounts;
     @Nullable
@@ -491,9 +555,23 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 this.loadedCarModelSignature = nextCarSig;
                 this.carBitmapDirty.set(true);
             }
+            refreshMirrorUniformCacheLocked();
         }
         if (triggerRender) {
             requestRenderSafe();
+        }
+    }
+
+    private void refreshMirrorUniformCacheLocked() {
+        for (int i = 0; i < CAMERA_SLOT_KEYS.length; i++) {
+            CameraMirrorPolicy.ResolvedMirror resolved =
+                    CameraMirrorPolicy.resolve(appConfig, MirrorTarget.MAIN_PREVIEW, CAMERA_SLOT_KEYS[i]);
+            boolean mirrorH = resolved.physicalH;
+            boolean mirrorV = resolved.physicalV;
+            cachedMirrorUniforms[i][0] = mirrorH ? -1.0f : 1.0f;
+            cachedMirrorUniforms[i][1] = mirrorH ? 1.0f : 0.0f;
+            cachedMirrorUniforms[i][2] = mirrorV ? -1.0f : 1.0f;
+            cachedMirrorUniforms[i][3] = mirrorV ? 1.0f : 0.0f;
         }
     }
 
@@ -608,10 +686,26 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         patchProgram = buildProgram(PATCH_VERTEX_SHADER, PATCH_FRAGMENT_SHADER);
         carProgram = buildProgram(CAR_VERTEX_SHADER, CAR_FRAGMENT_SHADER);
         colorProgram = buildProgram(COLOR_VERTEX_SHADER, COLOR_FRAGMENT_SHADER);
+        cacheProgramLocations();
+
+        // 新建 EGL 上下文后旧 GPU 缓冲句柄均已失效，统一重置为 0 后按需重建
+        birdVboId = 0;
+        birdIboId = 0;
+        roadVboId = 0;
+        roadIboId = 0;
+        carQuadVboId = 0;
+        cachedCarQuadHalfW = Double.NaN;
+        cachedCarQuadMinY = Double.NaN;
+        cachedCarQuadSpanY = Double.NaN;
+        for (int i = 0; i < 4; i++) {
+            wheelVboIds[i] = 0;
+            wheelIboIds[i] = 0;
+        }
 
         initOesInputTexturesAndSurfaces();
         initCarTexture();
         synchronized (stateLock) {
+            refreshMirrorUniformCacheLocked();
             if (pendingCarBitmap == null || pendingCarBitmap.isRecycled()) {
                 pendingCarBitmap = SurroundCarModelRepository.loadActiveCarModelBitmap(context, appConfig);
             }
@@ -748,7 +842,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             uploadCarTextureIfNeeded();
             updateCarQuad(profile);
         }
-        if (birdVertexBuffer == null || birdIndexBuffer == null || birdIndexCount <= 0) return;
+        if (birdVboId == 0 || birdIboId == 0 || birdIndexCount <= 0) return;
 
         int glY = box.glY(viewportHeight);
         GLES20.glViewport(box.left, glY, box.width, box.height);
@@ -770,48 +864,55 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 scaleY = (float) (2.0 / spanY);
                 offsetY = (float) (-(maxY + minY) / spanY);
             }
-            GLES20.glUniform4f(GLES20.glGetUniformLocation(birdProgram, "uViewTransform"),
-                    scaleX, offsetX, scaleY, offsetY);
-
-            int[] texUnits = {GLES20.GL_TEXTURE0, GLES20.GL_TEXTURE1, GLES20.GL_TEXTURE2, GLES20.GL_TEXTURE3};
-            for (int i = 0; i < 4; i++) {
-                GLES20.glActiveTexture(texUnits[i]);
-                GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[i]);
+            if (birdLocViewTransform >= 0) {
+                GLES20.glUniform4f(birdLocViewTransform, scaleX, offsetX, scaleY, offsetY);
             }
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(birdProgram, "uTexFront"), 0);
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(birdProgram, "uTexBack"), 1);
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(birdProgram, "uTexLeft"), 2);
-            GLES20.glUniform1i(GLES20.glGetUniformLocation(birdProgram, "uTexRight"), 3);
 
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(birdProgram, "uMatFront"), 1, false, texMatrices[0], 0);
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(birdProgram, "uMatBack"), 1, false, texMatrices[1], 0);
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(birdProgram, "uMatLeft"), 1, false, texMatrices[2], 0);
-            GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(birdProgram, "uMatRight"), 1, false, texMatrices[3], 0);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[0]);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE1);
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[1]);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE2);
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[2]);
+            GLES20.glActiveTexture(GLES20.GL_TEXTURE3);
+            GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[3]);
+            if (birdLocTexFront >= 0) GLES20.glUniform1i(birdLocTexFront, 0);
+            if (birdLocTexBack >= 0) GLES20.glUniform1i(birdLocTexBack, 1);
+            if (birdLocTexLeft >= 0) GLES20.glUniform1i(birdLocTexLeft, 2);
+            if (birdLocTexRight >= 0) GLES20.glUniform1i(birdLocTexRight, 3);
 
-            applyMirrorUniform(birdProgram, "uMirrorFront", "front");
-            applyMirrorUniform(birdProgram, "uMirrorBack", "back");
-            applyMirrorUniform(birdProgram, "uMirrorLeft", "left");
-            applyMirrorUniform(birdProgram, "uMirrorRight", "right");
+            if (birdLocMatFront >= 0) GLES20.glUniformMatrix4fv(birdLocMatFront, 1, false, texMatrices[0], 0);
+            if (birdLocMatBack >= 0) GLES20.glUniformMatrix4fv(birdLocMatBack, 1, false, texMatrices[1], 0);
+            if (birdLocMatLeft >= 0) GLES20.glUniformMatrix4fv(birdLocMatLeft, 1, false, texMatrices[2], 0);
+            if (birdLocMatRight >= 0) GLES20.glUniformMatrix4fv(birdLocMatRight, 1, false, texMatrices[3], 0);
+
+            applyCachedMirrorUniform(birdLocMirrorFront, SurroundMeshBuilder.CAM_FRONT);
+            applyCachedMirrorUniform(birdLocMirrorBack, SurroundMeshBuilder.CAM_BACK);
+            applyCachedMirrorUniform(birdLocMirrorLeft, SurroundMeshBuilder.CAM_LEFT);
+            applyCachedMirrorUniform(birdLocMirrorRight, SurroundMeshBuilder.CAM_RIGHT);
 
             int strideBytes = SurroundMeshBuilder.BIRD_FLOATS_PER_VERTEX * BYTES_PER_FLOAT;
-            int locPos = bindFloatAttrib(birdProgram, "aPosition", birdVertexBuffer, 0, 2, strideBytes);
-            int locPUv = bindFloatAttrib(birdProgram, "aPrimaryUv", birdVertexBuffer, 2, 2, strideBytes);
-            int locSUv = bindFloatAttrib(birdProgram, "aSecondaryUv", birdVertexBuffer, 4, 2, strideBytes);
-            int locPIdx = bindFloatAttrib(birdProgram, "aPrimaryIdx", birdVertexBuffer, 6, 1, strideBytes);
-            int locSIdx = bindFloatAttrib(birdProgram, "aSecondaryIdx", birdVertexBuffer, 7, 1, strideBytes);
-            int locBlend = bindFloatAttrib(birdProgram, "aBlendWeight", birdVertexBuffer, 8, 1, strideBytes);
-            int locUnder = bindFloatAttrib(birdProgram, "aUnderCarWeight", birdVertexBuffer, 9, 1, strideBytes);
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, birdVboId);
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, birdIboId);
+            bindVboFloatAttrib(birdLocPos, 2, strideBytes, 0);
+            bindVboFloatAttrib(birdLocPrimaryUv, 2, strideBytes, 2 * BYTES_PER_FLOAT);
+            bindVboFloatAttrib(birdLocSecondaryUv, 2, strideBytes, 4 * BYTES_PER_FLOAT);
+            bindVboFloatAttrib(birdLocPrimaryIdx, 1, strideBytes, 6 * BYTES_PER_FLOAT);
+            bindVboFloatAttrib(birdLocSecondaryIdx, 1, strideBytes, 7 * BYTES_PER_FLOAT);
+            bindVboFloatAttrib(birdLocBlendWeight, 1, strideBytes, 8 * BYTES_PER_FLOAT);
+            bindVboFloatAttrib(birdLocUnderCarWeight, 1, strideBytes, 9 * BYTES_PER_FLOAT);
 
-            birdIndexBuffer.position(0);
-            GLES20.glDrawElements(GLES20.GL_TRIANGLES, birdIndexCount, GLES20.GL_UNSIGNED_SHORT, birdIndexBuffer);
+            GLES20.glDrawElements(GLES20.GL_TRIANGLES, birdIndexCount, GLES20.GL_UNSIGNED_SHORT, 0);
 
-            disableAttrib(locPos);
-            disableAttrib(locPUv);
-            disableAttrib(locSUv);
-            disableAttrib(locPIdx);
-            disableAttrib(locSIdx);
-            disableAttrib(locBlend);
-            disableAttrib(locUnder);
+            disableAttrib(birdLocPos);
+            disableAttrib(birdLocPrimaryUv);
+            disableAttrib(birdLocSecondaryUv);
+            disableAttrib(birdLocPrimaryIdx);
+            disableAttrib(birdLocSecondaryIdx);
+            disableAttrib(birdLocBlendWeight);
+            disableAttrib(birdLocUnderCarWeight);
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
 
             if (showGuidance) {
                 ensureBirdGuidanceBatch(profile, angleDeg, isReverse);
@@ -824,23 +925,27 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             }
 
             // 叠绘离线 E5 俯视车模纹理（BitmapFactory / Canvas 均输出预乘 Alpha，需用 GL_ONE 避免二次乘 Alpha 变暗）
-            if (!hideCarModel && carProgram != 0 && carTextureId != 0 && carQuadBuffer != null) {
+            if (!hideCarModel && carProgram != 0 && carTextureId != 0 && carQuadVboId != 0) {
                 GLES20.glEnable(GLES20.GL_BLEND);
                 GLES20.glBlendFunc(GLES20.GL_ONE, GLES20.GL_ONE_MINUS_SRC_ALPHA);
                 GLES20.glUseProgram(carProgram);
                 GLES20.glActiveTexture(GLES20.GL_TEXTURE4);
                 GLES20.glBindTexture(GLES20.GL_TEXTURE_2D, carTextureId);
-                GLES20.glUniform1i(GLES20.glGetUniformLocation(carProgram, "uCarTex"), 4);
+                if (carLocTex >= 0) GLES20.glUniform1i(carLocTex, 4);
 
                 int carStride = 4 * BYTES_PER_FLOAT;
-                int cPos = bindFloatAttrib(carProgram, "aPosition", carQuadBuffer, 0, 2, carStride);
-                int cUv = bindFloatAttrib(carProgram, "aTexCoord", carQuadBuffer, 2, 2, carStride);
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, carQuadVboId);
+                bindVboFloatAttrib(carLocPos, 2, carStride, 0);
+                bindVboFloatAttrib(carLocTexCoord, 2, carStride, 2 * BYTES_PER_FLOAT);
                 GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
-                disableAttrib(cPos);
-                disableAttrib(cUv);
+                disableAttrib(carLocPos);
+                disableAttrib(carLocTexCoord);
+                GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
                 GLES20.glDisable(GLES20.GL_BLEND);
             }
         } finally {
+            GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+            GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
             GLES20.glDisable(GLES20.GL_SCISSOR_TEST);
         }
     }
@@ -871,10 +976,9 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
         boolean isRearRoad = (topMode == SurroundViewMode.REAR);
         int camSlot = isRearRoad ? SurroundMeshBuilder.CAM_BACK : SurroundMeshBuilder.CAM_FRONT;
-        String camPos = isRearRoad ? "back" : "front";
         ensureRoadMesh(profile, isRearRoad, box.aspectRatio(), stretchFill);
 
-        drawPatchMesh(roadVertexBuffer, roadIndexBuffer, roadIndexCount, camSlot, camPos);
+        drawPatchMesh(roadVboId, roadIboId, roadIndexCount, camSlot);
 
         if (showGuidance) {
             ensureRoadGuidanceBatch(angleDeg, isRearRoad, roadWidthScale);
@@ -902,39 +1006,41 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void drawWheelMesh(int wheelKind, int camSlot) {
         int safeKind = Math.max(0, Math.min(3, wheelKind));
-        FloatBuffer vb = wheelVertexBuffers[safeKind];
-        ShortBuffer ib = wheelIndexBuffers[safeKind];
+        int vbo = wheelVboIds[safeKind];
+        int ibo = wheelIboIds[safeKind];
         int count = wheelIndexCounts[safeKind];
-        if (vb == null || ib == null || count <= 0) return;
-        String camPos = camSlot == SurroundMeshBuilder.CAM_RIGHT ? "right" : "left";
-        drawPatchMesh(vb, ib, count, camSlot, camPos);
+        if (vbo == 0 || ibo == 0 || count <= 0) return;
+        drawPatchMesh(vbo, ibo, count, camSlot);
     }
 
-    private void drawPatchMesh(@NonNull FloatBuffer vb,
-                               @NonNull ShortBuffer ib,
+    private void drawPatchMesh(int vboId,
+                               int iboId,
                                int indexCount,
-                               int camSlot,
-                               @NonNull String camPos) {
-        if (patchProgram == 0 || indexCount <= 0) return;
+                               int camSlot) {
+        if (patchProgram == 0 || vboId == 0 || iboId == 0 || indexCount <= 0) return;
         GLES20.glUseProgram(patchProgram);
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, oesTextureIds[camSlot]);
-        GLES20.glUniform1i(GLES20.glGetUniformLocation(patchProgram, "uOesTex"), 0);
-        GLES20.glUniformMatrix4fv(GLES20.glGetUniformLocation(patchProgram, "uTexMatrix"),
-                1, false, texMatrices[camSlot], 0);
-        applyMirrorUniform(patchProgram, "uMirror", camPos);
+        if (patchLocOesTex >= 0) GLES20.glUniform1i(patchLocOesTex, 0);
+        if (patchLocTexMatrix >= 0) {
+            GLES20.glUniformMatrix4fv(patchLocTexMatrix, 1, false, texMatrices[camSlot], 0);
+        }
+        applyCachedMirrorUniform(patchLocMirror, camSlot);
 
         int stride = SurroundMeshBuilder.PATCH_FLOATS_PER_VERTEX * BYTES_PER_FLOAT;
-        int locPos = bindFloatAttrib(patchProgram, "aPosition", vb, 0, 2, stride);
-        int locUv = bindFloatAttrib(patchProgram, "aTexCoord", vb, 2, 2, stride);
-        int locVal = bindFloatAttrib(patchProgram, "aValid", vb, 4, 1, stride);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, vboId);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, iboId);
+        bindVboFloatAttrib(patchLocPos, 2, stride, 0);
+        bindVboFloatAttrib(patchLocTexCoord, 2, stride, 2 * BYTES_PER_FLOAT);
+        bindVboFloatAttrib(patchLocValid, 1, stride, 4 * BYTES_PER_FLOAT);
 
-        ib.position(0);
-        GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_SHORT, ib);
+        GLES20.glDrawElements(GLES20.GL_TRIANGLES, indexCount, GLES20.GL_UNSIGNED_SHORT, 0);
 
-        disableAttrib(locPos);
-        disableAttrib(locUv);
-        disableAttrib(locVal);
+        disableAttrib(patchLocPos);
+        disableAttrib(patchLocTexCoord);
+        disableAttrib(patchLocValid);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
     }
 
     private void drawGuidanceBatch(@Nullable FloatBuffer vb, @Nullable int[] stripCounts) {
@@ -942,10 +1048,11 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         GLES20.glEnable(GLES20.GL_BLEND);
         GLES20.glBlendFunc(GLES20.GL_SRC_ALPHA, GLES20.GL_ONE_MINUS_SRC_ALPHA);
         GLES20.glUseProgram(colorProgram);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
 
         int stride = SurroundGuidanceCalculator.FLOATS_PER_COLOR_VERTEX * BYTES_PER_FLOAT;
-        int locPos = bindFloatAttrib(colorProgram, "aPosition", vb, 0, 2, stride);
-        int locCol = bindFloatAttrib(colorProgram, "aColor", vb, 2, 4, stride);
+        bindClientFloatAttrib(colorLocPos, vb, 0, 2, stride);
+        bindClientFloatAttrib(colorLocColor, vb, 2, 4, stride);
 
         int offset = 0;
         for (int count : stripCounts) {
@@ -954,21 +1061,17 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 offset += count;
             }
         }
-        disableAttrib(locPos);
-        disableAttrib(locCol);
+        disableAttrib(colorLocPos);
+        disableAttrib(colorLocColor);
         GLES20.glDisable(GLES20.GL_BLEND);
     }
 
-    private void applyMirrorUniform(int program, @NonNull String uniformName, @NonNull String cameraPos) {
-        CameraMirrorPolicy.ResolvedMirror resolved =
-                CameraMirrorPolicy.resolve(appConfig, MirrorTarget.MAIN_PREVIEW, cameraPos);
-        boolean mirrorH = resolved.physicalH;
-        boolean mirrorV = resolved.physicalV;
-        float sx = mirrorH ? -1.0f : 1.0f;
-        float ox = mirrorH ? 1.0f : 0.0f;
-        float sy = mirrorV ? -1.0f : 1.0f;
-        float oy = mirrorV ? 1.0f : 0.0f;
-        GLES20.glUniform4f(GLES20.glGetUniformLocation(program, uniformName), sx, ox, sy, oy);
+    private void applyCachedMirrorUniform(int location, int camSlot) {
+        if (location < 0 || camSlot < 0 || camSlot >= cachedMirrorUniforms.length) {
+            return;
+        }
+        float[] m = cachedMirrorUniforms[camSlot];
+        GLES20.glUniform4f(location, m[0], m[1], m[2], m[3]);
     }
 
     private void initOesInputTexturesAndSurfaces() {
@@ -996,9 +1099,10 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             SurfaceTexture st = new SurfaceTexture(oesTextureIds[i]);
             st.setDefaultBufferSize(SurroundCalibrationProfile.IMAGE_WIDTH, SurroundCalibrationProfile.IMAGE_HEIGHT);
             SurfaceTexture.OnFrameAvailableListener frameListener = texture -> {
-                lastOesFrameUptimeMs.set(idx, SystemClock.uptimeMillis());
+                long nowUptime = SystemClock.uptimeMillis();
+                lastOesFrameUptimeMs.set(idx, nowUptime);
                 frameAvailableFlags[idx].set(true);
-                requestRenderSafe();
+                scheduleCoalescedOesRender(cbHandler, nowUptime);
             };
             if (cbHandler != null) {
                 st.setOnFrameAvailableListener(frameListener, cbHandler);
@@ -1054,6 +1158,12 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         double halfW = Math.max(50.0, profile.getHalfWorldWidthCm());
         double minY = profile.getWorldMinYCm();
         double spanY = Math.max(100.0, profile.getWorldMaxYCm() - minY);
+        if (carQuadVboId != 0
+                && Double.compare(halfW, cachedCarQuadHalfW) == 0
+                && Double.compare(minY, cachedCarQuadMinY) == 0
+                && Double.compare(spanY, cachedCarQuadSpanY) == 0) {
+            return;
+        }
         float left = (float) (SurroundCalibrationProfile.E5_CAR_QUAD_MIN_X_CM / halfW);
         float right = (float) (SurroundCalibrationProfile.E5_CAR_QUAD_MAX_X_CM / halfW);
         float bottom = (float) (((SurroundCalibrationProfile.E5_CAR_QUAD_MIN_Y_CM - minY) / spanY) * 2.0 - 1.0);
@@ -1065,6 +1175,10 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                 right, bottom, 1f, 1f
         };
         carQuadBuffer = toFloatBuffer(quad, carQuadBuffer);
+        carQuadVboId = uploadStaticFloatVbo(carQuadVboId, carQuadBuffer);
+        cachedCarQuadHalfW = halfW;
+        cachedCarQuadMinY = minY;
+        cachedCarQuadSpanY = spanY;
     }
 
     private void ensureBirdMesh(@NonNull SurroundCalibrationProfile profile,
@@ -1074,7 +1188,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         String assetKey = resolveCalibrationAssetKey(profile, true)
                 + "|" + adjustment.toCompactSignature()
                 + "|solo=" + soloCamIndex;
-        if (!dirty && birdVertexBuffer != null
+        if (!dirty && birdVboId != 0 && birdIboId != 0
                 && assetKey.equals(cachedBirdAssetKey)
                 && cachedBirdSoloIndex == soloCamIndex
                 && (birdMeshIsWorldCm || cachedBirdProfile == profile)) {
@@ -1084,6 +1198,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             GridMeshData soloMesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 56, 84, soloCamIndex);
             birdVertexBuffer = toFloatBuffer(soloMesh.vertices, birdVertexBuffer);
             birdIndexBuffer = toShortBuffer(soloMesh.indices, birdIndexBuffer);
+            birdVboId = uploadStaticFloatVbo(birdVboId, birdVertexBuffer);
+            birdIboId = uploadStaticShortIbo(birdIboId, birdIndexBuffer);
             birdIndexCount = soloMesh.indices.length;
             birdMeshIsWorldCm = false;
             cachedBirdAssetKey = assetKey;
@@ -1110,12 +1226,16 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                     : parsedBirdBaseMesh;
             birdVertexBuffer = toFloatBuffer(activeMesh.vertices, birdVertexBuffer);
             birdIndexBuffer = toShortBuffer(activeMesh.indices, birdIndexBuffer);
+            birdVboId = uploadStaticFloatVbo(birdVboId, birdVertexBuffer);
+            birdIboId = uploadStaticShortIbo(birdIboId, birdIndexBuffer);
             birdIndexCount = activeMesh.indices.length;
             birdMeshIsWorldCm = true;
         } else {
             GridMeshData mesh = SurroundMeshBuilder.buildBirdGroundMesh(profile, 56, 84, -1);
             birdVertexBuffer = toFloatBuffer(mesh.vertices, birdVertexBuffer);
             birdIndexBuffer = toShortBuffer(mesh.indices, birdIndexBuffer);
+            birdVboId = uploadStaticFloatVbo(birdVboId, birdVertexBuffer);
+            birdIboId = uploadStaticShortIbo(birdIboId, birdIndexBuffer);
             birdIndexCount = mesh.indices.length;
             birdMeshIsWorldCm = false;
         }
@@ -1139,7 +1259,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
                                 float aspect,
                                 boolean stretched) {
         boolean needRebuild = roadMeshDirty.compareAndSet(true, false)
-                || roadVertexBuffer == null
+                || roadVboId == 0
+                || roadIboId == 0
                 || cachedRoadProfile != profile
                 || cachedRoadIsRear != isRear
                 || cachedRoadStretched != stretched
@@ -1148,6 +1269,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         GridMeshData mesh = SurroundMeshBuilder.buildRoadPatchMesh(profile, isRear, aspect, stretched, 28, 20);
         roadVertexBuffer = toFloatBuffer(mesh.vertices, roadVertexBuffer);
         roadIndexBuffer = toShortBuffer(mesh.indices, roadIndexBuffer);
+        roadVboId = uploadStaticFloatVbo(roadVboId, roadVertexBuffer);
+        roadIboId = uploadStaticShortIbo(roadIboId, roadIndexBuffer);
         roadIndexCount = mesh.indices.length;
         cachedRoadProfile = profile;
         cachedRoadIsRear = isRear;
@@ -1158,7 +1281,7 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
     private void ensureWheelMeshes(@NonNull SurroundCalibrationProfile profile) {
         boolean dirty = wheelMeshDirty.compareAndSet(true, false);
         String assetKey = resolveCalibrationAssetKey(profile, false);
-        if (!dirty && wheelVertexBuffers[0] != null
+        if (!dirty && wheelVboIds[0] != 0 && wheelIboIds[0] != 0
                 && assetKey.equals(cachedWheelAssetKey)) {
             return;
         }
@@ -1182,6 +1305,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         for (int k = 0; k < 4; k++) {
             wheelVertexBuffers[k] = toFloatBuffer(resolved[k].vertices, wheelVertexBuffers[k]);
             wheelIndexBuffers[k] = toShortBuffer(resolved[k].indices, wheelIndexBuffers[k]);
+            wheelVboIds[k] = uploadStaticFloatVbo(wheelVboIds[k], wheelVertexBuffers[k]);
+            wheelIboIds[k] = uploadStaticShortIbo(wheelIboIds[k], wheelIndexBuffers[k]);
             wheelIndexCounts[k] = resolved[k].indices.length;
         }
         cachedWheelAssetKey = assetKey;
@@ -1314,6 +1439,20 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
             carProgram = 0;
             deleteProgram(colorProgram);
             colorProgram = 0;
+            resetProgramLocations();
+
+            birdVboId = deleteGlBuffer(birdVboId);
+            birdIboId = deleteGlBuffer(birdIboId);
+            roadVboId = deleteGlBuffer(roadVboId);
+            roadIboId = deleteGlBuffer(roadIboId);
+            carQuadVboId = deleteGlBuffer(carQuadVboId);
+            cachedCarQuadHalfW = Double.NaN;
+            cachedCarQuadMinY = Double.NaN;
+            cachedCarQuadSpanY = Double.NaN;
+            for (int i = 0; i < 4; i++) {
+                wheelVboIds[i] = deleteGlBuffer(wheelVboIds[i]);
+                wheelIboIds[i] = deleteGlBuffer(wheelIboIds[i]);
+            }
         } catch (Exception ignored) {
         }
         synchronized (stateLock) {
@@ -1340,6 +1479,8 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
 
     private void releaseSurfacesOnly() {
         synchronized (surfaceReleaseLock) {
+            oesRenderScheduled.set(false);
+            lastOesRenderDispatchUptimeMs = 0L;
             for (int i = 0; i < 4; i++) {
                 frameAvailableFlags[i].set(false);
                 lastOesFrameUptimeMs.set(i, 0L);
@@ -1373,19 +1514,172 @@ public final class SurroundGlRenderer implements GLSurfaceView.Renderer {
         }
     }
 
-    private static int bindFloatAttrib(int program,
-                                       @NonNull String name,
-                                       @NonNull FloatBuffer buffer,
-                                       int floatOffset,
-                                       int componentCount,
-                                       int strideBytes) {
-        int loc = GLES20.glGetAttribLocation(program, name);
+    static long computeOesRenderDelayMs(long nowUptimeMs, long lastDispatchUptimeMs, long minIntervalMs) {
+        if (minIntervalMs <= 0L || lastDispatchUptimeMs <= 0L) {
+            return 0L;
+        }
+        long elapsed = nowUptimeMs - lastDispatchUptimeMs;
+        if (elapsed < 0L || elapsed >= minIntervalMs) {
+            return 0L;
+        }
+        return minIntervalMs - elapsed;
+    }
+
+    private void scheduleCoalescedOesRender(@Nullable Handler cbHandler, long nowUptimeMs) {
+        if (stopped || released || !rendererAttached) {
+            return;
+        }
+        if (!oesRenderScheduled.compareAndSet(false, true)) {
+            return;
+        }
+        long delayMs = computeOesRenderDelayMs(
+                nowUptimeMs, lastOesRenderDispatchUptimeMs, OES_MIN_RENDER_INTERVAL_MS);
+        if (delayMs <= 0L || cbHandler == null) {
+            oesRenderScheduled.set(false);
+            lastOesRenderDispatchUptimeMs = nowUptimeMs;
+            requestRenderSafe();
+            return;
+        }
+        if (!cbHandler.postDelayed(oesCoalescedRenderRunnable, delayMs)) {
+            oesRenderScheduled.set(false);
+        }
+    }
+
+    private void cacheProgramLocations() {
+        resetProgramLocations();
+        if (birdProgram != 0) {
+            birdLocViewTransform = GLES20.glGetUniformLocation(birdProgram, "uViewTransform");
+            birdLocTexFront = GLES20.glGetUniformLocation(birdProgram, "uTexFront");
+            birdLocTexBack = GLES20.glGetUniformLocation(birdProgram, "uTexBack");
+            birdLocTexLeft = GLES20.glGetUniformLocation(birdProgram, "uTexLeft");
+            birdLocTexRight = GLES20.glGetUniformLocation(birdProgram, "uTexRight");
+            birdLocMatFront = GLES20.glGetUniformLocation(birdProgram, "uMatFront");
+            birdLocMatBack = GLES20.glGetUniformLocation(birdProgram, "uMatBack");
+            birdLocMatLeft = GLES20.glGetUniformLocation(birdProgram, "uMatLeft");
+            birdLocMatRight = GLES20.glGetUniformLocation(birdProgram, "uMatRight");
+            birdLocMirrorFront = GLES20.glGetUniformLocation(birdProgram, "uMirrorFront");
+            birdLocMirrorBack = GLES20.glGetUniformLocation(birdProgram, "uMirrorBack");
+            birdLocMirrorLeft = GLES20.glGetUniformLocation(birdProgram, "uMirrorLeft");
+            birdLocMirrorRight = GLES20.glGetUniformLocation(birdProgram, "uMirrorRight");
+            birdLocPos = GLES20.glGetAttribLocation(birdProgram, "aPosition");
+            birdLocPrimaryUv = GLES20.glGetAttribLocation(birdProgram, "aPrimaryUv");
+            birdLocSecondaryUv = GLES20.glGetAttribLocation(birdProgram, "aSecondaryUv");
+            birdLocPrimaryIdx = GLES20.glGetAttribLocation(birdProgram, "aPrimaryIdx");
+            birdLocSecondaryIdx = GLES20.glGetAttribLocation(birdProgram, "aSecondaryIdx");
+            birdLocBlendWeight = GLES20.glGetAttribLocation(birdProgram, "aBlendWeight");
+            birdLocUnderCarWeight = GLES20.glGetAttribLocation(birdProgram, "aUnderCarWeight");
+        }
+        if (patchProgram != 0) {
+            patchLocOesTex = GLES20.glGetUniformLocation(patchProgram, "uOesTex");
+            patchLocTexMatrix = GLES20.glGetUniformLocation(patchProgram, "uTexMatrix");
+            patchLocMirror = GLES20.glGetUniformLocation(patchProgram, "uMirror");
+            patchLocPos = GLES20.glGetAttribLocation(patchProgram, "aPosition");
+            patchLocTexCoord = GLES20.glGetAttribLocation(patchProgram, "aTexCoord");
+            patchLocValid = GLES20.glGetAttribLocation(patchProgram, "aValid");
+        }
+        if (carProgram != 0) {
+            carLocTex = GLES20.glGetUniformLocation(carProgram, "uCarTex");
+            carLocPos = GLES20.glGetAttribLocation(carProgram, "aPosition");
+            carLocTexCoord = GLES20.glGetAttribLocation(carProgram, "aTexCoord");
+        }
+        if (colorProgram != 0) {
+            colorLocPos = GLES20.glGetAttribLocation(colorProgram, "aPosition");
+            colorLocColor = GLES20.glGetAttribLocation(colorProgram, "aColor");
+        }
+    }
+
+    private void resetProgramLocations() {
+        birdLocViewTransform = -1;
+        birdLocTexFront = -1;
+        birdLocTexBack = -1;
+        birdLocTexLeft = -1;
+        birdLocTexRight = -1;
+        birdLocMatFront = -1;
+        birdLocMatBack = -1;
+        birdLocMatLeft = -1;
+        birdLocMatRight = -1;
+        birdLocMirrorFront = -1;
+        birdLocMirrorBack = -1;
+        birdLocMirrorLeft = -1;
+        birdLocMirrorRight = -1;
+        birdLocPos = -1;
+        birdLocPrimaryUv = -1;
+        birdLocSecondaryUv = -1;
+        birdLocPrimaryIdx = -1;
+        birdLocSecondaryIdx = -1;
+        birdLocBlendWeight = -1;
+        birdLocUnderCarWeight = -1;
+        patchLocOesTex = -1;
+        patchLocTexMatrix = -1;
+        patchLocMirror = -1;
+        patchLocPos = -1;
+        patchLocTexCoord = -1;
+        patchLocValid = -1;
+        carLocTex = -1;
+        carLocPos = -1;
+        carLocTexCoord = -1;
+        colorLocPos = -1;
+        colorLocColor = -1;
+    }
+
+    private static int uploadStaticFloatVbo(int existingId, @NonNull FloatBuffer data) {
+        int id = existingId;
+        if (id == 0) {
+            int[] ids = new int[1];
+            GLES20.glGenBuffers(1, ids, 0);
+            id = ids[0];
+        }
+        if (id == 0) {
+            return 0;
+        }
+        data.position(0);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, id);
+        GLES20.glBufferData(GLES20.GL_ARRAY_BUFFER, data.remaining() * BYTES_PER_FLOAT, data, GLES20.GL_STATIC_DRAW);
+        GLES20.glBindBuffer(GLES20.GL_ARRAY_BUFFER, 0);
+        return id;
+    }
+
+    private static int uploadStaticShortIbo(int existingId, @NonNull ShortBuffer data) {
+        int id = existingId;
+        if (id == 0) {
+            int[] ids = new int[1];
+            GLES20.glGenBuffers(1, ids, 0);
+            id = ids[0];
+        }
+        if (id == 0) {
+            return 0;
+        }
+        data.position(0);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, id);
+        GLES20.glBufferData(GLES20.GL_ELEMENT_ARRAY_BUFFER, data.remaining() * BYTES_PER_SHORT, data, GLES20.GL_STATIC_DRAW);
+        GLES20.glBindBuffer(GLES20.GL_ELEMENT_ARRAY_BUFFER, 0);
+        return id;
+    }
+
+    private static int deleteGlBuffer(int id) {
+        if (id != 0) {
+            GLES20.glDeleteBuffers(1, new int[]{id}, 0);
+        }
+        return 0;
+    }
+
+    private static void bindVboFloatAttrib(int loc, int componentCount, int strideBytes, int byteOffset) {
+        if (loc >= 0) {
+            GLES20.glEnableVertexAttribArray(loc);
+            GLES20.glVertexAttribPointer(loc, componentCount, GLES20.GL_FLOAT, false, strideBytes, byteOffset);
+        }
+    }
+
+    private static void bindClientFloatAttrib(int loc,
+                                              @NonNull FloatBuffer buffer,
+                                              int floatOffset,
+                                              int componentCount,
+                                              int strideBytes) {
         if (loc >= 0) {
             buffer.position(floatOffset);
             GLES20.glEnableVertexAttribArray(loc);
             GLES20.glVertexAttribPointer(loc, componentCount, GLES20.GL_FLOAT, false, strideBytes, buffer);
         }
-        return loc;
     }
 
     private static void disableAttrib(int loc) {

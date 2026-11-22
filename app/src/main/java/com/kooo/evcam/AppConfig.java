@@ -3639,6 +3639,8 @@ public class AppConfig implements CameraMirrorPolicy.Store {
         AppLog.d(TAG, "左上角返回/设置快捷键策略已设置: " + normalized);
     }
 
+    private static final String KEY_PREVIEW_ROUNDED_CLIP_ENABLED = "preview_rounded_clip_enabled";
+
     public boolean isPreviewViewShortcutsEnabled() {
         return prefs.getBoolean(KEY_VIEW_SHORTCUTS_ENABLED, true);
     }
@@ -3646,6 +3648,19 @@ public class AppConfig implements CameraMirrorPolicy.Store {
     public void setPreviewViewShortcutsEnabled(boolean enabled) {
         prefs.edit().putBoolean(KEY_VIEW_SHORTCUTS_ENABLED, enabled).apply();
         AppLog.d(TAG, "画面内视图切换快捷键显隐已设置: " + enabled);
+    }
+
+    /**
+     * 主预览窗格是否启用 16dp 硬件圆角裁剪。
+     * 默认关闭以减少多路 TextureView 在车机 RenderThread 上的圆角裁剪合成开销；用户可在外观设置随时开启。
+     */
+    public boolean isPreviewRoundedClipEnabled() {
+        return prefs.getBoolean(KEY_PREVIEW_ROUNDED_CLIP_ENABLED, false);
+    }
+
+    public void setPreviewRoundedClipEnabled(boolean enabled) {
+        prefs.edit().putBoolean(KEY_PREVIEW_ROUNDED_CLIP_ENABLED, enabled).apply();
+        AppLog.d(TAG, "预览窗格圆角裁剪已设置: " + enabled);
     }
 
     // ==================== T04 悬浮小窗与双镜像配置 ====================
