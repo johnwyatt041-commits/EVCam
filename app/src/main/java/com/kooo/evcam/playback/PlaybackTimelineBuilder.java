@@ -12,6 +12,7 @@ import java.util.Calendar;
 import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
@@ -28,6 +29,20 @@ public final class PlaybackTimelineBuilder {
     public static final int FILTER_ALL = 0;
     public static final int FILTER_TODAY = 1;
     public static final int FILTER_LOCKED = 2;
+
+    /**
+     * 过滤以 {@code .} 开头（含 {@code .trashed-}、{@code .pending-}、{@code ._}、{@code .evcam_}）
+     * 及回收站 {@code trashed-} 前缀的隐藏/临时文件，避免进入回放列表或触发无效缩略图/时长探测。
+     */
+    public static boolean isHiddenOrTrashedFileName(@Nullable String name) {
+        if (name == null || name.isEmpty()) {
+            return true;
+        }
+        if (name.charAt(0) == '.') {
+            return true;
+        }
+        return name.toLowerCase(Locale.ROOT).startsWith("trashed-");
+    }
 
     public static final class HourHeader {
         public final String hourLabel;
@@ -95,14 +110,27 @@ public final class PlaybackTimelineBuilder {
 
         Map<String, VideoGroup> groupMap = new HashMap<>();
         Map<String, Integer> pendingPrefixCounts = new HashMap<>();
+        Set<String> lockFileNames = new HashSet<>();
 
         for (File file : rawFiles) {
-            if (file == null || !file.isFile()) {
+            if (file == null) {
                 continue;
             }
             String name = file.getName();
+            if (isHiddenOrTrashedFileName(name)) {
+                continue;
+            }
             String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(VideoLockStore.LOCK_SUFFIX)) {
+                if (file.isFile()) {
+                    lockFileNames.add(name);
+                }
+                continue;
+            }
             if (lower.endsWith(VideoLockStore.PENDING_SUFFIX)) {
+                if (!file.isFile()) {
+                    continue;
+                }
                 if (activePendingPaths != null
                         && !activePendingPaths.contains(ActiveRecordingRegistry.normalizePath(file))) {
                     continue;
@@ -115,10 +143,14 @@ public final class PlaybackTimelineBuilder {
                 }
                 continue;
             }
-            if (!lower.endsWith(".mp4") || file.length() <= 0L) {
+            if (!lower.endsWith(".mp4") || VideoGroup.extractPosition(name) == null) {
                 continue;
             }
-            if (VideoGroup.extractPosition(name) == null) {
+            if (!file.isFile()) {
+                continue;
+            }
+            long len = file.length();
+            if (len <= 0L) {
                 continue;
             }
             String prefix = VideoGroup.extractTimestampPrefix(name);
@@ -127,7 +159,7 @@ public final class PlaybackTimelineBuilder {
                 group = new VideoGroup(prefix);
                 groupMap.put(prefix, group);
             }
-            group.addFile(file);
+            group.addFile(file, len);
         }
 
         ActiveRecordingBanner activeBanner = null;
@@ -152,7 +184,7 @@ public final class PlaybackTimelineBuilder {
             if (group.getVideoCount() == 0) {
                 continue;
             }
-            boolean locked = VideoLockStore.isGroupLocked(group);
+            boolean locked = VideoLockStore.isGroupLocked(group, lockFileNames);
             group.setLocked(locked);
 
             if (filterMode == FILTER_LOCKED && !locked) {
@@ -194,26 +226,45 @@ public final class PlaybackTimelineBuilder {
         if (photoDir == null || !photoDir.exists() || !photoDir.isDirectory()) {
             return Collections.emptyList();
         }
-        File[] files = photoDir.listFiles((dir, name) -> {
-            String lower = name.toLowerCase(Locale.ROOT);
-            return lower.endsWith(".jpg") || lower.endsWith(".jpeg") || lower.endsWith(".png");
-        });
+        File[] files = photoDir.listFiles();
         if (files == null || files.length == 0) {
             return Collections.emptyList();
         }
 
         Map<String, PhotoGroup> groupMap = new HashMap<>();
+        Set<String> lockFileNames = new HashSet<>();
         for (File file : files) {
-            if (file == null || !file.isFile() || file.length() <= 0L) {
+            if (file == null) {
                 continue;
             }
-            String prefix = PhotoGroup.extractTimestampPrefix(file.getName());
+            String name = file.getName();
+            if (isHiddenOrTrashedFileName(name)) {
+                continue;
+            }
+            String lower = name.toLowerCase(Locale.ROOT);
+            if (lower.endsWith(VideoLockStore.LOCK_SUFFIX)) {
+                if (file.isFile()) {
+                    lockFileNames.add(name);
+                }
+                continue;
+            }
+            if (!lower.endsWith(".jpg") && !lower.endsWith(".jpeg") && !lower.endsWith(".png")) {
+                continue;
+            }
+            if (!file.isFile()) {
+                continue;
+            }
+            long len = file.length();
+            if (len <= 0L) {
+                continue;
+            }
+            String prefix = PhotoGroup.extractTimestampPrefix(name);
             PhotoGroup group = groupMap.get(prefix);
             if (group == null) {
                 group = new PhotoGroup(prefix);
                 groupMap.put(prefix, group);
             }
-            group.addFile(file);
+            group.addFile(file, len);
         }
 
         String todayKey = new SimpleDateFormat("yyyy-MM-dd", Locale.US).format(new Date(todayReferenceMs));
@@ -222,13 +273,7 @@ public final class PlaybackTimelineBuilder {
             if (group.getPhotoCount() == 0) {
                 continue;
             }
-            boolean locked = false;
-            for (File f : group.getShareableFiles()) {
-                if (VideoLockStore.isLocked(f)) {
-                    locked = true;
-                    break;
-                }
-            }
+            boolean locked = VideoLockStore.isGroupLocked(group, lockFileNames);
             group.setLocked(locked);
             if (filterMode == FILTER_LOCKED && !locked) {
                 continue;

@@ -43,12 +43,31 @@ public final class VehicleRuleEngine {
     private VehicleSignalSnapshot lastSnapshot;
 
     public synchronized void setRules(@Nullable List<VehicleTriggerRule> nextRules) {
+        Map<String, VehicleTriggerRule> previousRulesById = new HashMap<>(this.rules.size());
+        for (VehicleTriggerRule previous : this.rules) {
+            previousRulesById.put(previous.id, previous);
+        }
         if (nextRules == null) {
             this.rules = Collections.emptyList();
-        } else {
-            this.rules = Collections.unmodifiableList(new ArrayList<>(nextRules));
+            runtimes.clear();
+            return;
         }
+        List<VehicleTriggerRule> copied = new ArrayList<>(nextRules.size());
+        Map<String, RuleRuntime> preservedRuntimes = new HashMap<>(nextRules.size());
+        for (VehicleTriggerRule next : nextRules) {
+            if (next == null) {
+                continue;
+            }
+            copied.add(next);
+            VehicleTriggerRule previous = previousRulesById.get(next.id);
+            RuleRuntime existingRuntime = runtimes.get(next.id);
+            if (previous != null && existingRuntime != null && previous.hasSameEvaluationDefinition(next)) {
+                preservedRuntimes.put(next.id, existingRuntime);
+            }
+        }
+        this.rules = Collections.unmodifiableList(copied);
         runtimes.clear();
+        runtimes.putAll(preservedRuntimes);
     }
 
     @NonNull

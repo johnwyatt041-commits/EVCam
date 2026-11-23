@@ -134,7 +134,24 @@ public class ExpandablePhotoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     public void syncSelectionByGroup(@Nullable PhotoGroup activeGroup) {
-        selectedPosition = activeGroup == null ? -1 : flattenedItems.indexOf(activeGroup);
+        if (activeGroup == null) {
+            selectedPosition = -1;
+            return;
+        }
+        int exactIdx = flattenedItems.indexOf(activeGroup);
+        if (exactIdx >= 0) {
+            selectedPosition = exactIdx;
+            return;
+        }
+        String targetPrefix = activeGroup.getTimestampPrefix();
+        for (int i = 0; i < flattenedItems.size(); i++) {
+            Object item = flattenedItems.get(i);
+            if (item instanceof PhotoGroup && targetPrefix.equals(((PhotoGroup) item).getTimestampPrefix())) {
+                selectedPosition = i;
+                return;
+            }
+        }
+        selectedPosition = -1;
     }
 
     @Override

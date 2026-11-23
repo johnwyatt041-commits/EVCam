@@ -30,7 +30,8 @@ import java.util.concurrent.Executors;
 
 /**
  * Expandable date + hourly timeline adapter for video playback groups.
- * Lazily probes segment durations on a single background worker and enforces {@code 320x200} Glide thumbs.
+ * Loads only ONE actually-recorded representative thumbnail per group with concurrency throttling
+ * and negative caching, and lazily probes segment durations on a single background worker.
  */
 public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerView.ViewHolder> {
 
@@ -44,7 +45,13 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     private final List<Object> flattenedItems = new ArrayList<>();
     private final ConcurrentHashMap<String, String> durationCache = new ConcurrentHashMap<>();
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final PlaybackThumbnailGuard thumbnailGuard;
+    private final Runnable cooldownDrainRunnable;
     private ExecutorService durationExecutor;
+    @Nullable
+    private RecyclerView attachedRecyclerView;
+    @Nullable
+    private RecyclerView.OnScrollListener scrollPauseListener;
 
     @Nullable
     private PlaybackTimelineBuilder.ActiveRecordingBanner activeRecordingBanner;
@@ -76,7 +83,49 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     public ExpandableVideoGroupAdapter(Context context, List<DateSection<VideoGroup>> dateSections) {
         this.context = context;
         this.dateSections = dateSections;
+        this.cooldownDrainRunnable = this::runCooldownDrain;
+        this.thumbnailGuard = PlaybackThumbnailGuard.createShared(this::scheduleCooldownDrain);
         buildFlattenedList();
+    }
+
+    private void runCooldownDrain() {
+        if (attachedRecyclerView != null || !flattenedItems.isEmpty()) {
+            thumbnailGuard.drainPending(System.currentTimeMillis());
+        }
+    }
+
+    private void scheduleCooldownDrain(long delayMs) {
+        mainHandler.removeCallbacks(cooldownDrainRunnable);
+        mainHandler.postDelayed(cooldownDrainRunnable, Math.max(1L, delayMs));
+    }
+
+    @Override
+    public void onAttachedToRecyclerView(@NonNull RecyclerView recyclerView) {
+        super.onAttachedToRecyclerView(recyclerView);
+        attachedRecyclerView = recyclerView;
+        if (scrollPauseListener == null) {
+            scrollPauseListener = new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrollStateChanged(@NonNull RecyclerView rv, int newState) {
+                    thumbnailGuard.setScrollPaused(
+                            newState == RecyclerView.SCROLL_STATE_SETTLING,
+                            System.currentTimeMillis());
+                }
+            };
+        }
+        recyclerView.addOnScrollListener(scrollPauseListener);
+    }
+
+    @Override
+    public void onDetachedFromRecyclerView(@NonNull RecyclerView recyclerView) {
+        if (scrollPauseListener != null) {
+            recyclerView.removeOnScrollListener(scrollPauseListener);
+        }
+        if (attachedRecyclerView == recyclerView) {
+            attachedRecyclerView = null;
+        }
+        thumbnailGuard.clearPendingAndInFlight();
+        super.onDetachedFromRecyclerView(recyclerView);
     }
 
     public void setActiveRecordingBanner(@Nullable PlaybackTimelineBuilder.ActiveRecordingBanner banner) {
@@ -154,10 +203,28 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     public void syncSelectionByGroup(@Nullable VideoGroup activeGroup) {
-        selectedPosition = activeGroup == null ? -1 : flattenedItems.indexOf(activeGroup);
+        if (activeGroup == null) {
+            selectedPosition = -1;
+            return;
+        }
+        int exactIdx = flattenedItems.indexOf(activeGroup);
+        if (exactIdx >= 0) {
+            selectedPosition = exactIdx;
+            return;
+        }
+        String targetPrefix = activeGroup.getTimestampPrefix();
+        for (int i = 0; i < flattenedItems.size(); i++) {
+            Object item = flattenedItems.get(i);
+            if (item instanceof VideoGroup && targetPrefix.equals(((VideoGroup) item).getTimestampPrefix())) {
+                selectedPosition = i;
+                return;
+            }
+        }
+        selectedPosition = -1;
     }
 
     public void release() {
+        thumbnailGuard.clearPendingAndInFlight();
         durationCache.clear();
         if (durationExecutor != null) {
             durationExecutor.shutdownNow();
@@ -236,6 +303,10 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     private void bindVideoGroup(VideoGroupViewHolder holder, VideoGroup group, int position) {
+        long nowMs = System.currentTimeMillis();
+        cancelActiveThumbnailLoad(holder, nowMs);
+        holder.boundGroup = group;
+
         holder.videoDate.setVisibility(View.GONE);
         holder.videoTime.setText(group.getFormattedSecondTime());
         holder.videoTime.setTextColor(ContextCompat.getColor(context, R.color.text_primary));
@@ -252,14 +323,28 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
             holder.activeBadge.setVisibility(group.isRecordingActive() ? View.VISIBLE : View.GONE);
         }
 
-        File thumbFile = group.hasVideo(VideoGroup.POSITION_COMBINED)
-                ? group.getVideoFile(VideoGroup.POSITION_COMBINED) : group.getFrontVideo();
-        PlaybackListViewHolders.loadThumbnail(context, thumbFile, holder.thumbFront, true);
-        PlaybackListViewHolders.loadThumbnail(context, group.getBackVideo(), holder.thumbBack, true);
-        PlaybackListViewHolders.loadThumbnail(context, group.getLeftVideo(), holder.thumbLeft, true);
-        PlaybackListViewHolders.loadThumbnail(context, group.getRightVideo(), holder.thumbRight, true);
+        if (holder.thumbGrid2x2 != null) {
+            holder.thumbGrid2x2.setVisibility(View.GONE);
+        }
+        PlaybackImageMemory.clearImageView(holder.thumbFront);
+        PlaybackImageMemory.clearImageView(holder.thumbBack);
+        PlaybackImageMemory.clearImageView(holder.thumbLeft);
+        PlaybackImageMemory.clearImageView(holder.thumbRight);
 
-        bindDurationBadgeAsync(holder, group.getThumbnailFile());
+        VideoGroup.RepresentativeMedia representative = thumbnailGuard.selectRepresentativeMedia(group, nowMs);
+        updateThumbCameraBadge(holder, PlaybackThumbnailGuard.resolveDisplayCameraLabel(group, representative));
+
+        if (holder.thumbPrimary != null) {
+            holder.thumbPrimary.setVisibility(View.VISIBLE);
+            PlaybackImageMemory.clearImageView(holder.thumbPrimary);
+            holder.thumbPrimary.setBackgroundColor(ContextCompat.getColor(context, R.color.preview_frame_background));
+            if (representative != null) {
+                submitRepresentativeThumbnail(holder, group, representative, nowMs);
+            }
+        }
+
+        File durationSample = representative != null ? representative.file : group.getThumbnailFile();
+        bindDurationBadgeAsync(holder, durationSample);
 
         boolean isSelected = isMultiSelectMode
                 ? selectedGroups.contains(group)
@@ -309,11 +394,93 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
         });
     }
 
+    private void submitRepresentativeThumbnail(@NonNull VideoGroupViewHolder holder,
+                                               @NonNull VideoGroup group,
+                                               @NonNull VideoGroup.RepresentativeMedia rep,
+                                               long nowMs) {
+        if (holder.thumbPrimary == null) {
+            return;
+        }
+        String fileKey = PlaybackThumbnailGuard.buildFileKey(rep.file);
+        holder.activeThumbKey = fileKey;
+        long token = thumbnailGuard.submit(fileKey, nowMs, assignedToken -> {
+            if (holder.thumbPrimary == null
+                    || holder.boundGroup != group
+                    || !fileKey.equals(holder.activeThumbKey)) {
+                thumbnailGuard.cancel(assignedToken, System.currentTimeMillis());
+                return;
+            }
+            holder.activeThumbToken = assignedToken;
+            boolean started = PlaybackListViewHolders.loadVideoThumbnailGuarded(
+                    context,
+                    rep.file,
+                    holder.thumbPrimary,
+                    () -> thumbnailGuard.onLoadSucceeded(assignedToken, fileKey, System.currentTimeMillis()),
+                    () -> {
+                        long failNow = System.currentTimeMillis();
+                        thumbnailGuard.onLoadFailed(assignedToken, fileKey, failNow);
+                        mainHandler.post(() -> {
+                            if (holder.boundGroup == group
+                                    && holder.activeThumbToken == assignedToken
+                                    && holder.thumbPrimary != null) {
+                                VideoGroup.RepresentativeMedia fallback =
+                                        thumbnailGuard.selectRepresentativeMedia(group, System.currentTimeMillis());
+                                updateThumbCameraBadge(
+                                        holder, PlaybackThumbnailGuard.resolveDisplayCameraLabel(group, fallback));
+                                if (fallback != null) {
+                                    submitRepresentativeThumbnail(holder, group, fallback, System.currentTimeMillis());
+                                } else {
+                                    holder.activeThumbToken = 0L;
+                                    holder.activeThumbKey = null;
+                                    PlaybackImageMemory.clearImageView(holder.thumbPrimary);
+                                    holder.thumbPrimary.setBackgroundColor(
+                                            ContextCompat.getColor(context, R.color.preview_frame_background));
+                                }
+                            }
+                        });
+                    });
+            if (!started) {
+                if (holder.activeThumbToken == assignedToken) {
+                    holder.activeThumbToken = 0L;
+                    holder.activeThumbKey = null;
+                }
+                thumbnailGuard.cancel(assignedToken, System.currentTimeMillis());
+            }
+        });
+        if (holder.boundGroup == group && fileKey.equals(holder.activeThumbKey)) {
+            holder.activeThumbToken = token;
+        }
+    }
+
+    private void cancelActiveThumbnailLoad(@NonNull VideoGroupViewHolder holder, long nowMs) {
+        if (holder.activeThumbToken != 0L) {
+            thumbnailGuard.cancel(holder.activeThumbToken, nowMs);
+            holder.activeThumbToken = 0L;
+        }
+        holder.activeThumbKey = null;
+    }
+
+    private void updateThumbCameraBadge(@NonNull VideoGroupViewHolder holder, @NonNull String label) {
+        if (holder.thumbCameraBadge == null) {
+            return;
+        }
+        if (label.isEmpty()) {
+            holder.thumbCameraBadge.setVisibility(View.GONE);
+        } else {
+            holder.thumbCameraBadge.setText(label);
+            holder.thumbCameraBadge.setVisibility(View.VISIBLE);
+        }
+    }
+
     private void bindDurationBadgeAsync(VideoGroupViewHolder holder, @Nullable File sampleFile) {
         if (holder.durationBadge == null) {
             return;
         }
-        if (sampleFile == null || !sampleFile.isFile() || sampleFile.length() <= 0L) {
+        if (sampleFile == null
+                || !sampleFile.isFile()
+                || sampleFile.length() < PlaybackThumbnailGuard.MIN_PLAYABLE_THUMB_BYTES
+                || thumbnailGuard.isNegativeCached(
+                        PlaybackThumbnailGuard.buildFileKey(sampleFile), System.currentTimeMillis())) {
             holder.boundDurationKey = null;
             holder.durationBadge.setVisibility(View.GONE);
             return;
@@ -388,7 +555,10 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     @Override
     public void onViewRecycled(@NonNull RecyclerView.ViewHolder holder) {
         if (holder instanceof VideoGroupViewHolder) {
-            ((VideoGroupViewHolder) holder).boundDurationKey = null;
+            VideoGroupViewHolder videoHolder = (VideoGroupViewHolder) holder;
+            cancelActiveThumbnailLoad(videoHolder, System.currentTimeMillis());
+            videoHolder.boundGroup = null;
+            videoHolder.boundDurationKey = null;
         }
         PlaybackImageMemory.clearViews(holder.itemView);
         super.onViewRecycled(holder);
@@ -400,14 +570,21 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
     }
 
     static class VideoGroupViewHolder extends RecyclerView.ViewHolder {
+        @Nullable final ImageView thumbPrimary;
+        @Nullable final View thumbGrid2x2;
         final ImageView thumbFront, thumbBack, thumbLeft, thumbRight;
         final TextView videoDate, videoTime, videoSize, videoCountBadge;
-        @Nullable final TextView durationBadge, lockBadge, activeBadge;
+        @Nullable final TextView thumbCameraBadge, durationBadge, lockBadge, activeBadge;
         final android.widget.CheckBox checkIndicator;
         @Nullable String boundDurationKey;
+        @Nullable VideoGroup boundGroup;
+        @Nullable String activeThumbKey;
+        long activeThumbToken = 0L;
 
         VideoGroupViewHolder(@NonNull View itemView) {
             super(itemView);
+            thumbPrimary = itemView.findViewById(R.id.thumb_primary);
+            thumbGrid2x2 = itemView.findViewById(R.id.thumb_grid_2x2);
             thumbFront = itemView.findViewById(R.id.thumb_front);
             thumbBack = itemView.findViewById(R.id.thumb_back);
             thumbLeft = itemView.findViewById(R.id.thumb_left);
@@ -416,6 +593,7 @@ public class ExpandableVideoGroupAdapter extends RecyclerView.Adapter<RecyclerVi
             videoTime = itemView.findViewById(R.id.video_time);
             videoSize = itemView.findViewById(R.id.video_size);
             videoCountBadge = itemView.findViewById(R.id.video_count_badge);
+            thumbCameraBadge = itemView.findViewById(R.id.video_thumb_camera_badge);
             durationBadge = itemView.findViewById(R.id.video_duration_badge);
             lockBadge = itemView.findViewById(R.id.video_lock_badge);
             activeBadge = itemView.findViewById(R.id.video_active_badge);

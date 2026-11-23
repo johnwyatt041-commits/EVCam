@@ -12,6 +12,7 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.TotalCaptureResult;
 import android.hardware.camera2.params.OutputConfiguration;
 import android.hardware.camera2.params.StreamConfigurationMap;
+import android.os.Handler;
 import android.util.Size;
 import android.view.Surface;
 import android.view.TextureView;
@@ -20,7 +21,9 @@ import org.junit.Before;
 import org.junit.Test;
 import org.mockito.InOrder;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.List;
 
 import static org.junit.Assert.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -463,5 +466,218 @@ public class SingleCameraRecordingPreviewIsolationTest {
         verify(bgSession).stopRepeating();
         verify(bgSession, never()).close();
         assertTrue(backgroundCam.hasActiveRecordSurface());
+    }
+
+    @Test
+    public void duplicateSurroundSurfaceWhileClosingOrConfiguringIsNoOp() {
+        Surface surroundSurface = mock(Surface.class);
+        when(surroundSurface.isValid()).thenReturn(true);
+
+        SingleCamera camera = createSpyCamera(textureView);
+        camera.setRecordSurface(recordSurface, true);
+        camera.setMainPreviewEnabled(true);
+        camera.attachRecordingSessionStateForTest(
+                device, session, sharedConfig,
+                previewSurface, previewSurfaceTexture, previewSurface,
+                true, previewSurface, recordSurface);
+        camera.setClosingSessionForTest(session);
+
+        // First call binds surroundSurface and disables mainPreview atomically -> triggers rebuild.
+        camera.setSurroundPreviewSurface(surroundSurface, null, true);
+        verify(camera, times(1)).recreateSession(true);
+
+        // Duplicate call while session is still closing must be ignored as NO_OP.
+        camera.setSurroundPreviewSurface(surroundSurface, null, true);
+        verify(camera, times(1)).recreateSession(anyBoolean());
+        verify(camera, never()).recreateSession();
+
+        // While already configuring the exact same surface, another bind for it is also NO_OP.
+        reset(camera);
+        doNothing().when(camera).openCamera();
+        doNothing().when(camera).recreateSession();
+        doNothing().when(camera).recreateSession(anyBoolean());
+        doNothing().when(camera).applyPreviewTransformIfUnmanaged();
+        camera.setSessionFlagsForTest(false, false);
+        camera.setConfiguringSurfacesForTest(surroundSurface, recordSurface);
+
+        camera.setSurroundPreviewSurface(surroundSurface, null, true);
+        verify(camera, never()).recreateSession();
+        verify(camera, never()).recreateSession(anyBoolean());
+    }
+
+    @Test
+    public void createSessionWhileClosingDoesNotScheduleUncancellableDelayedRebuild() {
+        Handler handler = mock(Handler.class);
+        SingleCamera camera = new SingleCamera(context, "0", null, cameraManager);
+        camera.attachRecordingSessionStateForTest(
+                device, null, null,
+                null, null, null,
+                false);
+        camera.setBackgroundHandlerForTest(handler);
+        camera.setClosingSessionForTest(session);
+
+        camera.triggerCreateCameraPreviewSessionForTest();
+
+        assertTrue(camera.isPendingReconfigurationForTest());
+        verify(handler, never()).postDelayed(any(Runnable.class), anyLong());
+    }
+
+    @Test
+    public void staleOnClosedCallbackDoesNotClearActiveClosingSession() {
+        Handler handler = mock(Handler.class);
+        CameraCaptureSession staleSessionA = mock(CameraCaptureSession.class);
+        CameraCaptureSession activeSessionB = mock(CameraCaptureSession.class);
+        SingleCamera camera = new SingleCamera(context, "0", null, cameraManager);
+        camera.attachRecordingSessionStateForTest(
+                device, null, null,
+                null, null, null,
+                false);
+        camera.setBackgroundHandlerForTest(handler);
+        camera.setClosingSessionForTest(activeSessionB);
+
+        // Stale onClosed from an earlier session must not clear isSessionClosing or trigger rebuild.
+        assertFalse(camera.triggerSessionClosedForTest(staleSessionA));
+        assertTrue(camera.isConfiguringOrClosingForTest());
+        verify(handler, never()).postDelayed(any(Runnable.class), anyLong());
+
+        // Matching onClosed clears closing state and schedules 50ms cancellable recreateSessionRunnable.
+        assertTrue(camera.triggerSessionClosedForTest(activeSessionB));
+        assertFalse(camera.isConfiguringOrClosingForTest());
+        verify(handler).postDelayed(any(Runnable.class), eq(50L));
+    }
+
+    @Test
+    public void clearingNonPrimarySurroundSurfaceDefersDynamicRemoveRetriesOnEbusyAndNeverPoisonsPrimary()
+            throws Exception {
+        Surface surroundSurface = mock(Surface.class);
+        when(surroundSurface.isValid()).thenReturn(true);
+
+        SingleCamera camera = createSpyCamera(textureView);
+        camera.setRecordSurface(recordSurface, true);
+        camera.setMainPreviewEnabled(true);
+        camera.setSurroundPreviewSurface(surroundSurface, null, false);
+        reset(camera, session, sharedConfig, requestBuilder);
+        doNothing().when(camera).openCamera();
+        doNothing().when(camera).recreateSession();
+        doNothing().when(camera).recreateSession(anyBoolean());
+        doNothing().when(camera).applyPreviewTransformIfUnmanaged();
+        when(device.createCaptureRequest(anyInt())).thenReturn(requestBuilder);
+        when(requestBuilder.build()).thenReturn(captureRequest);
+        when(sharedConfig.getSurfaces()).thenReturn(Collections.emptyList());
+
+        camera.attachRecordingSessionStateForTest(
+                device, session, sharedConfig,
+                previewSurface, previewSurfaceTexture, previewSurface,
+                true, previewSurface, surroundSurface, recordSurface);
+
+        Handler handler = mock(Handler.class);
+        List<Runnable> immediateTasks = new ArrayList<>();
+        List<Runnable> delayedTasks = new ArrayList<>();
+        List<Long> delays = new ArrayList<>();
+        when(handler.post(any(Runnable.class))).thenAnswer(inv -> {
+            immediateTasks.add(inv.getArgument(0));
+            return true;
+        });
+        when(handler.postDelayed(any(Runnable.class), anyLong())).thenAnswer(inv -> {
+            delayedTasks.add(inv.getArgument(0));
+            delays.add(inv.getArgument(1));
+            return true;
+        });
+        camera.setBackgroundHandlerForTest(handler);
+
+        doThrow(new IllegalStateException("updateOutputConfiguration: Unknown error -16 (-16)"))
+                .doNothing()
+                .when(session).updateOutputConfiguration(sharedConfig);
+
+        camera.setSurroundPreviewSurface(null, null);
+        assertEquals(1, immediateTasks.size());
+
+        // Step 1: Repeating targets switch immediately without calling updateOutputConfiguration at t=0ms.
+        immediateTasks.get(0).run();
+        verify(requestBuilder).addTarget(recordSurface);
+        verify(requestBuilder).addTarget(previewSurface);
+        verify(requestBuilder, never()).addTarget(surroundSurface);
+        verify(session).setRepeatingRequest(eq(captureRequest), any(), eq(handler));
+        verify(session, never()).updateOutputConfiguration(any());
+        assertEquals(1, delayedTasks.size());
+        assertEquals(Long.valueOf(SingleCamera.DYNAMIC_REMOVE_DRAIN_DELAY_MS), delays.get(0));
+
+        // Step 2: Drain timer hits -16 (-EBUSY) -> rolls back locally and schedules 80ms retry without poisoning primary.
+        delayedTasks.get(0).run();
+        verify(sharedConfig, times(1)).removeSurface(surroundSurface);
+        verify(session, times(1)).updateOutputConfiguration(sharedConfig);
+        verify(sharedConfig, times(1)).addSurface(surroundSurface);
+        assertEquals(2, delayedTasks.size());
+        assertEquals(Long.valueOf(SingleCamera.DYNAMIC_REMOVE_RETRY_DELAY_MS), delays.get(1));
+        assertFalse(camera.isActivePreviewPrimaryAbandonedForTest());
+        verify(session, never()).close();
+
+        // Step 3: Retry succeeds cleanly; session and primary preview config remain healthy.
+        delayedTasks.get(1).run();
+        verify(sharedConfig, times(2)).removeSurface(surroundSurface);
+        verify(session, times(2)).updateOutputConfiguration(sharedConfig);
+        verify(sharedConfig, times(1)).addSurface(surroundSurface);
+        assertFalse(camera.isActivePreviewPrimaryAbandonedForTest());
+        verify(session, never()).close();
+        verify(camera, never()).recreateSession();
+        verify(camera, never()).recreateSession(anyBoolean());
+    }
+
+    @Test
+    public void exhaustedNonPrimaryDynamicRemoveFailurePreservesRecordingSessionAndPrimaryHealth()
+            throws Exception {
+        Surface surroundSurface = mock(Surface.class);
+        when(surroundSurface.isValid()).thenReturn(true);
+
+        SingleCamera camera = createSpyCamera(textureView);
+        camera.setRecordSurface(recordSurface, true);
+        camera.setMainPreviewEnabled(true);
+        camera.setSurroundPreviewSurface(surroundSurface, null, false);
+        reset(camera, session, sharedConfig, requestBuilder);
+        doNothing().when(camera).openCamera();
+        doNothing().when(camera).recreateSession();
+        doNothing().when(camera).recreateSession(anyBoolean());
+        doNothing().when(camera).applyPreviewTransformIfUnmanaged();
+        when(device.createCaptureRequest(anyInt())).thenReturn(requestBuilder);
+        when(requestBuilder.build()).thenReturn(captureRequest);
+        when(sharedConfig.getSurfaces()).thenReturn(Collections.emptyList());
+
+        camera.attachRecordingSessionStateForTest(
+                device, session, sharedConfig,
+                previewSurface, previewSurfaceTexture, previewSurface,
+                true, previewSurface, surroundSurface, recordSurface);
+
+        Handler handler = mock(Handler.class);
+        List<Runnable> immediateTasks = new ArrayList<>();
+        List<Runnable> delayedTasks = new ArrayList<>();
+        when(handler.post(any(Runnable.class))).thenAnswer(inv -> {
+            immediateTasks.add(inv.getArgument(0));
+            return true;
+        });
+        when(handler.postDelayed(any(Runnable.class), anyLong())).thenAnswer(inv -> {
+            delayedTasks.add(inv.getArgument(0));
+            return true;
+        });
+        camera.setBackgroundHandlerForTest(handler);
+
+        doThrow(new IllegalStateException("updateOutputConfiguration: Unknown error -16 (-16)"))
+                .when(session).updateOutputConfiguration(sharedConfig);
+
+        camera.setSurroundPreviewSurface(null, null);
+        immediateTasks.get(0).run();
+        assertEquals(1, delayedTasks.size());
+        delayedTasks.get(0).run();
+        assertEquals(2, delayedTasks.size());
+        delayedTasks.get(1).run();
+
+        // Exhausted failure must not schedule a 3rd retry, tear down recording, or poison primary config.
+        assertEquals(2, delayedTasks.size());
+        verify(sharedConfig, times(2)).removeSurface(surroundSurface);
+        verify(sharedConfig, times(2)).addSurface(surroundSurface);
+        assertFalse(camera.isActivePreviewPrimaryAbandonedForTest());
+        verify(session, never()).stopRepeating();
+        verify(session, never()).close();
+        verify(camera, never()).recreateSession();
+        verify(camera, never()).recreateSession(anyBoolean());
     }
 }

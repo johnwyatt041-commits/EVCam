@@ -612,8 +612,25 @@ public class MainActivity extends AppCompatActivity implements
         }
         if ("start_recording".equals(action)) {
             intent.removeExtra("remote_action");
+            if (shouldShortCircuitStartRecordingIntent(
+                    isRecording,
+                    isRemoteRecording,
+                    isPreparingRecording,
+                    cameraManager != null && cameraManager.isRecording())) {
+                AppLog.d(TAG, "Received start_recording while already recording, short-circuit skip");
+                return;
+            }
             pendingRemoteCommand = true;
             new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
+                if (shouldShortCircuitStartRecordingIntent(
+                        isRecording,
+                        isRemoteRecording,
+                        isPreparingRecording,
+                        cameraManager != null && cameraManager.isRecording())) {
+                    pendingRemoteCommand = false;
+                    AppLog.d(TAG, "Already recording when delayed start_recording fired, skip");
+                    return;
+                }
                 if (cameraManager != null && !cameraManager.hasAvailableCameras()) {
                     cameraManager.openAllCameras();
                     new android.os.Handler(android.os.Looper.getMainLooper()).postDelayed(() -> {
@@ -724,11 +741,22 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
     
+    static boolean shouldShortCircuitStartRecordingIntent(boolean isRecording,
+                                                          boolean isRemoteRecording,
+                                                          boolean isPreparingRecording,
+                                                          boolean cameraManagerRecording) {
+        return isRecording || isRemoteRecording || isPreparingRecording || cameraManagerRecording;
+    }
+
     /**
      * 执行启动持续录制（等同点击录制按钮）
      */
     private void executeStartPersistentRecording() {
-        if (isRecording) {
+        if (shouldShortCircuitStartRecordingIntent(
+                isRecording,
+                isRemoteRecording,
+                isPreparingRecording,
+                cameraManager != null && cameraManager.isRecording())) {
             AppLog.d(TAG, "Already recording, skip");
             return;
         }

@@ -200,13 +200,27 @@ public final class RecordingPreviewSessionPolicy {
             SessionSnapshot s,
             boolean alreadyConfigured,
             boolean mainPreviewDisabledAtomically) {
+        return decideOnSurroundSurfaceAdded(s, alreadyConfigured, false, mainPreviewDisabledAtomically);
+    }
+
+    public static PreviewAction decideOnSurroundSurfaceAdded(
+            SessionSnapshot s,
+            boolean alreadyConfigured,
+            boolean alreadyInFlightForSameSurface,
+            boolean mainPreviewDisabledAtomically) {
         if (s == null) {
             return PreviewAction.NO_OP;
         }
         if (!s.cameraConnected) {
             return PreviewAction.OPEN_CAMERA;
         }
-        if (s.sessionBusy || !s.hasActiveSession) {
+        if (s.sessionBusy) {
+            if (alreadyInFlightForSameSurface && !mainPreviewDisabledAtomically) {
+                return PreviewAction.NO_OP;
+            }
+            return PreviewAction.RECREATE_SESSION;
+        }
+        if (!s.hasActiveSession) {
             return PreviewAction.RECREATE_SESSION;
         }
         if (alreadyConfigured) {

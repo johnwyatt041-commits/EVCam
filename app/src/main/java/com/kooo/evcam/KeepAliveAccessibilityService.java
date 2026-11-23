@@ -36,6 +36,8 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     
     private static KeepAliveAccessibilityService instance;
     private static boolean isServiceRunning = false;
+    private static volatile String lastForegroundPackage;
+    private static volatile String lastForegroundClass;
     
     private ScheduledExecutorService heartbeatExecutor;
     private long startTime;
@@ -209,9 +211,15 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent event) {
-        // 不处理任何无障碍事件，仅用于保活
-        // 虽然配置允许获取窗口内容，但代码中不会实际读取
-        // 这样既能获得高优先级，又能保护用户隐私
+        // 仅记录窗口切换事件自带的包名/类名元数据，不读取窗口树或用户界面内容
+        if (event != null && event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            CharSequence pkg = event.getPackageName();
+            if (pkg != null && pkg.length() > 0) {
+                lastForegroundPackage = pkg.toString();
+                CharSequence cls = event.getClassName();
+                lastForegroundClass = cls != null ? cls.toString() : null;
+            }
+        }
     }
 
     @Override
@@ -238,6 +246,8 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     public boolean onUnbind(Intent intent) {
         AppLog.d(TAG, "无障碍服务 onUnbind，准备清理无障碍悬浮窗句柄");
         notifyDetachedLocked();
+        lastForegroundPackage = null;
+        lastForegroundClass = null;
         instance = null;
         isServiceRunning = false;
         return super.onUnbind(intent);
@@ -256,6 +266,8 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         
         // 前台通知由 CameraForegroundService 管理，这里不需要停止
         
+        lastForegroundPackage = null;
+        lastForegroundClass = null;
         instance = null;
         isServiceRunning = false;
         
@@ -297,6 +309,20 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
                 }
             }
         }
+    }
+
+    /**
+     * 获取无障碍最近观察到的前台包名（仅用于避让原车全景影像，非保活期间返回 null）。
+     */
+    public static String getLastForegroundPackage() {
+        return isRunning() ? lastForegroundPackage : null;
+    }
+
+    /**
+     * 获取无障碍最近观察到的前台 Activity/类名。
+     */
+    public static String getLastForegroundClass() {
+        return isRunning() ? lastForegroundClass : null;
     }
 
     /**

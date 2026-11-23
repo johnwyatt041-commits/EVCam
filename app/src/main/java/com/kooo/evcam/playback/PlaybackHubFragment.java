@@ -16,12 +16,13 @@ import androidx.core.view.ViewCompat;
 import androidx.fragment.app.Fragment;
 import androidx.fragment.app.FragmentManager;
 
+import com.kooo.evcam.FragmentCleanupCoordinator;
 import com.kooo.evcam.R;
 import com.kooo.evcam.transfer.QrTransferDialog;
 import com.kooo.evcam.ui.UiThemeController;
 
 /**
- * 合并「回看」统一入口：顶部切换视频回看 / 照片回看两个列表，并集成 Wi-Fi 浏览器全库分享入口。
+ * 合并「回看」统一入口：顶部切换视频回看 / 照片回看两个列表，并集成清理碎片与 Wi-Fi 浏览器全库分享入口。
  */
 public class PlaybackHubFragment extends Fragment implements UiThemeController.ThemeAware {
 
@@ -33,6 +34,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
     private int activeTab = TAB_VIDEO;
     private Button btnTabVideo;
     private Button btnTabPhoto;
+    private Button btnCleanupFragments;
     private Button btnLanShare;
     private View rootView;
 
@@ -61,6 +63,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
         rootView = inflater.inflate(R.layout.fragment_playback_hub, container, false);
         btnTabVideo = rootView.findViewById(R.id.btn_tab_video);
         btnTabPhoto = rootView.findViewById(R.id.btn_tab_photo);
+        btnCleanupFragments = rootView.findViewById(R.id.btn_cleanup_fragments);
         btnLanShare = rootView.findViewById(R.id.btn_lan_share);
 
         getChildFragmentManager().registerFragmentLifecycleCallbacks(
@@ -76,6 +79,9 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
 
         btnTabVideo.setOnClickListener(v -> switchTab(TAB_VIDEO, true));
         btnTabPhoto.setOnClickListener(v -> switchTab(TAB_PHOTO, true));
+        if (btnCleanupFragments != null) {
+            btnCleanupFragments.setOnClickListener(v -> triggerManualFragmentCleanup());
+        }
         if (btnLanShare != null) {
             btnLanShare.setOnClickListener(v -> openLibraryLanShare());
         }
@@ -85,6 +91,33 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
             switchTab(activeTab, false);
         }
         return rootView;
+    }
+
+    private void triggerManualFragmentCleanup() {
+        FragmentCleanupCoordinator.startManualScanAndPrompt(
+                this,
+                () -> {
+                    if (btnCleanupFragments != null) {
+                        btnCleanupFragments.setEnabled(false);
+                        btnCleanupFragments.setText("扫描中...");
+                    }
+                },
+                () -> {
+                    if (btnCleanupFragments != null) {
+                        btnCleanupFragments.setEnabled(true);
+                        btnCleanupFragments.setText("清理碎片");
+                    }
+                },
+                null,
+                () -> {
+                    if (!isAdded()) {
+                        return;
+                    }
+                    Fragment child = getChildFragmentManager().findFragmentById(R.id.playback_tab_container);
+                    if (child instanceof PlaybackFragmentNew) {
+                        ((PlaybackFragmentNew) child).refreshVideoList();
+                    }
+                });
     }
 
     private void openLibraryLanShare() {
@@ -131,6 +164,7 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
         rootView = null;
         btnTabVideo = null;
         btnTabPhoto = null;
+        btnCleanupFragments = null;
         btnLanShare = null;
         super.onDestroyView();
     }
@@ -157,6 +191,11 @@ public class PlaybackHubFragment extends Fragment implements UiThemeController.T
     private void applyTabButtonTheme(@NonNull Context context) {
         styleTab(btnTabVideo, activeTab == TAB_VIDEO, context);
         styleTab(btnTabPhoto, activeTab == TAB_PHOTO, context);
+        if (btnCleanupFragments != null) {
+            ViewCompat.setBackgroundTintList(btnCleanupFragments,
+                    ColorStateList.valueOf(ContextCompat.getColor(context, R.color.button_background)));
+            btnCleanupFragments.setTextColor(ContextCompat.getColor(context, R.color.button_text));
+        }
         if (btnLanShare != null) {
             ViewCompat.setBackgroundTintList(btnLanShare,
                     ColorStateList.valueOf(ContextCompat.getColor(context, R.color.button_background)));

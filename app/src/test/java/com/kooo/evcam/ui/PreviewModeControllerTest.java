@@ -150,6 +150,11 @@ public class PreviewModeControllerTest {
         assertTrue(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, true));
         assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_A, false));
         assertFalse(PreviewModeController.shouldHideOrdinaryTextureViewsForModeA(PreviewMode.MODE_B, true));
+        assertFalse(PreviewModeController.shouldShowOrdinaryPreviewLayout(PreviewMode.MODE_A));
+        assertTrue(PreviewModeController.shouldShowOrdinaryPreviewLayout(PreviewMode.MODE_B));
+        assertTrue(PreviewModeController.shouldShowOrdinaryPreviewLayout(PreviewMode.MODE_C));
+        assertTrue(PreviewModeController.shouldShowOrdinaryPreviewLayout(PreviewMode.MODE_D));
+        assertTrue(PreviewModeController.shouldShowOrdinaryPreviewLayout(PreviewMode.MODE_E));
 
         // Mode A visibility mask is deferred until GLThread finishes creating surround OES surfaces.
         assertTrue(PreviewModeController.shouldDeferCameraVisibilityMaskForModeA(true, false));

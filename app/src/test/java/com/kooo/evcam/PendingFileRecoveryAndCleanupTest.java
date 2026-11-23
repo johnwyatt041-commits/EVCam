@@ -183,4 +183,134 @@ public class PendingFileRecoveryAndCleanupTest {
         assertNotNull(activeScan.activeRecording);
         assertEquals("20261121_090000", activeScan.activeRecording.timestampPrefix);
     }
+
+    @Test
+    public void manualCleanupScanFindsFragmentsProtectsActiveAndRefusesNormalMediaDeletion() throws Exception {
+        File videoDir = temp.newFolder("EVCam_Video_Manual");
+        long nowMs = 50_000_000L;
+        long oldMtime = nowMs - VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS - 60_000L;
+        long freshMtime = nowMs - 10_000L;
+
+        // Recoverable playable orphan pending -> recovered losslessly during scan
+        File recoverablePending = new File(videoDir, "20261122_070000_back.mp4.pending");
+        Files.write(recoverablePending.toPath(), buildMinimalValidMp4(1400));
+        recoverablePending.setLastModified(oldMtime);
+
+        // Deletable fragments
+        File corruptPending = new File(videoDir, "20261122_071000_left.mp4.pending");
+        File tinyStubPending = new File(videoDir, "20261122_071500_right.mp4.pending");
+        File stalePart = new File(videoDir, "20261122_072000_back.mp4.part");
+        File staleProbe = new File(videoDir, ".evcam_write_probe_1.mp4.pending");
+        File staleSpeedTmp = new File(videoDir, ".evcam_speed_test_1.tmp");
+        File orphanLock = new File(videoDir, "20261120_050000_back.mp4.lock");
+
+        Files.write(corruptPending.toPath(), new byte[4096]);
+        Files.write(tinyStubPending.toPath(), new byte[128]);
+        Files.write(stalePart.toPath(), new byte[2048]);
+        Files.write(staleProbe.toPath(), new byte[64]);
+        Files.write(staleSpeedTmp.toPath(), new byte[512]);
+        Files.write(orphanLock.toPath(), new byte[1]);
+
+        corruptPending.setLastModified(oldMtime);
+        tinyStubPending.setLastModified(oldMtime);
+        stalePart.setLastModified(oldMtime);
+        staleProbe.setLastModified(oldMtime);
+        staleSpeedTmp.setLastModified(oldMtime);
+        orphanLock.setLastModified(oldMtime);
+
+        // Must be strictly protected!
+        File normalMp4 = new File(videoDir, "20261122_080000_back.mp4");
+        File normalMp4Lock = new File(videoDir, "20261122_080000_back.mp4.lock");
+        File normalJpg = new File(videoDir, "20261122_080000_back.jpg");
+        File activePending = new File(videoDir, "20261123_090000_back.mp4.pending");
+        File gracePending = new File(videoDir, "20261123_090100_left.mp4.pending");
+        File activeTransferPart = new File(videoDir, "20261123_090200_right.mp4.part");
+        File trashedMp4 = new File(videoDir, ".trashed-123-20261122_060000_back.mp4");
+
+        Files.write(normalMp4.toPath(), new byte[8192]);
+        Files.write(normalMp4Lock.toPath(), new byte[1]);
+        Files.write(normalJpg.toPath(), new byte[1024]);
+        Files.write(activePending.toPath(), new byte[4096]);
+        Files.write(gracePending.toPath(), new byte[4096]);
+        Files.write(activeTransferPart.toPath(), new byte[4096]);
+        Files.write(trashedMp4.toPath(), new byte[2048]);
+
+        normalMp4.setLastModified(oldMtime);
+        normalMp4Lock.setLastModified(oldMtime);
+        normalJpg.setLastModified(oldMtime);
+        activePending.setLastModified(oldMtime); // old mtime, but actively registered
+        gracePending.setLastModified(freshMtime); // recent grace window
+        activeTransferPart.setLastModified(oldMtime); // actively transferring
+        trashedMp4.setLastModified(oldMtime);
+
+        Set<String> protectedPaths = new HashSet<>();
+        protectedPaths.add(ActiveRecordingRegistry.normalizePath(activePending));
+        protectedPaths.add(ActiveRecordingRegistry.normalizePath(activeTransferPart));
+
+        PendingFileRecoveryManager.ManualScanReport report = PendingFileRecoveryManager.scanForManualCleanup(
+                Collections.singletonList(videoDir),
+                protectedPaths,
+                nowMs,
+                VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS,
+                PendingFileRecoveryManager::hasValidMp4AtomStructure);
+
+        // Scan must recover playable pending but NEVER delete tiny/corrupt fragments before confirmation!
+        assertEquals(1, report.recoveredFiles.size());
+        assertEquals("20261122_070000_back.mp4", report.recoveredFiles.get(0).getName());
+        assertTrue(new File(videoDir, "20261122_070000_back.mp4").exists());
+        assertTrue(tinyStubPending.exists());
+        assertTrue(corruptPending.exists());
+
+        assertEquals(2, report.pendingCount);
+        assertEquals(4224L, report.pendingBytes);
+        assertEquals(1, report.partCount);
+        assertEquals(2048L, report.partBytes);
+        assertEquals(2, report.tempProbeCount);
+        assertEquals(576L, report.tempProbeBytes);
+        assertEquals(1, report.orphanLockCount);
+        assertEquals(1L, report.orphanLockBytes);
+        assertEquals(6, report.getTotalDeletableCount());
+        assertEquals(6849L, report.totalDeletableBytes);
+        assertEquals(3, report.protectedActiveCount);
+
+        // Even if normal media or protected items are maliciously injected into delete list, deleteFragmentsSafely refuses them!
+        java.util.List<PendingFileRecoveryManager.FragmentItem> mixedWithProtected = new java.util.ArrayList<>(report.deletableFragments);
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                normalMp4, PendingFileRecoveryManager.FragmentCategory.PENDING_VIDEO, normalMp4.length()));
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                normalJpg, PendingFileRecoveryManager.FragmentCategory.TEMP_PROBE, normalJpg.length()));
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                normalMp4Lock, PendingFileRecoveryManager.FragmentCategory.ORPHAN_LOCK, normalMp4Lock.length()));
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                activePending, PendingFileRecoveryManager.FragmentCategory.PENDING_VIDEO, activePending.length()));
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                gracePending, PendingFileRecoveryManager.FragmentCategory.PENDING_VIDEO, gracePending.length()));
+        mixedWithProtected.add(new PendingFileRecoveryManager.FragmentItem(
+                activeTransferPart, PendingFileRecoveryManager.FragmentCategory.TRANSFER_PART, activeTransferPart.length()));
+
+        PendingFileRecoveryManager.ManualDeleteResult deleteResult = PendingFileRecoveryManager.deleteFragmentsSafely(
+                mixedWithProtected,
+                protectedPaths,
+                nowMs,
+                VideoLockStore.ACTIVE_PENDING_GRACE_WINDOW_MS);
+
+        assertEquals(6, deleteResult.deletedCount);
+        assertEquals(6, deleteResult.skippedCount);
+        assertEquals(6849L, deleteResult.freedBytes);
+
+        assertFalse(corruptPending.exists());
+        assertFalse(tinyStubPending.exists());
+        assertFalse(stalePart.exists());
+        assertFalse(staleProbe.exists());
+        assertFalse(staleSpeedTmp.exists());
+        assertFalse(orphanLock.exists());
+
+        assertTrue(normalMp4.exists());
+        assertTrue(normalMp4Lock.exists());
+        assertTrue(normalJpg.exists());
+        assertTrue(activePending.exists());
+        assertTrue(gracePending.exists());
+        assertTrue(activeTransferPart.exists());
+        assertTrue(trashedMp4.exists());
+    }
 }

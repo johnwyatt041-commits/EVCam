@@ -1,50 +1,38 @@
 # 录像与预览性能优化
 
-最后更新：2026-11-22 21:40:18 +08:00
-最后核对：2026-11-22 21:40:18 +08:00
+最后更新：2026-11-23 09:26:36 +08:00
+最后核对：2026-11-23 09:26:36 +08:00
 任务/执行者：optimize-recording-preview-perf / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：已发布 **`build25`** GitHub Pre-release（[`v1.6.6-test-11222113-build25`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11222113-build25) / `006ebb5`）；待实车测试后再评 **`L1~L3`**
-当前结论：单 A 版收敛 + `S1~S4` + `M1~M2` 已封包上线 GitHub（`374` 测、Lint `0` errors、`apksigner` v2 与远端 SHA256 全验通过）；仅剩第三组大工作量 **`L1~L3`** 待实车日志评估。
+状态：已完成 **批次 A (`A1–A4`)**、**批次 B (`B1–B3`)** 与 **批次 C (`C1–C4`)** 离线实现与单 A 版验证（`1.6.6-test-11230919`）；待打包实车验证与关闭外部 D 挡脚本
+当前结论：批次 A/B/C 已合入工作区并通过 `395` 测与 Lint `0` errors（`2243` warnings）：批次 C 完成视频/照片回看后台异步扫盘加加载态、滤 `.`/`.trashed-`/`trashed-` 并内存 Set O(1) 判锁、每组仅加载 1 张已录主路代表图（绝不显示未录视角，并发=2/快滑暂停/LRU 负缓存）及回看/设置双入口安全清理不可恢复碎片。
 
 ## 已修复（`build24` / `9f90c63` 已合入 10 项）
 
-- **录像 1~5**：去 Release `glGetError()`/冗余 `eglMakeCurrent()`（[EglSurfaceEncoder.java](../../app/src/main/java/com/kooo/evcam/camera/EglSurfaceEncoder.java)、[MultiCameraCompositor.java](../../app/src/main/java/com/kooo/evcam/camera/MultiCameraCompositor.java)）；`segmentHandler` 异步分段、退避排空及 HEVC 码率修复（[CodecVideoRecorder.java](../../app/src/main/java/com/kooo/evcam/camera/CodecVideoRecorder.java)）；水印零分配与中转降优（[VehicleStatusWatermark.java](../../app/src/main/java/com/kooo/evcam/camera/VehicleStatusWatermark.java)、[FileTransferManager.java](../../app/src/main/java/com/kooo/evcam/FileTransferManager.java)）。
-- **预览 6~10**：Mode A VBO/IBO、`33ms` 合并限频与 Shader 减负（[SurroundGlRenderer.java](../../app/src/main/java/com/kooo/evcam/surround/SurroundGlRenderer.java)）；隐藏停刷计时 UI（[MainActivity.java](../../app/src/main/java/com/kooo/evcam/MainActivity.java)）；去默认圆角与冗余 Outline/`setOpaque`（[EditablePreviewLayout.java](../../app/src/main/java/com/kooo/evcam/ui/EditablePreviewLayout.java)）。
+- **录像 1~5**：去 Release `glGetError()`/冗余 `eglMakeCurrent()`；异步分段/退避与 HEVC 码率修复；水印零分配与中转降优。
+- **预览 6~10**：Mode A VBO/IBO、`33ms` 合并限频与 Shader 减负；隐藏停刷计时；去默认圆角与冗余 Outline/`setOpaque`。
 
-## 优化清单（已离线完成 `S1~S4` + `M1~M2`）
+## 分批整改清单（A/B/C 已离线完成；D 后置）
 
-### 第一组：`S1~S4`（小工作量，已完成）
-- [x] **S1 悬浮窗防重排**：[RecordingFloatingService.java](../../app/src/main/java/com/kooo/evcam/service/RecordingFloatingService.java) 计时等宽固定宽高，[OverlayWindowParamsFactory.java](../../app/src/main/java/com/kooo/evcam/ui/OverlayWindowParamsFactory.java) 与 [FloatingWindowService.java](../../app/src/main/java/com/kooo/evcam/FloatingWindowService.java) 改轻量 2038。
-- [x] **S2 VHAL 120s 重连消震荡**：[VhalSignalObserver.java](../../app/src/main/java/com/kooo/evcam/VhalSignalObserver.java) `ReconnectStateMachine` 仅真静默满 `120s` 重连且保留有效挡位。
-- [x] **S3 起录并行异步化**：[CodecVideoRecorder.java](../../app/src/main/java/com/kooo/evcam/camera/CodecVideoRecorder.java) 幂等取消清理，[MultiCameraManager.java](../../app/src/main/java/com/kooo/evcam/camera/MultiCameraManager.java) 经 [CodecPrepareCoordinator.java](../../app/src/main/java/com/kooo/evcam/camera/CodecPrepareCoordinator.java) 并发准备。
-- [x] **S4 补盲后台降频**：[BlindSpotService.java](../../app/src/main/java/com/kooo/evcam/BlindSpotService.java) 与 [BlindSpotCoordinator.java](../../app/src/main/java/com/kooo/evcam/blindspot/BlindSpotCoordinator.java) 仅需时轮询 AVM 并延迟预建主屏窗。
+- [x] **批次 A（`1.6.6-test-11230123`）**：**A1** `shouldShortCircuitStartRecordingIntent` 短路；**A2** `VehicleTriggerRule`/`VehicleRuleEngine` `setRules` 保留未变规则状态；**A3** `VhalSignalObserver` `stop`/`stopAsync` 静默退出；**A4** `CodecVideoRecorder` `direct` 路径统计编码输出帧数。
+- [x] **批次 B（`1.6.6-test-11230150`）**：**B1** `SurroundModeAView` `suppressRebindInSurfacesReadyCallback`+`250L` 释放与 `SingleCamera` 会话去重/删 `200ms` 匿名重建/校验 `closingSession`；**B2** 延迟 `60ms`/`80ms` 移除 `-16` 且不断录不弃主；**B3** [OverlayAvoidancePolicy.java](../../app/src/main/java/com/kooo/evcam/service/OverlayAvoidancePolicy.java)+[AvmForegroundDetector.java](../../app/src/main/java/com/kooo/evcam/service/AvmForegroundDetector.java) 三保险倒挡/AVM 避让与 Mode A `View.GONE`。
+- [x] **批次 C（`1.6.6-test-11230919`）**：**C1** [PlaybackFragmentNew.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackFragmentNew.java)+[PhotoPlaybackFragmentNew.java](../../app/src/main/java/com/kooo/evcam/playback/PhotoPlaybackFragmentNew.java) 异步扫盘+代次防抖+加载态（全 8 布局同步 `list_loading_view`）；**C2** [PlaybackTimelineBuilder.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackTimelineBuilder.java)+[VideoLockStore.java](../../app/src/main/java/com/kooo/evcam/playback/VideoLockStore.java) 滤 `.`/`.trashed-`/`trashed-` 并内存 Set O(1) 判锁；**C3** [PlaybackThumbnailGuard.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackThumbnailGuard.java)+[ExpandableVideoGroupAdapter.java](../../app/src/main/java/com/kooo/evcam/playback/ExpandableVideoGroupAdapter.java)+[PlaybackListViewHolders.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackListViewHolders.java)+[VideoGroup.java](../../app/src/main/java/com/kooo/evcam/playback/VideoGroup.java) 每组 1 张已录主路代表图（不显示未录视角，并发=2/快滑暂停/LRU 负缓存）；**C4** [PendingFileRecoveryManager.java](../../app/src/main/java/com/kooo/evcam/PendingFileRecoveryManager.java)+[FileTransferManager.java](../../app/src/main/java/com/kooo/evcam/FileTransferManager.java)+[FragmentCleanupCoordinator.java](../../app/src/main/java/com/kooo/evcam/FragmentCleanupCoordinator.java) 接入 [PlaybackHubFragment.java](../../app/src/main/java/com/kooo/evcam/playback/PlaybackHubFragment.java)/[RecorderSettingsFragment.java](../../app/src/main/java/com/kooo/evcam/RecorderSettingsFragment.java) 安全手动清理碎片。
+- [ ] **批次 D（外部/后置）**：用户关闭车机 D 挡外部 `start_recording` 脚本；**L2**（预览降尺寸）留作 A+B+C 实测后按需评估，`L1`/`L3` 暂不做。
 
-### 第二组：`M1~M2`（中等工作量，已完成）
-- [x] **M1 `Mode D`/前后台预览隔离重建**：[RecordingPreviewSessionPolicy.java](../../app/src/main/java/com/kooo/evcam/camera/RecordingPreviewSessionPolicy.java)、[SingleCamera.java](../../app/src/main/java/com/kooo/evcam/camera/SingleCamera.java) 热切与动态 `OutputConfiguration` 隔离重建（守 `P002`），协同 [MultiCameraManager.java](../../app/src/main/java/com/kooo/evcam/camera/MultiCameraManager.java)、[PreviewModeController.java](../../app/src/main/java/com/kooo/evcam/ui/PreviewModeController.java) 与 [MainActivity.java](../../app/src/main/java/com/kooo/evcam/MainActivity.java)。
-- [x] **M2 无水印无调色直连编码跳过 GL**：新增 [DirectEncodingPolicy.java](../../app/src/main/java/com/kooo/evcam/camera/DirectEncodingPolicy.java)；[CodecVideoRecorder.java](../../app/src/main/java/com/kooo/evcam/camera/CodecVideoRecorder.java) 直连编码器输入面，含 `preStartDrain`/首 IDR 门控、跨段单调 PTS 与 `path=direct|gl`；协同 [SingleCamera.java](../../app/src/main/java/com/kooo/evcam/camera/SingleCamera.java)、[MultiCameraManager.java](../../app/src/main/java/com/kooo/evcam/camera/MultiCameraManager.java)、[AppConfig.java](../../app/src/main/java/com/kooo/evcam/AppConfig.java)、[RecorderSettingsFragment.java](../../app/src/main/java/com/kooo/evcam/RecorderSettingsFragment.java) 保活跃会话稳态、配置开关与异常一次回退 GL。
+## 验证与证据（2026-11-23 09:26:36 +08:00）
 
-### 第三组：`L1~L3`（大工作量，实测后再评）
-- [ ] **L1 共享单 GL 线程**（仅日常开水印需优化时合并 3~4 路 `EGLContext`）。
-- [ ] **L2 预览降尺寸 / 减物理流**（查前景 4 路对后台 3 路 `21.3~22.9fps` HAL 带宽瓶颈，守 `P004`/`P006`）。
-- [ ] **L3 4×`TextureView` 合单 `GLSurfaceView`**（联动拍照与矩阵，仅 UI 仍卡再做）。
-
-### 已排除项
-- ~~E5 编码参数~~：`correctedPts=0`、`codec poll avgUs=0.17~0.36ms`；~~切 B/改写盘~~：`writerAvgUs=0.20~0.59ms`、`declaredMaxInstances=8`。
-
-## 验证与证据（2026-11-22 21:40:18 +08:00）
-
-- **离线与发布（`build25` / `1.6.6-test-11222113`）**：`.\tools\verify.ps1` `374` 测（`0` 败/错/跳），A Debug/Release 与 Lint `0` errors、`apksigner` v2 通过，[notes](../../outputs/EVCam-E5-build25-1.6.6-test-11222113-notes.md) 等 5 资产 GitHub 远端 SHA256 一致（`006ebb5`）。
-- **实车基线（`build24` `E245` `mode_d`，141 路-分段）**：稳态 `24.7~24.88fps`，`Mode D` `id=0/3` 跌至 `19~21.9fps`；`build25` 实车帧率、直连比例及闪屏待复测（开「Debug 日志转 INFO」）。
+- **批次 C 离线验证（`1.6.6-test-11230919`）**：新增 `6` 测（[PlaybackThumbnailGuardTest.java](../../app/src/test/java/com/kooo/evcam/playback/PlaybackThumbnailGuardTest.java) `3` 测、[PlaybackTimelineAndLockTest.java](../../app/src/test/java/com/kooo/evcam/playback/PlaybackTimelineAndLockTest.java) +`2` 测、[PendingFileRecoveryAndCleanupTest.java](../../app/src/test/java/com/kooo/evcam/PendingFileRecoveryAndCleanupTest.java) +`1` 测）；`.\tools\verify.ps1` `395` 测全过（`0` 败/错/跳，`work/verification/build-20261123-092103-954.log`），单 A Debug/Release 通过，`:app:lintIndependentDebug` `0` errors（`2243` warnings）。
+- **批次 A/B 验证**：批次 A `380` 测、批次 B `389` 测（`build-20261123-015021-869.log`）与 Lint `0` errors 通过。
+- **实车基线（`build25` / `006ebb5`）**：`work/optimize-recording-preview-perf/evcam_log_20261123_001841.txt`（总加权 `19.23fps`，稳态 `24.0~24.82`）。
 
 ## 最近记录
 
-- 2026-11-22 21:40:18 +08:00 | 封包发布 `build25` 至 GitHub Pre-release（`006ebb5` / `1.6.6-test-11222113`） | 单 A 版 `5` 资产远端 SHA256 核验一致、`build23` 归档，含单 A 收敛与 `S1~S4`+`M1~M2`（待实车） | [notes](../../outputs/EVCam-E5-build25-1.6.6-test-11222113-notes.md)
-- 2026-11-22 21:25:03 +08:00 | 完成 `M2` 直连编码跳过 GL、17 项单测与单 A 版验证（`1.6.6-test-11222113`） | 跳过 EGL/`SurfaceTexture` 直连编码器，含预排空/首 IDR 门控、可控开关、动态开关延后生效及单路回退 GL；`verify.ps1` `374` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
-- 2026-11-22 20:41:35 +08:00 | 完成 `M1` 预览隔离重建与单 A 版验证（`1.6.6-test-11222037`） | 录制期改 RepeatingRequest 热切与动态 `OutputConfiguration` 隔离重建；`verify.ps1` `357` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
-- 2026-11-22 20:06:06 +08:00 | 完成 `S1~S4` 优化与单 A 版验证（`1.6.6-test-11222001`） | 补 4 组单测，`verify.ps1` `342` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
-- 2026-11-22 19:04:00 +08:00 | 拆分第二批优化清单（`S1~S4`/`M1~M2`/`L1~L3`） | 排除第 4/5 项，纳入后台闪屏嫌疑点与排查抓手 | [STATUS.md](../STATUS.md)
+- 2026-11-23 09:26:36 +08:00 | 完成批次 C (`C1~C4`) 离线修复与单 A 版验证（`1.6.6-test-11230919`） | 异步扫盘加载态、滤隐藏/回收站与内存 Set O(1) 判锁、每组 1 张已录主路缩略图含限流负缓存、双入口安全清理碎片；`verify.ps1` `395` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
+- 2026-11-23 01:53:49 +08:00 | 完成批次 B (`B1~B3`) 离线修复与单 A 版验证（`1.6.6-test-11230150`） | 修 Mode A 双绑定/`200ms` 重建/`onClosed` 错清、`-16` 延迟移除不断录、三保险 R 挡/AVM 避让；`verify.ps1` `389` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
+- 2026-11-23 01:28:05 +08:00 | 完成批次 A (`A1~A4`) 离线修复与单 A 版验证（`1.6.6-test-11230123`） | 修 `start_recording` 短路、规则保留、VHAL `stopAsync` 静默、直连帧数日志；`verify.ps1` `380` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
+- 2026-11-23 01:05:26 +08:00 | 整理 `build25` 分批整改清单（A/B/C+D）并确认车机外部 D 挡脚本（`1.6.6-test-11222113`） | 核实存在未关 D 挡外部 `start_recording` 脚本，拆分批次 A/B/C+D | [STATUS.md](../STATUS.md)
+- 2026-11-22 21:40:18 +08:00 | 封包发布 `build25` 至 GitHub Pre-release（`006ebb5` / `1.6.6-test-11222113`） | 单 A 版 `5` 资产远端 SHA256 一致、`build23` 归档，含单 A 收敛与 `S1~S4`+`M1~M2` | [notes](../../outputs/EVCam-E5-build25-1.6.6-test-11222113-notes.md)
 
 ## 下一步
 
-1. 安装 `build25` 上银河 E5 实测并开 `Debug 日志转 INFO`，采集 `path=direct` vs `path=gl` 帧率与切换表现，再评估是否推进 **`L1~L3`**。
+1. 提交并打包单 A 版在 E5 实车验证批次 A+B+C（用户同步关闭外部 D 挡脚本），实测后再评估 **L2**。

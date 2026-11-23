@@ -225,6 +225,18 @@ public class RecordingPreviewSessionPolicyTest {
                 false, false, false, false, true, false);
         assertEquals(SurroundClearAction.CLOSE_CAMERA,
                 RecordingPreviewSessionPolicy.decideOnSurroundSurfaceCleared(idleSurroundCleared, true));
+
+        // B1: Duplicate surround bind for same in-flight surface while session is closing/configuring is NO_OP,
+        // unless disabling main preview atomically or binding a distinct new request.
+        SessionSnapshot busyRecording = snapshot(
+                true, false, true, true, true, false,
+                false, true, false, false, true, false);
+        assertEquals(PreviewAction.NO_OP,
+                RecordingPreviewSessionPolicy.decideOnSurroundSurfaceAdded(busyRecording, false, true, false));
+        assertEquals(PreviewAction.RECREATE_SESSION,
+                RecordingPreviewSessionPolicy.decideOnSurroundSurfaceAdded(busyRecording, false, true, true));
+        assertEquals(PreviewAction.RECREATE_SESSION,
+                RecordingPreviewSessionPolicy.decideOnSurroundSurfaceAdded(busyRecording, false, false, false));
     }
 
     @Test

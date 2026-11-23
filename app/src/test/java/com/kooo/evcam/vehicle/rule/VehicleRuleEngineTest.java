@@ -445,4 +445,126 @@ public class VehicleRuleEngineTest {
         assertEquals(RuleAction.ENABLE_GUIDANCE, drive.get(0).action);
         assertEquals(-1L, engine.getNextDelayDueMs(3500L));
     }
+
+    @Test
+    public void setRulesWithIdenticalDefinitionsPreservesLatchedRuntimeState() {
+        VehicleTriggerRule delayedStop = new VehicleTriggerRule(
+                "r_delayed_stop",
+                "停车3秒停录",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                3,
+                RuleAction.STOP
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(
+                VehicleTriggerRule.createDefaultRules().get(1),
+                delayedStop
+        ));
+
+        // 切入 D 挡触发一次 START，并锁存 fired=true
+        List<VehicleRuleEngine.TriggerEvent> first = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 5, 0, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(1, first.size());
+        assertEquals(RuleAction.START, first.get(0).action);
+
+        // 切入 P 挡后启动 3 秒倒计时（已走 1 秒）
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 2000L).isEmpty());
+        assertEquals(3000L, engine.getNextDelayDueMs(2000L));
+        assertTrue(engine.tickAll(3000L).isEmpty());
+        assertEquals(2000L, engine.getNextDelayDueMs(3000L));
+
+        // 模拟切换预览模式触发 startOrReload() 重新传入语义相同的新规则实例列表
+        VehicleTriggerRule reloadedGearStart = VehicleTriggerRule.fromJsonArray(
+                VehicleTriggerRule.toJsonArray(VehicleTriggerRule.createDefaultRules())).get(1);
+        VehicleTriggerRule reloadedDelayedStop = new VehicleTriggerRule(
+                "r_delayed_stop",
+                "停车3秒停录",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                3,
+                RuleAction.STOP
+        );
+        engine.setRules(Arrays.asList(reloadedGearStart, reloadedDelayedStop));
+
+        // 倒计时剩余 2000ms 未被清零重新算 3000ms
+        assertEquals(2000L, engine.getNextDelayDueMs(3000L));
+        List<VehicleRuleEngine.TriggerEvent> stopAt5s = engine.tickAll(5000L);
+        assertEquals(1, stopAt5s.size());
+        assertEquals(RuleAction.STOP, stopAt5s.get(0).action);
+
+        // 重新切回 D 挡之前如果原本就在 D 挡（或继续在 D 挡收到心跳）：未改规则不得在相同状态下重复触发 START
+        engine.setRules(Arrays.asList(reloadedGearStart, reloadedDelayedStop));
+        List<VehicleRuleEngine.TriggerEvent> driveFirst = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 10, 0, 0, 0, 0, 0, 0), 6000L);
+        assertEquals(1, driveFirst.size());
+        assertEquals(RuleAction.START, driveFirst.get(0).action);
+
+        // 在 D 挡再次调用 setRules（如切换预览模式）并收到 D 挡快照 -> 不得重复触发 START
+        engine.setRules(Arrays.asList(VehicleTriggerRule.createDefaultRules().get(1), reloadedDelayedStop));
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 12, 0, 0, 0, 0, 0, 0), 6500L).isEmpty());
+    }
+
+    @Test
+    public void setRulesResetsOnlyChangedOrRemovedRules() {
+        VehicleTriggerRule gearStart = VehicleTriggerRule.createDefaultRules().get(1);
+        VehicleTriggerRule delayedStop3s = new VehicleTriggerRule(
+                "r_delayed_stop",
+                "停车3秒停录",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                3,
+                RuleAction.STOP
+        );
+        VehicleRuleEngine engine = new VehicleRuleEngine();
+        engine.setRules(Arrays.asList(gearStart, delayedStop3s));
+
+        List<VehicleRuleEngine.TriggerEvent> start = engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 15, 0, 0, 0, 0, 0, 0), 1000L);
+        assertEquals(1, start.size());
+
+        // 修改 delayedStop 延迟为 5s，保留 gearStart 不变
+        VehicleTriggerRule modifiedStop5s = new VehicleTriggerRule(
+                "r_delayed_stop",
+                "停车5秒停录",
+                true,
+                new VehicleRuleCondition(VehicleRuleSignal.GEAR, RuleComparison.EQUALS, VehicleRuleSignal.GEAR_PARK),
+                null,
+                ConditionLogic.AND,
+                5,
+                RuleAction.STOP
+        );
+        engine.setRules(Arrays.asList(
+                VehicleTriggerRule.createDefaultRules().get(1),
+                modifiedStop5s
+        ));
+
+        // 未改动的 gearStart 仍锁存，不重复触发
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.DRIVE, 20, 0, 0, 0, 0, 0, 0), 1500L).isEmpty());
+
+        // 新延迟 5s 按新规则生效
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 2000L).isEmpty());
+        assertEquals(5000L, engine.getNextDelayDueMs(2000L));
+        assertTrue(engine.tickAll(5500L).isEmpty());
+        List<VehicleRuleEngine.TriggerEvent> at7s = engine.tickAll(7000L);
+        assertEquals(1, at7s.size());
+        assertEquals(RuleAction.STOP, at7s.get(0).action);
+
+        // 移除 r_delayed_stop 并再加回后，新实例从未触发态重新开始
+        engine.setRules(Collections.singletonList(gearStart));
+        engine.setRules(Arrays.asList(gearStart, modifiedStop5s));
+        assertTrue(engine.evaluateAll(
+                snap(VehicleSignalSnapshot.Gear.PARK, 0, 0, 0, 0, 0, 0, 0), 8000L).isEmpty());
+        assertEquals(5000L, engine.getNextDelayDueMs(8000L));
+    }
 }

@@ -581,6 +581,30 @@
                     android:textColor="@color/text_secondary"
                     android:textSize="16sp"
                     android:visibility="gone" />
+
+                <LinearLayout
+                    android:id="@+id/list_loading_view"
+                    android:layout_width="match_parent"
+                    android:layout_height="match_parent"
+                    android:orientation="vertical"
+                    android:gravity="center"
+                    android:padding="16dp"
+                    android:visibility="gone">
+
+                    <ProgressBar
+                        android:layout_width="36dp"
+                        android:layout_height="36dp"
+                        android:indeterminate="true" />
+
+                    <TextView
+                        android:id="@+id/list_loading_text"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="10dp"
+                        android:text="正在加载录像列表..."
+                        android:textColor="@color/text_secondary"
+                        android:textSize="14sp" />
+                </LinearLayout>
             </FrameLayout>
         </LinearLayout>
     </LinearLayout>

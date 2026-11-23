@@ -131,9 +131,29 @@ public class VhalSignalObserver {
     private volatile float currentSpeed = 0f;
 
     private volatile ManagedChannel grpcChannel;
+    private volatile io.grpc.ClientCall<byte[], byte[]> activeStreamCall;
     private Thread connectThread;
     private volatile boolean running = false;
     private volatile boolean connected = false;
+
+    static boolean shouldLogStreamError(boolean streamClosed, boolean running) {
+        return !streamClosed && running;
+    }
+
+    static boolean shouldResetSignalHubOnDisconnect(boolean hasOtherRunningObserver) {
+        return !hasOtherRunningObserver;
+    }
+
+    private void cancelActiveStreamCall() {
+        io.grpc.ClientCall<byte[], byte[]> call = activeStreamCall;
+        activeStreamCall = null;
+        if (call != null) {
+            try {
+                call.cancel("VHAL observer stopped", null);
+            } catch (Exception ignored) {
+            }
+        }
+    }
 
     // 上一次的转向灯状态，避免重复回调
     private int lastSignalState = -1;
@@ -312,6 +332,7 @@ public class VhalSignalObserver {
         running = false;
         synchronized (liveObservers) { liveObservers.remove(this); }
         notifyObserverLifecycle();
+        cancelActiveStreamCall();
         disconnect();
         if (connectThread != null) {
             connectThread.interrupt();
@@ -326,6 +347,7 @@ public class VhalSignalObserver {
         extraPropertyListeners.clear();
         synchronized (liveObservers) { liveObservers.remove(this); }
         notifyObserverLifecycle();
+        cancelActiveStreamCall();
         Thread previous = connectThread;
         connectThread = null;
         if (previous != null) previous.interrupt();
@@ -526,6 +548,7 @@ public class VhalSignalObserver {
                     .build();
 
             call = streamChannel.newCall(streamMethod, CallOptions.DEFAULT);
+            activeStreamCall = call;
             reconnectStateMachine.onStreamOpened(monotonicNowMs());
 
             ClientCalls.asyncServerStreamingCall(call, new byte[0], new StreamObserver<byte[]>() {
@@ -544,7 +567,8 @@ public class VhalSignalObserver {
 
                 @Override
                 public void onError(Throwable t) {
-                    if (streamClosed.get()) {
+                    if (!shouldLogStreamError(streamClosed.get(), running)) {
+                        latch.countDown();
                         return;
                     }
                     AppLog.e(TAG, "Property stream error: " + t.getMessage());
@@ -554,7 +578,8 @@ public class VhalSignalObserver {
 
                 @Override
                 public void onCompleted() {
-                    if (streamClosed.get()) {
+                    if (streamClosed.get() || !running) {
+                        latch.countDown();
                         return;
                     }
                     AppLog.d(TAG, "Property stream completed");
@@ -599,10 +624,15 @@ public class VhalSignalObserver {
                         AppLog.e(TAG, "Native method not found: " + e.getMessage());
                         return;
                     } catch (Exception e) {
+                        if (!running || streamClosed.get()) {
+                            return;
+                        }
                         AppLog.w(TAG, "SendAll attempt " + attempt + "/" + MAX_RETRIES + " failed: " + e.getMessage());
                     }
                 }
-                AppLog.e(TAG, "SendAll exhausted all retries");
+                if (running && !streamClosed.get()) {
+                    AppLog.e(TAG, "SendAll exhausted all retries");
+                }
             }, "VehicleApiSendAll").start();
 
             // 等待流结束（仅在真正连续静默满 STREAM_TIMEOUT_MS 时触发静默重连，防止半开连接卡死）
@@ -641,6 +671,9 @@ public class VhalSignalObserver {
             return ReconnectStateMachine.StreamEndReason.STREAM_ERROR;
         } finally {
             streamClosed.set(true);
+            if (activeStreamCall == call) {
+                activeStreamCall = null;
+            }
             if (call != null) {
                 try {
                     call.cancel("VHAL stream closed", null);
@@ -780,7 +813,7 @@ public class VhalSignalObserver {
      */
 
     private void notifyConnectionState(boolean isConnected) {
-        if (!isConnected) {
+        if (!isConnected && shouldResetSignalHubOnDisconnect(findRunningObserverExcept(this) != null)) {
             com.kooo.evcam.vehicle.VehicleSignalHub.getInstance().reset();
         }
         PropertyListener primary = propertyListener;

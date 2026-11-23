@@ -616,7 +616,7 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
                 modeAContainer.setVisibility(View.GONE);
             }
             if (previewLayout != null) {
-                previewLayout.setVisibility(View.VISIBLE);
+                previewLayout.setVisibility(shouldShowOrdinaryPreviewLayout(currentMode) ? View.VISIBLE : View.GONE);
                 if (currentMode != PreviewMode.MODE_A) {
                     int primary = currentMode == PreviewMode.MODE_D ? modeDLeftPrimaryIndex : modeCPrimaryIndex;
                     previewLayout.setPreviewState(currentMode, primary, modeDRightSideIndex);
@@ -981,6 +981,10 @@ public final class PreviewModeController implements PreviewModeHost, MultiCamera
     public static boolean shouldHideOrdinaryTextureViewsForModeA(@Nullable PreviewMode mode,
                                                                  boolean mainPreviewEnabled) {
         return mode == PreviewMode.MODE_A && mainPreviewEnabled;
+    }
+
+    public static boolean shouldShowOrdinaryPreviewLayout(@Nullable PreviewMode mode) {
+        return mode != PreviewMode.MODE_A;
     }
 
     public static boolean shouldDeferCameraVisibilityMaskForModeA(boolean wantSurroundGl,

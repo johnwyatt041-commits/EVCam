@@ -16,13 +16,23 @@
         android:padding="8dp"
         android:gravity="center_vertical">
 
-        <!-- Thumbnail (2x2 or composite frame) -->
+        <!-- Thumbnail (single representative or 2x2 photo grid) -->
         <FrameLayout
             android:layout_width="96dp"
             android:layout_height="60dp"
             android:background="#000000">
 
+            <ImageView
+                android:id="@+id/thumb_primary"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:scaleType="centerCrop"
+                android:background="@color/preview_frame_background"
+                android:visibility="gone"
+                android:contentDescription="代表缩略图" />
+
             <LinearLayout
+                android:id="@+id/thumb_grid_2x2"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
                 android:orientation="vertical">
@@ -104,6 +114,18 @@
                 android:textColor="@color/white"
                 android:textSize="10sp"
                 android:text="4路" />
+
+            <TextView
+                android:id="@+id/video_thumb_camera_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_gravity="bottom|start"
+                android:background="#8C000000"
+                android:paddingHorizontal="4dp"
+                android:paddingVertical="1dp"
+                android:textColor="@color/white"
+                android:textSize="10sp"
+                android:visibility="gone" />
 
             <TextView
                 android:id="@+id/video_duration_badge"

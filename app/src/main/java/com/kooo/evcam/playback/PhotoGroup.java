@@ -47,10 +47,20 @@ public class PhotoGroup {
      * 添加图片文件到分组
      */
     public void addFile(File file) {
+        addFile(file, file != null ? file.length() : 0L);
+    }
+
+    /**
+     * 添加图片文件到分组（复用扫描阶段已读取的文件长度）
+     */
+    public void addFile(File file, long fileLength) {
+        if (file == null) {
+            return;
+        }
         String position = extractPosition(file.getName());
         if (position != null) {
             photoFiles.put(position, file);
-            totalSize += file.length();
+            totalSize += Math.max(0L, fileLength);
         }
     }
 

@@ -3,6 +3,10 @@ package com.kooo.evcam.playback;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Process;
+import android.util.Log;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
 import android.view.MotionEvent;
@@ -36,6 +40,9 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 图片回看页：按日期/小时分组、全部/今日/已锁定筛选、.lock 防误删保护、主题联动与统一分享入口。
@@ -64,6 +71,13 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
     private final List<DateSection<PhotoGroup>> dateSections = new ArrayList<>();
     private ExpandablePhotoGroupAdapter adapter;
     private PhotoGroup currentGroup;
+
+    private View listLoadingView;
+    private TextView listLoadingText;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final AtomicInteger scanGeneration = new AtomicInteger(0);
+    @Nullable
+    private ExecutorService scanExecutor;
 
     private int filterMode = PlaybackTimelineBuilder.FILTER_ALL;
     private boolean isMultiSelectMode = false;
@@ -110,6 +124,8 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
 
         photoList = view.findViewById(R.id.photo_list);
         emptyText = view.findViewById(R.id.empty_text);
+        listLoadingView = view.findViewById(R.id.list_loading_view);
+        listLoadingText = view.findViewById(R.id.list_loading_text);
         noSelectionHint = view.findViewById(R.id.no_selection_hint);
 
         multiViewLayout = view.findViewById(R.id.multi_view_layout);
@@ -367,25 +383,113 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
     }
 
     private void updatePhotoList() {
-        dateSections.clear();
-        File saveDir = StorageHelper.getPhotoDir(getContext());
-        List<DateSection<PhotoGroup>> scanned = PlaybackTimelineBuilder.scanPhotoDirectory(
-                saveDir, filterMode, System.currentTimeMillis());
-        dateSections.addAll(scanned);
+        Context context = getContext();
+        if (context == null || adapter == null) {
+            return;
+        }
+        final Context appCtx = context.getApplicationContext();
+        final int generation = scanGeneration.incrementAndGet();
+        final int requestedFilter = filterMode;
 
-        if (dateSections.isEmpty()) {
-            showEmptyState();
-        } else {
-            photoList.setVisibility(View.VISIBLE);
+        showLoadingState();
+        ensureScanExecutor().execute(() -> {
+            if (generation != scanGeneration.get()) {
+                return;
+            }
+            try {
+                File saveDir = StorageHelper.getPhotoDir(appCtx);
+                List<DateSection<PhotoGroup>> scanned = PlaybackTimelineBuilder.scanPhotoDirectory(
+                        saveDir, requestedFilter, System.currentTimeMillis());
+                if (generation != scanGeneration.get()) {
+                    return;
+                }
+                mainHandler.post(() -> {
+                    if (generation != scanGeneration.get()
+                            || !isAdded()
+                            || rootView == null
+                            || adapter == null
+                            || getContext() == null) {
+                        return;
+                    }
+                    hideLoadingState();
+                    dateSections.clear();
+                    dateSections.addAll(scanned);
+
+                    if (dateSections.isEmpty()) {
+                        showEmptyState();
+                    } else {
+                        photoList.setVisibility(View.VISIBLE);
+                        emptyText.setVisibility(View.GONE);
+                    }
+
+                    adapter.buildFlattenedList();
+                    adapter.syncSelectionByGroup(currentGroup);
+                    adapter.notifyDataSetChanged();
+                });
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to scan photo directory", t);
+                mainHandler.post(() -> {
+                    if (generation != scanGeneration.get()
+                            || !isAdded()
+                            || rootView == null
+                            || getContext() == null) {
+                        return;
+                    }
+                    hideLoadingState();
+                    if (dateSections.isEmpty()) {
+                        showEmptyState();
+                    } else {
+                        photoList.setVisibility(View.VISIBLE);
+                    }
+                });
+            }
+        });
+    }
+
+    private ExecutorService ensureScanExecutor() {
+        if (scanExecutor == null || scanExecutor.isShutdown()) {
+            scanExecutor = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(() -> {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+                    r.run();
+                }, "PlaybackPhotoScan");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        return scanExecutor;
+    }
+
+    private void showLoadingState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.VISIBLE);
+        }
+        if (photoList != null) {
+            photoList.setVisibility(View.GONE);
+        }
+        if (emptyText != null) {
             emptyText.setVisibility(View.GONE);
         }
+        if (btnRefresh != null) {
+            btnRefresh.setEnabled(false);
+            btnRefresh.setText("加载中");
+        }
+    }
 
-        adapter.buildFlattenedList();
-        adapter.syncSelectionByGroup(currentGroup);
-        adapter.notifyDataSetChanged();
+    private void hideLoadingState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.GONE);
+        }
+        if (btnRefresh != null) {
+            btnRefresh.setEnabled(true);
+            btnRefresh.setText("刷新");
+        }
     }
 
     private void showEmptyState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.GONE);
+        }
         photoList.setVisibility(View.GONE);
         emptyText.setVisibility(View.VISIBLE);
         if (filterMode == PlaybackTimelineBuilder.FILTER_LOCKED) {
@@ -638,6 +742,8 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
         if (previewContainer != null) previewContainer.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_background));
         if (controlsLayout != null) controlsLayout.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_controls_background));
         if (currentDatetime != null) currentDatetime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
+        if (emptyText != null) emptyText.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
+        if (listLoadingText != null) listLoadingText.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
         PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnRefresh, false);
         PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnMultiSelect, false);
         PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnViewMode, false);
@@ -647,6 +753,12 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
 
     @Override
     public void onDestroyView() {
+        scanGeneration.incrementAndGet();
+        mainHandler.removeCallbacksAndMessages(null);
+        if (scanExecutor != null) {
+            scanExecutor.shutdownNow();
+            scanExecutor = null;
+        }
         if (getView() != null) PlaybackImageMemory.clearViews(getView());
         if (photoList != null) {
             photoList.setAdapter(null);
@@ -655,6 +767,8 @@ public class PhotoPlaybackFragmentNew extends Fragment implements UiThemeControl
         PlaybackImageMemory.clear(getContext());
         adapter = null;
         imageFront = imageBack = imageLeft = imageRight = imageSingle = null;
+        listLoadingView = null;
+        listLoadingText = null;
         rootView = null;
         super.onDestroyView();
     }

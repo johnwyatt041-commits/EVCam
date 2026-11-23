@@ -465,4 +465,115 @@ public class CodecVideoRecorderDirectPathTest {
         assertFalse(success2.get());
         assertNull(surface2.get());
     }
+
+    @Test
+    public void directPathDisplayFrameCountTracksCumulativeAndSegmentEncodedFrames() throws Exception {
+        CodecVideoRecorder recorder = new CodecVideoRecorder("right", 1280, 800);
+        MediaCodec encoder = mock(MediaCodec.class);
+        AsyncMuxerWriter firstMuxer = mock(AsyncMuxerWriter.class);
+        Handler mockSegHandler = mock(Handler.class);
+        ExecutorService segExec = Executors.newSingleThreadExecutor();
+        File tempDir = new File(System.getProperty("java.io.tmpdir"), "evcam_direct_frames_" + System.nanoTime());
+        tempDir.mkdirs();
+
+        try {
+            CountDownLatch rotated = new CountDownLatch(1);
+            when(mockSegHandler.post(any(Runnable.class))).thenAnswer(inv -> {
+                segExec.execute(inv.getArgument(0));
+                return true;
+            });
+
+            String seg0Path = new File(tempDir, "20261123_012300_right.mp4").getAbsolutePath();
+            MediaCodec.BufferInfo info = new MediaCodec.BufferInfo();
+            MediaFormat format = mock(MediaFormat.class);
+
+            setField(recorder, "activePathMode", DirectEncodingPolicy.PathMode.DIRECT);
+            setField(recorder, "encoder", encoder);
+            setField(recorder, "bufferInfo", info);
+            setField(recorder, "muxer", firstMuxer);
+            setField(recorder, "outputFormat", format);
+            setField(recorder, "muxerStarted", true);
+            setField(recorder, "currentFilePath", seg0Path);
+            setField(recorder, "saveDirectory", tempDir.getAbsolutePath());
+            setField(recorder, "cameraPosition", "right");
+            setField(recorder, "segmentHandler", mockSegHandler);
+            setField(recorder, "drainHandler", null);
+            recorder.setTimestampProvider(() -> "20261123_012400");
+            recorder.setCallback(new RecordCallback() {
+                @Override public void onRecordStart(String cameraId) {}
+                @Override public void onRecordStop(String cameraId) {}
+                @Override public void onRecordError(String cameraId, String error) {}
+                @Override public void onPrepareSegmentSwitch(String cameraId, int currentSegmentIndex) {}
+                @Override public void onSegmentSwitch(String cameraId, int newSegmentIndex, String completedFilePath) {
+                    rotated.countDown();
+                }
+                @Override public void onCorruptedFilesDeleted(String cameraId, List<String> deletedFiles) {}
+                @Override public void onRecordingRebuildRequested(String cameraId, String reason) {}
+                @Override public void onFirstDataWritten(String cameraId) {}
+            });
+
+            when(encoder.getOutputBuffer(anyInt())).thenReturn(ByteBuffer.allocate(4));
+            AtomicInteger step = new AtomicInteger();
+            when(encoder.dequeueOutputBuffer(any(MediaCodec.BufferInfo.class), anyLong())).thenAnswer(inv -> {
+                int s = step.getAndIncrement();
+                info.offset = 0;
+                info.size = 4;
+                if (s < 3) {
+                    info.flags = (s == 0) ? MediaCodec.BUFFER_FLAG_KEY_FRAME : 0;
+                    info.presentationTimeUs = (s + 1) * 40_000L;
+                    return s;
+                }
+                return MediaCodec.INFO_TRY_AGAIN_LATER;
+            });
+
+            assertTrue(drain(recorder, false));
+            assertEquals(0L, ((Number) getField(recorder, "recordedFrameCount")).longValue());
+            assertEquals(3L, ((Number) getField(recorder, "encodedOutputFrameCount")).longValue());
+            assertEquals(3L, recorder.getDisplayRecordedFrameCount());
+            assertEquals("3 (segment: 3)", recorder.formatFileSizeLogFrames());
+
+            // 触发关键帧切段后，segment 计数归零重计，累计计数跨分段延续
+            setField(recorder, "segmentRequested", true);
+            step.set(0);
+            when(encoder.dequeueOutputBuffer(any(MediaCodec.BufferInfo.class), anyLong())).thenAnswer(inv -> {
+                int s = step.getAndIncrement();
+                info.offset = 0;
+                info.size = 4;
+                if (s == 0) {
+                    info.flags = MediaCodec.BUFFER_FLAG_KEY_FRAME;
+                    info.presentationTimeUs = 200_000L;
+                    return 0;
+                } else if (s == 1) {
+                    info.flags = 0;
+                    info.presentationTimeUs = 240_000L;
+                    return 1;
+                }
+                return MediaCodec.INFO_TRY_AGAIN_LATER;
+            });
+
+            assertTrue(drain(recorder, false));
+            assertTrue(rotated.await(2, TimeUnit.SECONDS));
+            assertEquals(0L, ((Number) getField(recorder, "recordedFrameCount")).longValue());
+            assertEquals(2L, ((Number) getField(recorder, "encodedOutputFrameCount")).longValue());
+            assertEquals(5L, recorder.getDisplayRecordedFrameCount());
+            assertEquals("5 (segment: 2)", recorder.formatFileSizeLogFrames());
+
+            // GL 模式仍沿用 recordedFrameCount
+            setField(recorder, "activePathMode", DirectEncodingPolicy.PathMode.GL);
+            setField(recorder, "recordedFrameCount", 12L);
+            assertEquals(12L, recorder.getDisplayRecordedFrameCount());
+            assertEquals("12", recorder.formatFileSizeLogFrames());
+        } finally {
+            segExec.shutdownNow();
+            setField(recorder, "encoder", null);
+            recorder.release();
+            File[] children = tempDir.listFiles();
+            if (children != null) {
+                for (File child : children) {
+                    child.delete();
+                }
+            }
+            tempDir.delete();
+        }
+    }
 }

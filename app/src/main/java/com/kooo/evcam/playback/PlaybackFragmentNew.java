@@ -3,6 +3,9 @@ package com.kooo.evcam.playback;
 import android.content.Context;
 import android.content.res.Configuration;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.os.Process;
 import android.util.Log;
 import android.view.GestureDetector;
 import android.view.LayoutInflater;
@@ -29,6 +32,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder;
 import com.kooo.evcam.MainActivity;
 import com.kooo.evcam.R;
 import com.kooo.evcam.StorageHelper;
+import com.kooo.evcam.camera.ActiveRecordingRegistry;
 import com.kooo.evcam.ui.UiThemeController;
 
 import java.io.File;
@@ -37,6 +41,9 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * 视频回看页：支持按日期与小时分组、.lock 锁定保护、A 版四路同步播放、
@@ -78,6 +85,13 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
     private ExpandableVideoGroupAdapter adapter;
     private MultiVideoPlayerManager playerManager;
     private CompositeQuadrantTextureController compositeController;
+
+    private View listLoadingView;
+    private TextView listLoadingText;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final AtomicInteger scanGeneration = new AtomicInteger(0);
+    @Nullable
+    private ExecutorService scanExecutor;
 
     private int filterMode = PlaybackTimelineBuilder.FILTER_ALL;
     private boolean isMultiSelectMode = false;
@@ -129,6 +143,8 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
 
         videoList = view.findViewById(R.id.video_list);
         emptyText = view.findViewById(R.id.empty_text);
+        listLoadingView = view.findViewById(R.id.list_loading_view);
+        listLoadingText = view.findViewById(R.id.list_loading_text);
         noSelectionHint = view.findViewById(R.id.no_selection_hint);
 
         multiViewLayout = view.findViewById(R.id.multi_view_layout);
@@ -594,28 +610,119 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
         placeholderRight.setVisibility(hasRight ? View.GONE : View.VISIBLE);
     }
 
+    public void refreshVideoList() {
+        updateVideoList();
+    }
+
     private void updateVideoList() {
-        dateSections.clear();
-        File saveDir = StorageHelper.getVideoDir(getContext());
-        PlaybackTimelineBuilder.VideoScanResult scan = PlaybackTimelineBuilder.scanVideoDirectory(
-                saveDir, filterMode, System.currentTimeMillis(),
-                com.kooo.evcam.camera.ActiveRecordingRegistry.snapshot());
+        Context context = getContext();
+        if (context == null || adapter == null) {
+            return;
+        }
+        final Context appCtx = context.getApplicationContext();
+        final int generation = scanGeneration.incrementAndGet();
+        final int requestedFilter = filterMode;
 
-        dateSections.addAll(scan.dateSections);
-        adapter.setActiveRecordingBanner(scan.activeRecording);
-        adapter.buildFlattenedList();
-        adapter.syncSelectionByGroup(currentGroup);
-        adapter.notifyDataSetChanged();
+        showLoadingState();
+        ensureScanExecutor().execute(() -> {
+            if (generation != scanGeneration.get()) {
+                return;
+            }
+            try {
+                File saveDir = StorageHelper.getVideoDir(appCtx);
+                PlaybackTimelineBuilder.VideoScanResult scan = PlaybackTimelineBuilder.scanVideoDirectory(
+                        saveDir, requestedFilter, System.currentTimeMillis(),
+                        ActiveRecordingRegistry.snapshot());
+                if (generation != scanGeneration.get()) {
+                    return;
+                }
+                mainHandler.post(() -> {
+                    if (generation != scanGeneration.get()
+                            || !isAdded()
+                            || rootView == null
+                            || adapter == null
+                            || getContext() == null) {
+                        return;
+                    }
+                    hideLoadingState();
+                    dateSections.clear();
+                    dateSections.addAll(scan.dateSections);
+                    adapter.setActiveRecordingBanner(scan.activeRecording);
+                    adapter.buildFlattenedList();
+                    adapter.syncSelectionByGroup(currentGroup);
+                    adapter.notifyDataSetChanged();
 
-        if (dateSections.isEmpty() && scan.activeRecording == null) {
-            showEmptyState();
-        } else {
-            videoList.setVisibility(View.VISIBLE);
+                    if (dateSections.isEmpty() && scan.activeRecording == null) {
+                        showEmptyState();
+                    } else {
+                        videoList.setVisibility(View.VISIBLE);
+                        emptyText.setVisibility(View.GONE);
+                    }
+                });
+            } catch (Throwable t) {
+                Log.e(TAG, "Failed to scan video directory", t);
+                mainHandler.post(() -> {
+                    if (generation != scanGeneration.get()
+                            || !isAdded()
+                            || rootView == null
+                            || getContext() == null) {
+                        return;
+                    }
+                    hideLoadingState();
+                    if (dateSections.isEmpty()) {
+                        showEmptyState();
+                    } else {
+                        videoList.setVisibility(View.VISIBLE);
+                    }
+                });
+            }
+        });
+    }
+
+    private ExecutorService ensureScanExecutor() {
+        if (scanExecutor == null || scanExecutor.isShutdown()) {
+            scanExecutor = Executors.newSingleThreadExecutor(r -> {
+                Thread t = new Thread(() -> {
+                    Process.setThreadPriority(Process.THREAD_PRIORITY_BACKGROUND);
+                    r.run();
+                }, "PlaybackVideoScan");
+                t.setDaemon(true);
+                return t;
+            });
+        }
+        return scanExecutor;
+    }
+
+    private void showLoadingState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.VISIBLE);
+        }
+        if (videoList != null) {
+            videoList.setVisibility(View.GONE);
+        }
+        if (emptyText != null) {
             emptyText.setVisibility(View.GONE);
+        }
+        if (btnRefresh != null) {
+            btnRefresh.setEnabled(false);
+            btnRefresh.setText("加载中");
+        }
+    }
+
+    private void hideLoadingState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.GONE);
+        }
+        if (btnRefresh != null) {
+            btnRefresh.setEnabled(true);
+            btnRefresh.setText("刷新");
         }
     }
 
     private void showEmptyState() {
+        if (listLoadingView != null) {
+            listLoadingView.setVisibility(View.GONE);
+        }
         videoList.setVisibility(View.GONE);
         emptyText.setVisibility(View.VISIBLE);
         if (filterMode == PlaybackTimelineBuilder.FILTER_LOCKED) {
@@ -886,6 +993,8 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
         if (previewContainer != null) previewContainer.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_background));
         if (controlsLayout != null) controlsLayout.setBackgroundColor(ContextCompat.getColor(themedContext, R.color.preview_controls_background));
         if (currentDatetime != null) currentDatetime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
+        if (emptyText != null) emptyText.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
+        if (listLoadingText != null) listLoadingText.setTextColor(ContextCompat.getColor(themedContext, R.color.text_secondary));
         if (currentTime != null) currentTime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
         if (totalTime != null) totalTime.setTextColor(ContextCompat.getColor(themedContext, R.color.text_primary));
         PlaybackThemeAndShareHelper.styleToolbarButton(themedContext, btnRefresh, false);
@@ -910,6 +1019,12 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
 
     @Override
     public void onDestroyView() {
+        scanGeneration.incrementAndGet();
+        mainHandler.removeCallbacksAndMessages(null);
+        if (scanExecutor != null) {
+            scanExecutor.shutdownNow();
+            scanExecutor = null;
+        }
         if (getView() != null) PlaybackImageMemory.clearViews(getView());
         if (videoList != null) {
             videoList.setAdapter(null);
@@ -928,6 +1043,8 @@ public class PlaybackFragmentNew extends Fragment implements UiThemeController.T
             playerManager = null;
         }
         PlaybackImageMemory.clear(getContext());
+        listLoadingView = null;
+        listLoadingText = null;
         rootView = null;
         super.onDestroyView();
     }

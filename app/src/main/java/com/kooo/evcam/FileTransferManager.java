@@ -82,6 +82,7 @@ public class FileTransferManager {
     private static final long MIN_VALID_FILE_SIZE = 1024;  // Short, valid recordings can be smaller than 500 KB.
 
     private volatile String inFlightSourcePath = null;
+    private volatile String inFlightTargetPartPath = null;
 
     public static final class TempCleanupStats {
         public int deletedVerifiedCount = 0;
@@ -411,19 +412,49 @@ public class FileTransferManager {
 
     private Set<String> collectProtectedPaths() {
         Set<String> protectedPaths = new HashSet<>(ActiveRecordingRegistry.snapshot());
+        protectedPaths.addAll(collectActiveTransferPaths());
+        return protectedPaths;
+    }
+
+    /**
+     * 收集正在传输或排队待传输的文件及目标 .part 临时路径，防止手动清理误删在途分片。
+     */
+    public Set<String> collectActiveTransferPaths() {
+        Set<String> active = new HashSet<>();
         String activeFlight = inFlightSourcePath;
         if (activeFlight != null && !activeFlight.isEmpty()) {
-            protectedPaths.add(activeFlight);
+            active.add(activeFlight);
+        }
+        String activePart = inFlightTargetPartPath;
+        if (activePart != null && !activePart.isEmpty()) {
+            active.add(activePart);
         }
         for (TransferTask task : transferQueue) {
-            if (task != null && task.sourceFile != null) {
-                String path = ActiveRecordingRegistry.normalizePath(task.sourceFile);
-                if (!path.isEmpty()) {
-                    protectedPaths.add(path);
+            if (task == null) {
+                continue;
+            }
+            if (task.sourceFile != null) {
+                String srcPath = ActiveRecordingRegistry.normalizePath(task.sourceFile);
+                if (!srcPath.isEmpty()) {
+                    active.add(srcPath);
+                }
+            }
+            if (task.targetFile != null) {
+                String dstPath = ActiveRecordingRegistry.normalizePath(task.targetFile);
+                if (!dstPath.isEmpty()) {
+                    active.add(dstPath);
+                }
+                File parent = task.targetFile.getParentFile();
+                if (parent != null) {
+                    String partPath = ActiveRecordingRegistry.normalizePath(
+                            new File(parent, task.targetFile.getName() + ".part"));
+                    if (!partPath.isEmpty()) {
+                        active.add(partPath);
+                    }
                 }
             }
         }
-        return protectedPaths;
+        return active;
     }
 
     static File resolveVerifiedTargetVideoDir(Context context) {
@@ -702,26 +733,31 @@ public class FileTransferManager {
         File parent = target.getParentFile();
         File partFile = parent != null ? new File(parent, target.getName() + ".part") : null;
         if (partFile != null) {
-            if (partFile.exists()) {
-                partFile.delete();
-            }
-            if (copyFileDirect(source, partFile, size)) {
-                if (target.exists() && !target.delete()) {
-                    AppLog.w(TAG, "Failed to delete existing target file before rename: " + target.getName());
-                }
-                if (partFile.renameTo(target) && target.exists() && target.length() == size) {
-                    AppLog.d(TAG, "File copied successfully (.part atomic): " + source.getName() + " (" + formatSize(size) + ")");
-                    return true;
-                }
+            inFlightTargetPartPath = ActiveRecordingRegistry.normalizePath(partFile);
+            try {
                 if (partFile.exists()) {
                     partFile.delete();
                 }
-                AppLog.w(TAG, "Atomic .part rename failed on target FS, falling back to direct copy: " + target.getName());
-            } else {
-                if (partFile.exists()) {
-                    partFile.delete();
+                if (copyFileDirect(source, partFile, size)) {
+                    if (target.exists() && !target.delete()) {
+                        AppLog.w(TAG, "Failed to delete existing target file before rename: " + target.getName());
+                    }
+                    if (partFile.renameTo(target) && target.exists() && target.length() == size) {
+                        AppLog.d(TAG, "File copied successfully (.part atomic): " + source.getName() + " (" + formatSize(size) + ")");
+                        return true;
+                    }
+                    if (partFile.exists()) {
+                        partFile.delete();
+                    }
+                    AppLog.w(TAG, "Atomic .part rename failed on target FS, falling back to direct copy: " + target.getName());
+                } else {
+                    if (partFile.exists()) {
+                        partFile.delete();
+                    }
+                    return false;
                 }
-                return false;
+            } finally {
+                inFlightTargetPartPath = null;
             }
         }
         if (target.exists() && !target.delete()) {

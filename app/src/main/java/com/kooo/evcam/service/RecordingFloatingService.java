@@ -42,6 +42,8 @@ import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.recording.RecordingController;
 import com.kooo.evcam.ui.OverlayWindowParamsFactory;
+import com.kooo.evcam.vehicle.VehicleSignalHub;
+import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
 
 /**
  * 录制悬浮按钮服务
@@ -99,6 +101,37 @@ public class RecordingFloatingService extends Service {
     private BroadcastReceiver sizeUpdateReceiver;
     private BroadcastReceiver recordingStateReceiver;
 
+    // 倒挡 / 原车 360 避让控制
+    private final AvmForegroundDetector avmForegroundDetector = new AvmForegroundDetector();
+    private volatile boolean isServiceDestroyed = false;
+    private boolean showRequestedByBackground = false;
+    private boolean inReverseGear = false;
+    private boolean avmForeground = false;
+    private final Runnable deferredShowRunnable = this::reconcileAfterBackgroundDebounce;
+    private final Runnable avmRecheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isServiceDestroyed || !showRequestedByBackground) {
+                return;
+            }
+            inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.isAvmInForeground(RecordingFloatingService.this, target);
+            reconcileOverlayVisibility("avm_poll");
+        }
+    };
+    private final VehicleSignalHub.Listener vehicleSignalListener = snapshot -> {
+        if (isServiceDestroyed || mainHandler == null) {
+            return;
+        }
+        final boolean reverse = OverlayAvoidancePolicy.isReverseGear(snapshot);
+        mainHandler.post(() -> {
+            if (!isServiceDestroyed) {
+                onReverseGearChanged(reverse);
+            }
+        });
+    };
+
     public class LocalBinder extends Binder {
         public RecordingFloatingService getService() {
             return RecordingFloatingService.this;
@@ -142,9 +175,12 @@ public class RecordingFloatingService extends Service {
         super.onCreate();
         AppLog.d(TAG, "录制悬浮服务创建");
 
+        isServiceDestroyed = false;
         mainHandler = new Handler(Looper.getMainLooper());
         appConfig = new AppConfig(this);
         windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
+        inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+        VehicleSignalHub.getInstance().addListener(vehicleSignalListener);
 
         // 获取屏幕尺寸
         DisplayMetrics metrics = new DisplayMetrics();
@@ -246,9 +282,13 @@ public class RecordingFloatingService extends Service {
         if (intent != null) {
             String action = intent.getAction();
             if (ACTION_HIDE.equals(action)) {
+                showRequestedByBackground = false;
+                avmForeground = false;
+                cancelPendingAvoidanceCallbacks();
                 hideFloatingWindow();
             } else {
-                showFloatingWindow();
+                showRequestedByBackground = true;
+                requestShowWithAvoidance();
             }
         }
         return START_STICKY;
@@ -263,6 +303,10 @@ public class RecordingFloatingService extends Service {
     @Override
     public void onDestroy() {
         super.onDestroy();
+        isServiceDestroyed = true;
+        cancelPendingAvoidanceCallbacks();
+        VehicleSignalHub.getInstance().removeListener(vehicleSignalListener);
+        avmForegroundDetector.reset();
         hideFloatingWindow();
 
         if (isServiceBound) {
@@ -289,7 +333,92 @@ public class RecordingFloatingService extends Service {
 
     // ========== 悬浮窗管理 ==========
 
-    private void showFloatingWindow() {
+    private void cancelPendingAvoidanceCallbacks() {
+        if (mainHandler != null) {
+            mainHandler.removeCallbacks(deferredShowRunnable);
+            mainHandler.removeCallbacks(avmRecheckRunnable);
+        }
+    }
+
+    private void requestShowWithAvoidance() {
+        MainActivity main = MainActivity.getInstance();
+        boolean appFg = main != null && main.isInterfaceInForeground();
+        inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+        if (appFg || inReverseGear) {
+            cancelPendingAvoidanceCallbacks();
+            if (inReverseGear) {
+                AppLog.i(TAG, "检测到倒挡(R)，跳过创建录制悬浮窗以避免与原车 360 争抢显示");
+            }
+            hideFloatingWindow();
+            return;
+        }
+        if (floatingContainer != null) {
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
+            if (avmForeground) {
+                reconcileOverlayVisibility("avm_foreground");
+            }
+            return;
+        }
+        mainHandler.removeCallbacks(deferredShowRunnable);
+        mainHandler.postDelayed(deferredShowRunnable, OverlayAvoidancePolicy.BACKGROUND_SHOW_DEBOUNCE_MS);
+    }
+
+    private void reconcileAfterBackgroundDebounce() {
+        if (isServiceDestroyed || !showRequestedByBackground) {
+            return;
+        }
+        inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+        String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+        avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
+        reconcileOverlayVisibility("background_debounced");
+    }
+
+    private void onReverseGearChanged(boolean reverse) {
+        if (inReverseGear == reverse) {
+            return;
+        }
+        inReverseGear = reverse;
+        if (reverse) {
+            cancelPendingAvoidanceCallbacks();
+            if (floatingContainer != null) {
+                AppLog.i(TAG, "检测到倒挡(R)，避让隐藏录制悬浮窗");
+            }
+            hideFloatingWindow();
+            return;
+        }
+        if (showRequestedByBackground) {
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
+            reconcileOverlayVisibility("gear_exit_reverse");
+        }
+    }
+
+    private void reconcileOverlayVisibility(String reason) {
+        MainActivity main = MainActivity.getInstance();
+        boolean appFg = main != null && main.isInterfaceInForeground();
+        if (!showRequestedByBackground
+                || OverlayAvoidancePolicy.shouldSuppressMainOverlay(appFg, inReverseGear, avmForeground)) {
+            mainHandler.removeCallbacks(deferredShowRunnable);
+            if (floatingContainer != null) {
+                AppLog.i(TAG, "避让隐藏录制悬浮窗 (reason=" + reason
+                        + ", appFg=" + appFg + ", reverse=" + inReverseGear + ", avm=" + avmForeground + ")");
+                hideFloatingWindow();
+            }
+            if (OverlayAvoidancePolicy.shouldPollAvmExit(
+                    showRequestedByBackground, appFg, avmForeground, inReverseGear)) {
+                mainHandler.removeCallbacks(avmRecheckRunnable);
+                mainHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
+            } else {
+                mainHandler.removeCallbacks(avmRecheckRunnable);
+            }
+            return;
+        }
+        mainHandler.removeCallbacks(avmRecheckRunnable);
+        showFloatingWindowNow();
+    }
+
+    private void showFloatingWindowNow() {
         MainActivity main = MainActivity.getInstance();
         if (main != null && main.isInterfaceInForeground()) {
             hideFloatingWindow();

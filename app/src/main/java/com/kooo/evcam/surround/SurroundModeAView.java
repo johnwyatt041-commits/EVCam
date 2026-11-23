@@ -50,7 +50,7 @@ public final class SurroundModeAView extends FrameLayout {
     }
 
     private static final String TAG = "SurroundModeAView";
-    private static final long TEARDOWN_SURFACE_DELAY_MS = 100L;
+    private static final long TEARDOWN_SURFACE_DELAY_MS = 250L;
     private static final long WATCHDOG_INTERVAL_MS = 2_000L;
     private static final String[] CAMERA_KEYS = {"front", "back", "left", "right"};
 
@@ -91,6 +91,7 @@ public final class SurroundModeAView extends FrameLayout {
 
     private volatile boolean active = false;
     private volatile boolean surfacesReady = false;
+    private boolean suppressRebindInSurfacesReadyCallback = false;
     @Nullable private Surface cachedFrontSurface;
     @Nullable private Surface cachedBackSurface;
     @Nullable private Surface cachedLeftSurface;
@@ -325,6 +326,7 @@ public final class SurroundModeAView extends FrameLayout {
                     cachedLeftSt = stLeft;
                     cachedRightSt = stRight;
                     surfacesReady = true;
+                    boolean boundInReadyCallback = false;
                     if (boundCameraManager != null) {
                         boundCameraManager.bindSurroundPreviewForModeA(
                                 front, stFront,
@@ -333,9 +335,15 @@ public final class SurroundModeAView extends FrameLayout {
                                 right, stRight
                         );
                         startCameraWatchdog();
+                        boundInReadyCallback = true;
                     }
                     if (hostCallbacks != null) {
-                        hostCallbacks.onSurroundSurfacesReady();
+                        suppressRebindInSurfacesReadyCallback = boundInReadyCallback;
+                        try {
+                            hostCallbacks.onSurroundSurfacesReady();
+                        } finally {
+                            suppressRebindInSurfacesReadyCallback = false;
+                        }
                     }
                 }));
         glView.setRenderer(renderer);
@@ -352,11 +360,13 @@ public final class SurroundModeAView extends FrameLayout {
 
     /** 更新绑定的 MultiCameraManager 引用（用于相机延迟初始化完成后挂载 4 路 OES Surface）。 */
     public void bindCameraManagerIfActive(@Nullable MultiCameraManager cameraManager) {
+        boolean skipDuplicateBind = suppressRebindInSurfacesReadyCallback
+                && cameraManager == this.boundCameraManager;
         this.boundCameraManager = cameraManager;
         if (!active || cameraManager == null) {
             return;
         }
-        if (surfacesReady && hasAnyValidCachedSurroundSurface()) {
+        if (!skipDuplicateBind && surfacesReady && hasAnyValidCachedSurroundSurface()) {
             cameraManager.bindSurroundPreviewForModeA(
                     cachedFrontSurface, cachedFrontSt,
                     cachedBackSurface, cachedBackSt,
@@ -407,6 +417,7 @@ public final class SurroundModeAView extends FrameLayout {
         }
         active = false;
         surfacesReady = false;
+        suppressRebindInSurfacesReadyCallback = false;
         VehicleSignalHub.getInstance().removeListener(signalListener);
         releaseSteeringAngleSubscription();
 
@@ -417,6 +428,8 @@ public final class SurroundModeAView extends FrameLayout {
         this.pendingTeardownRenderer = rendererToRelease;
 
         if (viewToRelease != null) {
+            // 退后台或切到原车 360 时立即隐藏独立硬件 SurfaceView 图层，避免与原车 360 叠加闪烁
+            viewToRelease.setVisibility(View.GONE);
             mainHandler.postDelayed(() -> {
                 if (pendingTeardownRenderer == rendererToRelease) {
                     pendingTeardownRenderer = null;
@@ -426,6 +439,9 @@ public final class SurroundModeAView extends FrameLayout {
                 }
                 viewToRelease.onPause();
                 removeView(viewToRelease);
+                if (rendererToRelease != null) {
+                    rendererToRelease.releaseSurfacesFallback();
+                }
                 AppLog.i(TAG, "Mode A 360 GL context destroyed cleanly");
                 if (afterTeardown != null) {
                     afterTeardown.run();

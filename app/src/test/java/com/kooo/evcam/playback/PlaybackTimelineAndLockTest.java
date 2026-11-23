@@ -126,4 +126,74 @@ public class PlaybackTimelineAndLockTest {
         assertFalse(orphanLock.exists());
         assertFalse(unlockedOld.exists());
     }
+
+    @Test
+    public void videoScanFiltersHiddenAndTrashedAndDetectsLocksInMemorySet() throws Exception {
+        File dir = temp.newFolder("EVCam_Video_Hidden_Lock");
+        File validLocked = new File(dir, "20261123_081000_back.mp4");
+        File validLockedSidecar = new File(dir, "20261123_081000_back.mp4.lock");
+        File validUnlocked = new File(dir, "20261123_082000_left.mp4");
+        File trashedMp4 = new File(dir, ".trashed-1700000000-20261123_083000_back.mp4");
+        File trashedNoDot = new File(dir, "trashed-20261123_083500_back.mp4");
+        File appleDouble = new File(dir, "._20261123_084000_back.mp4");
+        File hiddenPending = new File(dir, ".pending-20261123_084500_back.mp4");
+        File writeProbe = new File(dir, ".evcam_write_probe_1.mp4.pending");
+
+        Files.write(validLocked.toPath(), new byte[2048]);
+        Files.write(validLockedSidecar.toPath(), new byte[0]);
+        Files.write(validUnlocked.toPath(), new byte[2048]);
+        Files.write(trashedMp4.toPath(), new byte[2048]);
+        Files.write(trashedNoDot.toPath(), new byte[2048]);
+        Files.write(appleDouble.toPath(), new byte[2048]);
+        Files.write(hiddenPending.toPath(), new byte[2048]);
+        Files.write(writeProbe.toPath(), new byte[128]);
+
+        long todayRef = new VideoGroup("20261123_120000").getRecordTime().getTime();
+        PlaybackTimelineBuilder.VideoScanResult all = PlaybackTimelineBuilder.scanVideoDirectory(
+                dir, PlaybackTimelineBuilder.FILTER_ALL, todayRef, java.util.Collections.emptySet());
+        assertEquals(1, all.dateSections.size());
+        assertEquals(2, all.dateSections.get(0).getItemCount());
+        assertNull(all.activeRecording);
+
+        PlaybackTimelineBuilder.VideoScanResult locked = PlaybackTimelineBuilder.scanVideoDirectory(
+                dir, PlaybackTimelineBuilder.FILTER_LOCKED, todayRef, java.util.Collections.emptySet());
+        assertEquals(1, locked.dateSections.size());
+        assertEquals(1, locked.dateSections.get(0).getItemCount());
+        VideoGroup lockedGroup = locked.dateSections.get(0).getItems().get(0);
+        assertEquals("20261123_081000", lockedGroup.getTimestampPrefix());
+        assertTrue(lockedGroup.isLocked());
+        assertTrue(VideoLockStore.isGroupLocked(lockedGroup, java.util.Collections.singleton(validLockedSidecar.getName())));
+        assertFalse(VideoLockStore.isGroupLocked(lockedGroup, java.util.Collections.emptySet()));
+    }
+
+    @Test
+    public void photoScanFiltersHiddenAndTrashedAndDetectsLocksInMemorySet() throws Exception {
+        File dir = temp.newFolder("EVCam_Photo_Hidden_Lock");
+        File lockedPhoto = new File(dir, "20261123_090000_back.jpg");
+        File lockedPhotoSidecar = new File(dir, "20261123_090000_back.jpg.lock");
+        File unlockedPhoto = new File(dir, "20261123_091000_left.png");
+        File trashedJpg = new File(dir, ".trashed-123-20261123_092000_back.jpg");
+        File dotFileJpg = new File(dir, "._20261123_093000_back.jpg");
+        File hiddenPng = new File(dir, ".thumb.png");
+
+        Files.write(lockedPhoto.toPath(), new byte[1024]);
+        Files.write(lockedPhotoSidecar.toPath(), new byte[0]);
+        Files.write(unlockedPhoto.toPath(), new byte[1024]);
+        Files.write(trashedJpg.toPath(), new byte[1024]);
+        Files.write(dotFileJpg.toPath(), new byte[1024]);
+        Files.write(hiddenPng.toPath(), new byte[1024]);
+
+        long todayRef = new PhotoGroup("20261123_120000").getCaptureTime().getTime();
+        List<DateSection<PhotoGroup>> all = PlaybackTimelineBuilder.scanPhotoDirectory(
+                dir, PlaybackTimelineBuilder.FILTER_ALL, todayRef);
+        assertEquals(1, all.size());
+        assertEquals(2, all.get(0).getItemCount());
+
+        List<DateSection<PhotoGroup>> locked = PlaybackTimelineBuilder.scanPhotoDirectory(
+                dir, PlaybackTimelineBuilder.FILTER_LOCKED, todayRef);
+        assertEquals(1, locked.size());
+        assertEquals(1, locked.get(0).getItemCount());
+        assertEquals("20261123_090000", locked.get(0).getItems().get(0).getTimestampPrefix());
+        assertTrue(locked.get(0).getItems().get(0).isLocked());
+    }
 }

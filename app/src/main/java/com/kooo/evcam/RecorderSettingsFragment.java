@@ -123,6 +123,8 @@ public class RecorderSettingsFragment extends Fragment {
     private EditText photoStorageLimitEdit;
     private TextView videoUsedSizeText;
     private TextView photoUsedSizeText;
+    private Button cleanupFragmentsButton;
+    private TextView fragmentCleanupResultText;
     private boolean isInitializingStorageCleanup = false;
     
     // 录制摄像头选择配置相关
@@ -1665,6 +1667,8 @@ public class RecorderSettingsFragment extends Fragment {
             activeUsbSpeedTest.cancel();
             activeUsbSpeedTest = null;
         }
+        cleanupFragmentsButton = null;
+        fragmentCleanupResultText = null;
         super.onDestroyView();
     }
     
@@ -1917,7 +1921,13 @@ public class RecorderSettingsFragment extends Fragment {
         photoStorageLimitEdit = view.findViewById(R.id.et_photo_storage_limit);
         videoUsedSizeText = view.findViewById(R.id.tv_video_used_size);
         photoUsedSizeText = view.findViewById(R.id.tv_photo_used_size);
-        
+        cleanupFragmentsButton = view.findViewById(R.id.btn_cleanup_fragments);
+        fragmentCleanupResultText = view.findViewById(R.id.tv_fragment_cleanup_result);
+
+        if (cleanupFragmentsButton != null) {
+            cleanupFragmentsButton.setOnClickListener(v -> triggerManualFragmentCleanup());
+        }
+
         if (videoStorageLimitEdit == null || photoStorageLimitEdit == null || getContext() == null) {
             return;
         }
@@ -2043,6 +2053,30 @@ public class RecorderSettingsFragment extends Fragment {
                 });
             }
         }).start();
+    }
+
+    private void triggerManualFragmentCleanup() {
+        FragmentCleanupCoordinator.startManualScanAndPrompt(
+                this,
+                () -> {
+                    if (cleanupFragmentsButton != null) {
+                        cleanupFragmentsButton.setEnabled(false);
+                        cleanupFragmentsButton.setText("扫描中...");
+                    }
+                },
+                () -> {
+                    if (cleanupFragmentsButton != null) {
+                        cleanupFragmentsButton.setEnabled(true);
+                        cleanupFragmentsButton.setText("扫描清理");
+                    }
+                },
+                status -> {
+                    if (fragmentCleanupResultText != null && isAdded()) {
+                        fragmentCleanupResultText.setVisibility(View.VISIBLE);
+                        fragmentCleanupResultText.setText(status);
+                    }
+                },
+                this::updateStorageUsedSizeDisplay);
     }
     
     /**

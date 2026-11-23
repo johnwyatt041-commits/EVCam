@@ -1,10 +1,15 @@
 package com.kooo.evcam.playback;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import java.io.File;
 import java.text.ParseException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
@@ -52,10 +57,22 @@ public class VideoGroup {
      * @param file 视频文件
      */
     public void addFile(File file) {
+        addFile(file, file != null ? file.length() : 0L);
+    }
+
+    /**
+     * 添加视频文件到分组（复用扫描阶段已读取的文件长度）
+     * @param file 视频文件
+     * @param fileLength 文件长度（字节）
+     */
+    public void addFile(File file, long fileLength) {
+        if (file == null) {
+            return;
+        }
         String position = extractPosition(file.getName());
         if (position != null) {
             videoFiles.put(position, file);
-            totalSize += file.length();
+            totalSize += Math.max(0L, fileLength);
         }
     }
     
@@ -192,6 +209,72 @@ public class VideoGroup {
         return new HashMap<>(videoFiles);
     }
     
+    /**
+     * 已录制代表视角及文件实体，仅包含本组真实存在的视角。
+     */
+    public static final class RepresentativeMedia {
+        @NonNull public final String position;
+        @NonNull public final File file;
+
+        public RepresentativeMedia(@NonNull String position, @NonNull File file) {
+            this.position = position;
+            this.file = file;
+        }
+    }
+
+    /**
+     * 按优先级返回本组实际已录制的视频列表（绝不包含未录制视角）。
+     */
+    @NonNull
+    public List<RepresentativeMedia> getRecordedVideosInPriorityOrder() {
+        List<RepresentativeMedia> out = new ArrayList<>();
+        String[] orderedPositions = {
+                POSITION_COMBINED, POSITION_FRONT, POSITION_BACK, POSITION_LEFT, POSITION_RIGHT
+        };
+        for (String pos : orderedPositions) {
+            File file = videoFiles.get(pos);
+            if (file != null && !VideoLockStore.isPendingFile(file)) {
+                out.add(new RepresentativeMedia(pos, file));
+            }
+        }
+        for (Map.Entry<String, File> entry : videoFiles.entrySet()) {
+            String pos = entry.getKey();
+            File file = entry.getValue();
+            if (file == null || VideoLockStore.isPendingFile(file)) {
+                continue;
+            }
+            if (!POSITION_COMBINED.equals(pos)
+                    && !POSITION_FRONT.equals(pos)
+                    && !POSITION_BACK.equals(pos)
+                    && !POSITION_LEFT.equals(pos)
+                    && !POSITION_RIGHT.equals(pos)) {
+                out.add(new RepresentativeMedia(pos, file));
+            }
+        }
+        return out;
+    }
+
+    @NonNull
+    public static String getPositionDisplayLabel(@Nullable String position) {
+        if (position == null) {
+            return "";
+        }
+        switch (position) {
+            case POSITION_FRONT:
+                return "前";
+            case POSITION_BACK:
+                return "后";
+            case POSITION_LEFT:
+                return "左";
+            case POSITION_RIGHT:
+                return "右";
+            case POSITION_COMBINED:
+                return "合成";
+            default:
+                return "";
+        }
+    }
+
     /**
      * 获取第一个可用的缩略图文件（用于列表显示）
      * 优先级：front > back > left > right

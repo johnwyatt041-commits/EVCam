@@ -73,6 +73,23 @@ public final class VehicleTriggerRule {
         return DEFAULT_DOOR_STOP_ID.equals(id) || DEFAULT_GEAR_START_ID.equals(id);
     }
 
+    /** 判断两条规则的评估语义（ID/启用/条件/逻辑/延迟/动作）是否一致，供配置重载时保留已锁存的运行状态。 */
+    public boolean hasSameEvaluationDefinition(@Nullable VehicleTriggerRule other) {
+        if (this == other) {
+            return true;
+        }
+        if (other == null) {
+            return false;
+        }
+        return enabled == other.enabled
+                && delaySeconds == other.delaySeconds
+                && action == other.action
+                && conditionLogic == other.conditionLogic
+                && id.equals(other.id)
+                && primaryCondition.equals(other.primaryCondition)
+                && additionalConditions.equals(other.additionalConditions);
+    }
+
     public boolean matches(@Nullable VehicleSignalSnapshot snapshot) {
         if (!enabled || snapshot == null) {
             return false;

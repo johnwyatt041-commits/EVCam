@@ -290,4 +290,34 @@ public class VhalSignalObserverReconnectTest {
         assertFalse(sm.isSilentReconnecting());
         assertFalse(sm.isConnected());
     }
+
+    @Test
+    public void intentionalStopSuppressesStreamErrorLogging() {
+        assertTrue(VhalSignalObserver.shouldLogStreamError(false, true));
+        assertFalse(VhalSignalObserver.shouldLogStreamError(false, false));
+        assertFalse(VhalSignalObserver.shouldLogStreamError(true, true));
+        assertFalse(VhalSignalObserver.shouldLogStreamError(true, false));
+    }
+
+    @Test
+    public void observerHandoffPreservesSignalHubGearWhileLastObserverStopResets() {
+        VehicleSignalHub hub = VehicleSignalHub.getInstance();
+        long t = 1_000L;
+        hub.onRawBatch(gearBatch(0x0004, 100L), t); // PARK
+        assertEquals(VehicleSignalSnapshot.Gear.PARK, hub.getSnapshot(t).gear);
+
+        // 若仍有其他运行中 Observer 接管，断连清理不得重置 Hub（避免 PARK -> UNKNOWN 瞬时抖动）
+        assertFalse(VhalSignalObserver.shouldResetSignalHubOnDisconnect(true));
+        if (VhalSignalObserver.shouldResetSignalHubOnDisconnect(true)) {
+            hub.reset();
+        }
+        assertEquals(VehicleSignalSnapshot.Gear.PARK, hub.getSnapshot(t + 10L).gear);
+
+        // 最后一个 Observer 停机且无接替者时才重置 Hub 为 UNKNOWN
+        assertTrue(VhalSignalObserver.shouldResetSignalHubOnDisconnect(false));
+        if (VhalSignalObserver.shouldResetSignalHubOnDisconnect(false)) {
+            hub.reset();
+        }
+        assertEquals(VehicleSignalSnapshot.Gear.UNKNOWN, hub.getSnapshot(t + 20L).gear);
+    }
 }

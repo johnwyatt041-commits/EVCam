@@ -20,7 +20,11 @@ import android.view.WindowManager;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
 
+import com.kooo.evcam.service.AvmForegroundDetector;
+import com.kooo.evcam.service.OverlayAvoidancePolicy;
 import com.kooo.evcam.ui.OverlayWindowParamsFactory;
+import com.kooo.evcam.vehicle.VehicleSignalHub;
+import com.kooo.evcam.vehicle.VehicleSignalSnapshot;
 
 /**
  * 悬浮窗服务
@@ -69,19 +73,56 @@ public class FloatingWindowService extends Service {
     
     // 悬浮窗显示状态
     private boolean isFloatingWindowVisible = true;
+    private final AvmForegroundDetector avmForegroundDetector = new AvmForegroundDetector();
+    private volatile boolean isServiceDestroyed = false;
+    private boolean appInForeground = false;
+    private boolean inReverseGear = false;
+    private boolean avmForeground = false;
+    private final Runnable deferredShowRunnable = this::reconcileAfterBackgroundDebounce;
+    private final Runnable avmRecheckRunnable = new Runnable() {
+        @Override
+        public void run() {
+            if (isServiceDestroyed || appInForeground || blinkHandler == null) {
+                return;
+            }
+            inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.isAvmInForeground(FloatingWindowService.this, target);
+            reconcileFloatingVisibility("avm_poll");
+        }
+    };
+    private final VehicleSignalHub.Listener vehicleSignalListener = snapshot -> {
+        if (isServiceDestroyed || blinkHandler == null) {
+            return;
+        }
+        final boolean reverse = OverlayAvoidancePolicy.isReverseGear(snapshot);
+        blinkHandler.post(() -> {
+            if (!isServiceDestroyed) {
+                onReverseGearChanged(reverse);
+            }
+        });
+    };
     
     @Override
     public void onCreate() {
         super.onCreate();
         AppLog.d(TAG, "FloatingWindowService onCreate");
         isServiceRunning = true;
+        isServiceDestroyed = false;
         
         appConfig = new AppConfig(this);
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
         blinkHandler = new Handler(Looper.getMainLooper());
+        MainActivity main = MainActivity.getInstance();
+        appInForeground = main != null && main.isInterfaceInForeground();
+        inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+        avmForeground = !appInForeground && !inReverseGear
+                && avmForegroundDetector.isAvmInForeground(this, appConfig.getAvmAvoidanceActivity());
+        VehicleSignalHub.getInstance().addListener(vehicleSignalListener);
         
         // 创建悬浮窗
         createFloatingWindow();
+        reconcileFloatingVisibility("create");
         
         // 注册录制状态广播接收器
         registerRecordingStateReceiver();
@@ -114,7 +155,11 @@ public class FloatingWindowService extends Service {
     public void onDestroy() {
         super.onDestroy();
         AppLog.d(TAG, "FloatingWindowService onDestroy");
+        isServiceDestroyed = true;
         isServiceRunning = false;
+        cancelPendingAvoidanceCallbacks();
+        VehicleSignalHub.getInstance().removeListener(vehicleSignalListener);
+        avmForegroundDetector.reset();
         
         // 保存当前位置
         if (layoutParams != null) {
@@ -256,6 +301,11 @@ public class FloatingWindowService extends Service {
             }
         });
         
+        boolean initialSuppressed = OverlayAvoidancePolicy.shouldSuppressMainOverlay(
+                appInForeground, inReverseGear, avmForeground);
+        floatingView.setVisibility(initialSuppressed ? View.GONE : View.VISIBLE);
+        isFloatingWindowVisible = !initialSuppressed;
+
         // 添加到窗口
         attachedOverlay = OverlayWindowParamsFactory.attachLightweightMainOverlay(
                 this, windowManager, floatingView, layoutParams, this::stopSelf);
@@ -312,10 +362,22 @@ public class FloatingWindowService extends Service {
             public void onReceive(Context context, Intent intent) {
                 if (ACTION_APP_FOREGROUND_STATE.equals(intent.getAction())) {
                     boolean isForeground = intent.getBooleanExtra(EXTRA_IS_FOREGROUND, false);
+                    appInForeground = isForeground;
                     if (isForeground) {
+                        avmForeground = false;
+                        cancelPendingAvoidanceCallbacks();
                         hideFloatingWindow();
                     } else {
-                        showFloatingWindow();
+                        inReverseGear = OverlayAvoidancePolicy.isReverseGear(
+                                VehicleSignalHub.getInstance().getSnapshot());
+                        if (inReverseGear) {
+                            cancelPendingAvoidanceCallbacks();
+                            hideFloatingWindow();
+                        } else if (blinkHandler != null) {
+                            blinkHandler.removeCallbacks(deferredShowRunnable);
+                            blinkHandler.postDelayed(deferredShowRunnable,
+                                    OverlayAvoidancePolicy.BACKGROUND_SHOW_DEBOUNCE_MS);
+                        }
                     }
                 }
             }
@@ -324,15 +386,78 @@ public class FloatingWindowService extends Service {
         IntentFilter filter = new IntentFilter(ACTION_APP_FOREGROUND_STATE);
         ContextCompat.registerReceiver(this, foregroundStateReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
     }
+
+    private void cancelPendingAvoidanceCallbacks() {
+        if (blinkHandler != null) {
+            blinkHandler.removeCallbacks(deferredShowRunnable);
+            blinkHandler.removeCallbacks(avmRecheckRunnable);
+        }
+    }
+
+    private void reconcileAfterBackgroundDebounce() {
+        if (isServiceDestroyed || appInForeground) {
+            return;
+        }
+        inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
+        String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+        avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
+        reconcileFloatingVisibility("background_debounced");
+    }
+
+    private void onReverseGearChanged(boolean reverse) {
+        if (inReverseGear == reverse) {
+            return;
+        }
+        inReverseGear = reverse;
+        if (reverse) {
+            cancelPendingAvoidanceCallbacks();
+            hideFloatingWindow();
+            return;
+        }
+        if (!appInForeground) {
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
+            reconcileFloatingVisibility("gear_exit_reverse");
+        }
+    }
+
+    private void reconcileFloatingVisibility(String reason) {
+        boolean suppressed = OverlayAvoidancePolicy.shouldSuppressMainOverlay(
+                appInForeground, inReverseGear, avmForeground);
+        if (suppressed) {
+            if (blinkHandler != null) {
+                blinkHandler.removeCallbacks(deferredShowRunnable);
+            }
+            if (isFloatingWindowVisible) {
+                AppLog.d(TAG, "避让隐藏悬浮窗 (reason=" + reason
+                        + ", appFg=" + appInForeground + ", reverse=" + inReverseGear + ", avm=" + avmForeground + ")");
+            }
+            hideFloatingWindow();
+            if (blinkHandler != null) {
+                if (OverlayAvoidancePolicy.shouldPollAvmExit(true, appInForeground, avmForeground, inReverseGear)) {
+                    blinkHandler.removeCallbacks(avmRecheckRunnable);
+                    blinkHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
+                } else {
+                    blinkHandler.removeCallbacks(avmRecheckRunnable);
+                }
+            }
+            return;
+        }
+        if (blinkHandler != null) {
+            blinkHandler.removeCallbacks(avmRecheckRunnable);
+        }
+        showFloatingWindow();
+    }
     
     /**
      * 隐藏悬浮窗
      */
     private void hideFloatingWindow() {
+        stopBlinkAnimation();
         if (floatingView != null && isFloatingWindowVisible) {
             floatingView.setVisibility(View.GONE);
             isFloatingWindowVisible = false;
-            AppLog.d(TAG, "悬浮窗已隐藏（应用在前台）");
+            AppLog.d(TAG, "悬浮窗已隐藏（应用在前台或倒挡/360避让）");
         }
     }
     
@@ -340,9 +465,15 @@ public class FloatingWindowService extends Service {
      * 显示悬浮窗
      */
     private void showFloatingWindow() {
+        if (OverlayAvoidancePolicy.shouldSuppressMainOverlay(appInForeground, inReverseGear, avmForeground)) {
+            return;
+        }
         if (floatingView != null && !isFloatingWindowVisible) {
             floatingView.setVisibility(View.VISIBLE);
             isFloatingWindowVisible = true;
+            if (isRecording) {
+                startBlinkAnimation();
+            }
             AppLog.d(TAG, "悬浮窗已显示（应用在后台）");
         }
     }
@@ -358,7 +489,7 @@ public class FloatingWindowService extends Service {
         isRecording = recording;
         AppLog.d(TAG, "录制状态更新: " + (recording ? "录制中" : "未录制"));
         
-        if (recording) {
+        if (recording && isFloatingWindowVisible) {
             startBlinkAnimation();
         } else {
             stopBlinkAnimation();
@@ -412,6 +543,7 @@ public class FloatingWindowService extends Service {
         attachedOverlay = null;
         
         createFloatingWindow();
+        reconcileFloatingVisibility("update");
     }
     
     /**

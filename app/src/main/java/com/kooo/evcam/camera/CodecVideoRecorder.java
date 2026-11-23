@@ -231,7 +231,8 @@ public class CodecVideoRecorder {
     private Surface cachedRecordSurface = null;
     
     // 编码器输出帧计数（仅用于日志和统计，不再用于 PTS 计算）
-    private long encodedOutputFrameCount = 0;
+    private volatile long encodedOutputFrameCount = 0;
+    private volatile long totalEncodedOutputFrameCount = 0;  // 跨分段累计编码输出帧数（供直连路径日志统计）
 
     // 分段录制相关
     private long segmentDurationMs = 60000;  // 分段时长，默认1分钟，可通过 setSegmentDuration 配置
@@ -632,6 +633,7 @@ public class CodecVideoRecorder {
         this.codecPolls = this.totalCodecPollUs = this.maxCodecPollUs = 0;
         this.segmentRequested = false;
         this.encodedOutputFrameCount = 0;  // 重置编码输出帧计数
+        this.totalEncodedOutputFrameCount = 0;
 
         // 重置健康检查状态
         this.encoderHealthy = true;
@@ -1130,7 +1132,8 @@ public class CodecVideoRecorder {
             }
             logRecordingStats();
 
-            AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped on worker thread, frames recorded: " + recordedFrameCount);
+            AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped on worker thread, frames recorded: "
+                    + getDisplayRecordedFrameCount());
         };
 
         if (stopExecutorHandler != null) {
@@ -1166,7 +1169,8 @@ public class CodecVideoRecorder {
         // 验证并清理所有录制的文件
         List<String> deletedFiles = validateAndCleanupAllFiles();
 
-        AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped, frames recorded: " + recordedFrameCount);
+        AppLog.d(TAG, "Camera " + cameraId + " Codec recording stopped, frames recorded: "
+                + getDisplayRecordedFrameCount());
 
         if (callback != null) {
             callback.onRecordStop(cameraId);
@@ -1738,6 +1742,7 @@ public class CodecVideoRecorder {
                             data.limit(bufferInfo.offset + bufferInfo.size);
                             muxer.writeSampleData(videoTrackIndex, data, bufferInfo);
                             encodedOutputFrameCount++;
+                            totalEncodedOutputFrameCount++;
                             framesWithoutEncoderOutput = 0;
                             lastEncoderOutputTime = System.currentTimeMillis();
                             gotOutput = true;
@@ -1754,6 +1759,17 @@ public class CodecVideoRecorder {
             encoderHealthy = false;
         }
         return gotOutput;
+    }
+
+    long getDisplayRecordedFrameCount() {
+        return isDirectInputActive() ? totalEncodedOutputFrameCount : recordedFrameCount;
+    }
+
+    String formatFileSizeLogFrames() {
+        if (isDirectInputActive()) {
+            return totalEncodedOutputFrameCount + " (segment: " + encodedOutputFrameCount + ")";
+        }
+        return String.valueOf(recordedFrameCount);
     }
 
     private void logRecordingStats() {
@@ -2242,7 +2258,7 @@ public class CodecVideoRecorder {
                             callback.onFirstDataWritten(cameraId);
                         }
                     }
-                    AppLog.d(TAG, "Camera " + cameraId + " file size: " + currentSize + " bytes (" + (currentSize / 1024) + " KB), frames: " + recordedFrameCount);
+                    AppLog.d(TAG, "Camera " + cameraId + " file size: " + currentSize + " bytes (" + (currentSize / 1024) + " KB), frames: " + formatFileSizeLogFrames());
                 } else if (sizeIncrease == 0 && lastFileSize > 0) {
                     AppLog.w(TAG, "Camera " + cameraId + " WARNING: File size not growing! Current: " + currentSize + " bytes");
                 }

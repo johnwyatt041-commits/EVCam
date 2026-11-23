@@ -44,6 +44,16 @@ public final class VideoLockStore {
         return getLockSidecar(mediaFile).isFile();
     }
 
+    /**
+     * O(1) 内存集合判锁，避免目录扫描阶段为每个媒体文件执行额外 {@code stat()}。
+     */
+    public static boolean isLocked(@Nullable File mediaFile, @NonNull Set<String> lockOrDirFileNames) {
+        if (mediaFile == null || isLockFile(mediaFile) || isPendingFile(mediaFile) || lockOrDirFileNames.isEmpty()) {
+            return false;
+        }
+        return lockOrDirFileNames.contains(mediaFile.getName() + LOCK_SUFFIX);
+    }
+
     public static boolean setLocked(@Nullable File mediaFile, boolean locked) {
         if (mediaFile == null || !mediaFile.exists() || !mediaFile.isFile() || isPendingFile(mediaFile)) {
             return false;
@@ -69,6 +79,30 @@ public final class VideoLockStore {
         }
         for (File file : group.getShareableFiles()) {
             if (isLocked(file)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isGroupLocked(@Nullable VideoGroup group, @NonNull Set<String> lockOrDirFileNames) {
+        if (group == null || lockOrDirFileNames.isEmpty()) {
+            return false;
+        }
+        for (File file : group.getAllVideoFiles().values()) {
+            if (isLocked(file, lockOrDirFileNames)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public static boolean isGroupLocked(@Nullable PhotoGroup group, @NonNull Set<String> lockOrDirFileNames) {
+        if (group == null || lockOrDirFileNames.isEmpty()) {
+            return false;
+        }
+        for (File file : group.getAllPhotoFiles().values()) {
+            if (isLocked(file, lockOrDirFileNames)) {
                 return true;
             }
         }
@@ -172,7 +206,7 @@ public final class VideoLockStore {
         if (isLockFile(file)) {
             return !isOrphanLockFile(file, directoryFileNames);
         }
-        return isLocked(file);
+        return isLocked(file, directoryFileNames);
     }
 
     @NonNull
