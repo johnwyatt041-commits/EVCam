@@ -1,21 +1,21 @@
 # 项目进度
 
-最后更新/核对：2026-11-23 16:04:43 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已完成**外部显式广播快捷控制**源码提交 `0bb9b04` 与本地单 A 版 **`build27`** 封包，版本 `1.6.6-test-11231552` / `versionCode = 87`；线上最新 Pre-release 仍为 `build26`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-23 16:14:36 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已完成**外部显式广播快捷控制**源码提交 `0bb9b04` 并发布单 A 版 **`build27`** 至 GitHub fork Pre-release，版本 `1.6.6-test-11231552` / `versionCode = 87`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix` 已本地提交 **`0bb9b04`**（`build27` / `1.6.6-test-11231552`，未推送远端） |
+| 分支与提交 | `codex/e5-recording-startup-fix` 已提交 **`0bb9b04`**（`build27` / `1.6.6-test-11231552`），已推送至 `johnwyatt041-commits/EVCam` |
 | 本地交付 | `outputs/` 顶层保留 **`build26`** + **`build27`**（`build25` 已归档至 `outputs/archive/`，索引见 [INDEX.md](../outputs/archive/INDEX.md)） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11230919-build26`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11230919-build26)（`build27` 暂仅本地） |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11231552-build27`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11231552-build27)（5 资产远端 SHA256 核验一致） |
 | 离线与设备验证 | **`build27` 已过单 A 离线验证**（`.\tools\verify.ps1` `405` 测 `0` 败/错/跳 + Debug/Release + `:app:lintIndependentDebug` `0` errors / `2244` warnings）；待实车实测 |
-| 实车状态 | 待安装本地 `build27` 上银河 E5 实车验证外接按钮广播 + 批次 A/B/C，并同步由用户关闭车机外部 D 挡脚本 |
+| 实车状态 | 待下载/安装 `build27` 上银河 E5 实车验证外接按钮广播 + 批次 A/B/C，并同步由用户关闭车机外部 D 挡脚本 |
 
 ## 当前结论与确认边界
 
-- **外部显式广播快捷控制已完成本地封包 `build27`（`1.6.6-test-11231552` / `0bb9b04`），待实车验证**：详见 [外部广播快捷控制任务](tasks/add-external-broadcast-control.md)（13 个显式广播，包名 `com.kooo.evcam`，零常驻后台占用；APK `EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk` SHA256 `9d55f0a8...`，通过 `405` 测与 Lint `0` errors）。
+- **外部显式广播快捷控制已发布 `build27` GitHub Pre-release（`1.6.6-test-11231552` / `0bb9b04`），待实车验证**：详见 [外部广播快捷控制任务](tasks/add-external-broadcast-control.md)（13 个显式广播，包名 `com.kooo.evcam`，零常驻后台占用；APK `EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `405` 测与 Lint `0` errors）。
 - **`build26`（批次 A/B/C）已封包发布并推送 GitHub Pre-release，待实车验证**：详见 [录像与预览性能优化任务](tasks/optimize-recording-preview-perf.md)（源码 `2d99f75` 打标 `v1.6.6-test-11230919-build26`，单 A 版 `5` 资产远端 SHA256 一致；通过 `395` 测与 Lint `0` errors）。
 - **U 盘手动写入速度检测已离线完成**：详见 [U 盘速度检测任务](tasks/add-usb-speed-test.md)（通过 `FileChannel.force(true)` 测算均速与最低分块速度，评估直写或中转写入要求）。
 - **多路录像启动、U 盘中转/遗留 `.pending`/动态清理、模式 A 断联与压制规则忙等 6 项问题已离线修复**：详见 [多路录制与系统可靠性修复](tasks/fix-recording-storage-modea-rule-reliability.md)（全 6 项均在源码核实存在）。
@@ -27,11 +27,11 @@
 
 ## 下一步
 
-1. 安装本地 `build27`（`EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk`），上银河 E5 实车验证按钮广播与批次 A+B+C，并同步关闭车机外部 D 挡 `start_recording` 脚本（GitHub 暂保持 `build26`，待用户确认是否推送 `build27`）。
+1. 下载/安装 `build27`（`EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk`），上银河 E5 实车验证按钮广播与批次 A+B+C，并同步关闭车机外部 D 挡 `start_recording` 脚本。
 
 ## 最近更新（最多5条）
 
-- 2026-11-23 16:04:43 +08:00 | 提交 `0bb9b04` 并本地封包单 A 版 `build27`（`1.6.6-test-11231552`） | 13 个显式广播（`com.kooo.evcam`，零后台占用）；归档 `build25`，APK SHA256 `9d55f0a8...`，`405` 测与 Lint `0` errors 通过（暂未推 GitHub） | [外部广播控制](tasks/add-external-broadcast-control.md)
+- 2026-11-23 16:14:36 +08:00 | 封包发布 build27 并推送 GitHub Pre-release（`1.6.6-test-11231552`） | 源码 `0bb9b04` 打标 `v1.6.6-test-11231552-build27` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build25` 归档，通过 `405` 测与 Lint `0` errors | [外部广播控制](tasks/add-external-broadcast-control.md)
 - 2026-11-23 10:39:05 +08:00 | 封包发布 build26 并推送 GitHub Pre-release（`1.6.6-test-11230919`） | 源码 `2d99f75` 打标 `v1.6.6-test-11230919-build26` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build24` 归档，通过 `395` 测与 Lint `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-23 09:26:36 +08:00 | 完成批次 C (`C1~C4`) 离线修复与单 A 版验证（`1.6.6-test-11230919`） | 回放异步扫盘加加载态、滤隐藏/回收站与内存 Set O(1) 判锁、每组 1 张已录主路代表图含限流负缓存、回看/设置安全手动清理碎片；`verify.ps1` `395` 测与 Lint `0` errors 通过 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-23 01:53:49 +08:00 | 完成批次 B (`B1~B3`) 离线修复与单 A 版验证（`1.6.6-test-11230150`） | 消 Mode A 双绑定/`200ms` 匿名重建/`onClosed` 错清，修 `-16` 延迟移除且不污染主通道不断录，加三保险 R 挡/AVM 避让与 Mode A `View.GONE`；`verify.ps1` `389` 测与 Lint `0` errors 通过 | [性能优化清单](tasks/optimize-recording-preview-perf.md)
