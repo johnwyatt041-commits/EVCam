@@ -302,6 +302,28 @@
                 <data android:scheme="package" />
             </intent-filter>
         </receiver>
+
+        <!-- 外部显式广播快捷控制接收器（目标包名 com.kooo.evcam，零后台占用） -->
+        <receiver
+            android:name=".external.ExternalCommandReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.kooo.evcam.action.TOGGLE_FOREGROUND" />
+                <action android:name="com.kooo.evcam.action.MOVE_TO_FOREGROUND" />
+                <action android:name="com.kooo.evcam.action.MOVE_TO_BACKGROUND" />
+                <action android:name="com.kooo.evcam.action.TOGGLE_RECORDING" />
+                <action android:name="com.kooo.evcam.action.START_RECORDING" />
+                <action android:name="com.kooo.evcam.action.STOP_RECORDING" />
+                <action android:name="com.kooo.evcam.action.TAKE_PHOTO" />
+                <action android:name="com.kooo.evcam.action.OPEN_PREVIEW_MODE_A" />
+                <action android:name="com.kooo.evcam.action.OPEN_PREVIEW_MODE_B" />
+                <action android:name="com.kooo.evcam.action.OPEN_PREVIEW_MODE_C" />
+                <action android:name="com.kooo.evcam.action.OPEN_PREVIEW_MODE_D" />
+                <action android:name="com.kooo.evcam.action.OPEN_PREVIEW_MODE_E" />
+                <action android:name="com.kooo.evcam.action.SWITCH_PREVIEW_MODE" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

@@ -177,6 +177,8 @@ public class MainActivity extends AppCompatActivity implements
     private boolean suppressKeepCameraOnPauseOnce = false; // 规则动作 STOP_RELEASE / EXIT_APP 显式释放摄像头一次
     private boolean closeCamerasOnRecordingStopped = false; // 停录完成回调中关闭空闲摄像头
     private Runnable automationStartRecordingRunnable;
+    private final android.os.Handler externalCommandHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+    private Runnable externalPhotoReturnRunnable;
     private androidx.appcompat.app.AlertDialog doorExitConfirmDialog;
     private Runnable doorExitCountdownRunnable;
     
@@ -427,8 +429,12 @@ public class MainActivity extends AppCompatActivity implements
         boolean autoStartRecording = getIntent().getBooleanExtra("auto_start_recording", false);
         boolean launchedForVehicleAction = getIntent() != null
                 && getIntent().hasExtra(WakeUpHelper.EXTRA_VEHICLE_ACTION);
+        boolean launchedForExternalCommand = getIntent() != null
+                && com.kooo.evcam.external.ExternalCommandContract.shouldSkipStartupPageOverrides(
+                getIntent().getStringExtra(com.kooo.evcam.external.ExternalCommandContract.EXTRA_EXTERNAL_COMMAND));
         if (savedInstanceState == null && !autoStartFromBoot && !autoStartRecording
-                && !appConfig.isAutoStartRecording() && !launchedForVehicleAction) {
+                && !appConfig.isAutoStartRecording() && !launchedForVehicleAction
+                && !launchedForExternalCommand) {
             applyDefaultStartPage();
             applyStartupPreviewPresentation();
         }
@@ -513,6 +519,7 @@ public class MainActivity extends AppCompatActivity implements
             CameraForegroundService.start(this, "EVCam", "车辆信号与后台保活运行中");
         }
         handleVehicleActionFromIntent(getIntent());
+        handleExternalCommandFromIntent(getIntent());
     }
 
     @Override
@@ -524,6 +531,7 @@ public class MainActivity extends AppCompatActivity implements
         // 处理远程命令
         handleRemoteCommandFromIntent(intent);
         handleVehicleActionFromIntent(intent);
+        handleExternalCommandFromIntent(intent);
 
         // 处理从录制悬浮按钮启动（需要自动开始录制）
         boolean autoStartRecording = intent.getBooleanExtra("auto_start_recording", false);
@@ -2055,6 +2063,148 @@ public class MainActivity extends AppCompatActivity implements
         }
     }
 
+    public boolean isOnRecordingSection() {
+        return uiShell == null || uiShell.getCurrentRoot() == R.id.nav_recording;
+    }
+
+    public boolean isMainPreviewCurrentlyEnabled() {
+        return appConfig != null && appConfig.isMainPreviewEnabled();
+    }
+
+    @NonNull
+    public com.kooo.evcam.ui.PreviewMode getCurrentPreviewMode() {
+        if (previewModeController != null) {
+            return previewModeController.getCurrentPreviewMode();
+        }
+        return com.kooo.evcam.ui.PreviewMode.fromKey(appConfig != null ? appConfig.getPreviewMode() : null);
+    }
+
+    public boolean isAnyRecordingActive() {
+        return shouldShortCircuitStartRecordingIntent(
+                isRecording,
+                isRemoteRecording,
+                isPreparingRecording,
+                cameraManager != null && cameraManager.isRecording());
+    }
+
+    public boolean hasAvailableCamerasForExternalCommand() {
+        return cameraManager != null && cameraManager.hasAvailableCameras();
+    }
+
+    private void cancelPendingExternalPhotoReturn() {
+        if (externalPhotoReturnRunnable != null) {
+            externalCommandHandler.removeCallbacks(externalPhotoReturnRunnable);
+            externalPhotoReturnRunnable = null;
+        }
+    }
+
+    private void handleExternalCommandFromIntent(@androidx.annotation.Nullable Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        String command = intent.getStringExtra(
+                com.kooo.evcam.external.ExternalCommandContract.EXTRA_EXTERNAL_COMMAND);
+        if (command == null || command.isEmpty()) {
+            return;
+        }
+        String modeKey = intent.getStringExtra(
+                com.kooo.evcam.external.ExternalCommandContract.EXTRA_PREVIEW_MODE);
+        boolean returnBg = intent.getBooleanExtra(
+                com.kooo.evcam.external.ExternalCommandContract.EXTRA_RETURN_TO_BACKGROUND_AFTER_PHOTO,
+                false);
+        intent.removeExtra(com.kooo.evcam.external.ExternalCommandContract.EXTRA_EXTERNAL_COMMAND);
+        intent.removeExtra(com.kooo.evcam.external.ExternalCommandContract.EXTRA_PREVIEW_MODE);
+        intent.removeExtra(com.kooo.evcam.external.ExternalCommandContract.EXTRA_RETURN_TO_BACKGROUND_AFTER_PHOTO);
+
+        if (com.kooo.evcam.external.ExternalCommandContract.CMD_OPEN_PREVIEW_MODE.equals(command)) {
+            com.kooo.evcam.ui.PreviewMode mode =
+                    com.kooo.evcam.external.ExternalCommandContract.parsePreviewModeExtra(modeKey);
+            if (mode != null) {
+                handleExternalPreviewModeCommand(mode);
+            }
+        } else if (com.kooo.evcam.external.ExternalCommandContract.CMD_TAKE_PHOTO.equals(command)) {
+            handleExternalTakePhotoCommand(returnBg);
+        }
+    }
+
+    public void handleExternalPreviewModeCommand(@NonNull com.kooo.evcam.ui.PreviewMode targetMode) {
+        cancelPendingExternalPhotoReturn();
+        com.kooo.evcam.vehicle.VehicleAutomationCoordinator.getInstance().notifyUserInteraction();
+        if (previewEditor != null && previewEditor.isEditing()) {
+            Toast.makeText(this, "请先保存或取消布局编辑", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        if (uiShell != null && uiShell.getCurrentRoot() != R.id.nav_recording) {
+            showRecordingInterface();
+        }
+        if (appConfig != null && !appConfig.isMainPreviewEnabled()) {
+            setMainPreviewEnabled(true);
+        }
+        if (previewModeController != null) {
+            previewModeController.setPreviewMode(targetMode);
+        }
+    }
+
+    public void handleExternalStartRecordingCommand() {
+        if (isAnyRecordingActive()) {
+            AppLog.d(TAG, "外部广播开始录制跳过：已在录制中");
+            return;
+        }
+        isManuallyStoppedRecording = false;
+        if (cameraManager != null && !cameraManager.hasAvailableCameras()) {
+            cameraManager.openAllCameras();
+            externalCommandHandler.postDelayed(() -> {
+                if (!isFinishing() && !isDestroyed() && !isAnyRecordingActive()) {
+                    startRecording(false);
+                }
+            }, 1500);
+        } else {
+            startRecording(false);
+        }
+    }
+
+    public void handleExternalStopRecordingCommand() {
+        if (!isAnyRecordingActive()) {
+            AppLog.d(TAG, "外部广播停止录制跳过：当前未在录制");
+            return;
+        }
+        isManuallyStoppedRecording = true;
+        wasRecordingBeforeScreenOff = false;
+        stopRecording();
+    }
+
+    public void handleExternalTakePhotoCommand(boolean returnToBackgroundAfter) {
+        cancelPendingExternalPhotoReturn();
+        if (returnToBackgroundAfter && !isOnRecordingSection()) {
+            showRecordingInterface();
+        }
+        Runnable captureTask = () -> {
+            if (isFinishing() || isDestroyed()) {
+                return;
+            }
+            takePicture();
+            if (returnToBackgroundAfter) {
+                externalPhotoReturnRunnable = () -> {
+                    externalPhotoReturnRunnable = null;
+                    if (!isFinishing() && !isDestroyed() && !isInBackground) {
+                        WakeUpHelper.releaseWakeLock();
+                        com.kooo.evcam.lifecycle.AppExitCoordinator.moveUiToBackground(MainActivity.this);
+                    }
+                };
+                externalCommandHandler.postDelayed(externalPhotoReturnRunnable, 1500L);
+            }
+        };
+        if (cameraManager != null && cameraManager.hasAvailableCameras()
+                && hasBeenResumedOnce && !isInBackground) {
+            captureTask.run();
+        } else {
+            if (cameraManager != null && !cameraManager.hasAvailableCameras()) {
+                cameraManager.openAllCameras();
+            }
+            externalCommandHandler.postDelayed(captureTask, hasBeenResumedOnce ? 1500L : 2500L);
+        }
+    }
+
     private void showDoorExitConfirmationDialog(int delaySeconds, @NonNull Runnable onConfirmExit) {
         if (isFinishing() || isDestroyed()) {
             return;
@@ -3423,7 +3573,7 @@ public class MainActivity extends AppCompatActivity implements
             @Override
             public void onReceive(android.content.Context context, android.content.Intent intent) {
                 String action = intent.getAction();
-                if ("com.kooo.evcam.action.TOGGLE_RECORDING".equals(action)) {
+                if (com.kooo.evcam.service.RecordingFloatingService.ACTION_INTERNAL_TOGGLE_RECORDING.equals(action)) {
                     AppLog.d(TAG, "收到录制切换广播（来自悬浮窗）");
                     // 在主线程执行录制切换
                     runOnUiThread(() -> {
@@ -3434,7 +3584,7 @@ public class MainActivity extends AppCompatActivity implements
         };
         
         android.content.IntentFilter filter = new android.content.IntentFilter();
-        filter.addAction("com.kooo.evcam.action.TOGGLE_RECORDING");
+        filter.addAction(com.kooo.evcam.service.RecordingFloatingService.ACTION_INTERNAL_TOGGLE_RECORDING);
         ContextCompat.registerReceiver(this, toggleRecordingReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
         
         AppLog.d(TAG, "录制切换广播接收器已注册");
@@ -4638,6 +4788,8 @@ public class MainActivity extends AppCompatActivity implements
 
     @Override
     protected void onDestroy() {
+        externalCommandHandler.removeCallbacksAndMessages(null);
+        externalPhotoReturnRunnable = null;
         dismissDoorExitConfirmationDialog();
         if (reopenCameraHandler != null && automationStartRecordingRunnable != null) {
             reopenCameraHandler.removeCallbacks(automationStartRecordingRunnable);

@@ -56,6 +56,7 @@ public class RecordingFloatingService extends Service {
     public static final String ACTION_SHOW = "com.kooo.evcam.action.SHOW_RECORDING_FLOATING";
     public static final String ACTION_HIDE = "com.kooo.evcam.action.HIDE_RECORDING_FLOATING";
     public static final String ACTION_UPDATE_SIZE = "com.kooo.evcam.action.UPDATE_RECORDING_FLOATING_SIZE";
+    public static final String ACTION_INTERNAL_TOGGLE_RECORDING = "com.kooo.evcam.internal.TOGGLE_RECORDING";
 
     public static final String EXTRA_BUTTON_SIZE = "button_size";
     public static final String EXTRA_TEXT_SIZE = "text_size";
@@ -590,7 +591,7 @@ public class RecordingFloatingService extends Service {
             case FOREGROUND:
                 // 应用在前台，通过 MainActivity 停止录制
                 AppLog.d(TAG, "App is in foreground, sending stop recording broadcast to MainActivity");
-                Intent stopIntent = new Intent("com.kooo.evcam.action.TOGGLE_RECORDING");
+                Intent stopIntent = new Intent(ACTION_INTERNAL_TOGGLE_RECORDING);
                 stopIntent.setPackage(getPackageName());
                 sendBroadcast(stopIntent);
                 return;
