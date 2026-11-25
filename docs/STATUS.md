@@ -1,21 +1,21 @@
 # 项目进度
 
-最后更新/核对：2026-11-26 00:57:10 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；即将提交并封包发布**原车 360/AVM 显示闪屏修复** `build28` / `1.6.6-test-11260052` / `versionCode = 88`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-26 01:08:30 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已提交并封包发布**原车 360/AVM 显示闪屏修复** `build28` / `1.6.6-test-11260052` / `versionCode = 88`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix` 即将提交**原车 360/AVM 闪屏修复**（`1.6.6-test-11260052` / `build28`） |
-| 本地交付 | `outputs/` 顶层保留 **`build26`** + **`build27`**（准备归档 `build26` 并封包 `build28`） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11231552-build27`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11231552-build27)（5 资产远端 SHA256 核验一致） |
+| 分支与提交 | `codex/e5-recording-startup-fix` 最新源码 `f8c1ac3`（**原车 360/AVM 闪屏修复** `1.6.6-test-11260052` / `build28`，含本发布记录提交） |
+| 本地交付 | `outputs/` 顶层保留 **`build27`** + **`build28`**（已归档 `build26` 至 `outputs/archive/`） |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11260052-build28`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11260052-build28)（5 资产远端 SHA256 核验一致） |
 | 离线与设备验证 | **当前工作区已过单 A 离线验证**（`.\tools\verify.ps1` `407` 测 `0` 败/错/跳 + Debug/Release + `:app:lintIndependentDebug` `0` errors / `2244` warnings）；待实车实测 |
 | 实车状态 | 待在银河 E5 实车验证原车 360 闪屏修复、按钮广播与批次 A/B/C，并顺便抓回放 Wi-Fi 分享网卡日志 |
 
 ## 当前结论与确认边界
 
-- **原车 360/AVM 显示闪屏修复已离线完成（`1.6.6-test-11260052` / `versionCode = 88`，待实车验证）**：详见 [原车 360 闪屏修复任务](tasks/fix-native-360-avm-screen-flicker.md)（补齐无障碍窗口实时推送、后台持续 AVM 巡检、`FloatingWindowService` 立即卸载替代 `GONE`、修 450ms/1000ms 竞态与 OEM 多包名识别、`StandalonePreviewWindow` 倒挡/360 避让；通过 `407` 测与 Lint `0` errors）。
+- **原车 360/AVM 显示闪屏修复已发布 `build28` GitHub Pre-release（`1.6.6-test-11260052` / `f8c1ac3`，待实车验证）**：详见 [原车 360 闪屏修复任务](tasks/fix-native-360-avm-screen-flicker.md)（补齐无障碍窗口实时推送、后台持续 AVM 巡检、`FloatingWindowService` 立即卸载替代 `GONE`、修 450ms/1000ms 竞态与 OEM 多包名识别、`StandalonePreviewWindow` 倒挡/360 避让；APK `EVCam-E5-A-Independent-1.6.6-test-11260052-build28-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `407` 测与 Lint `0` errors）。
 - **外部显式广播快捷控制已发布 `build27` GitHub Pre-release（`1.6.6-test-11231552` / `0bb9b04`），待实车验证**：详见 [外部广播快捷控制任务](tasks/add-external-broadcast-control.md)（13 个显式广播，包名 `com.kooo.evcam`，零常驻后台占用；APK `EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `405` 测与 Lint `0` errors）。
 - **`build26`（批次 A/B/C）已封包发布并推送 GitHub Pre-release，待实车验证**：详见 [录像与预览性能优化任务](tasks/optimize-recording-preview-perf.md)（源码 `2d99f75` 打标 `v1.6.6-test-11230919-build26`，单 A 版 `5` 资产远端 SHA256 一致；通过 `395` 测与 Lint `0` errors）。
 - **U 盘手动写入速度检测已离线完成**：详见 [U 盘速度检测任务](tasks/add-usb-speed-test.md)（通过 `FileChannel.force(true)` 测算均速与最低分块速度，评估直写或中转写入要求）。
@@ -33,7 +33,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-26 00:57:10 +08:00 | 完成原车 360/AVM 显示闪屏修复并加入回放网卡对齐待办（`1.6.6-test-11260052` / `versionCode = 88`） | 补齐实时窗口推送、后台持续巡检、浮窗立即卸载、OEM 多包名识别与独立预览避让；`verify.ps1` `407` 测、Lint `0` errors 与 APK 校验通过 | [360闪屏修复](tasks/fix-native-360-avm-screen-flicker.md)
+- 2026-11-26 01:08:30 +08:00 | 封包发布 build28 并推送 GitHub Pre-release（`1.6.6-test-11260052`） | 源码 `f8c1ac3` 打标 `v1.6.6-test-11260052-build28` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build26` 归档，通过 `407` 测与 Lint `0` errors | [360闪屏修复](tasks/fix-native-360-avm-screen-flicker.md)
 - 2026-11-23 16:14:36 +08:00 | 封包发布 build27 并推送 GitHub Pre-release（`1.6.6-test-11231552`） | 源码 `0bb9b04` 打标 `v1.6.6-test-11231552-build27` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build25` 归档，通过 `405` 测与 Lint `0` errors | [外部广播控制](tasks/add-external-broadcast-control.md)
 - 2026-11-23 10:39:05 +08:00 | 封包发布 build26 并推送 GitHub Pre-release（`1.6.6-test-11230919`） | 源码 `2d99f75` 打标 `v1.6.6-test-11230919-build26` 推送，单 A 版 `5` 资产远端 SHA256 一致、`build24` 归档，通过 `395` 测与 Lint `0` errors | [性能优化清单](tasks/optimize-recording-preview-perf.md)
 - 2026-11-23 09:26:36 +08:00 | 完成批次 C (`C1~C4`) 离线修复与单 A 版验证（`1.6.6-test-11230919`） | 回放异步扫盘加加载态、滤隐藏/回收站与内存 Set O(1) 判锁、每组 1 张已录主路代表图含限流负缓存、回看/设置安全手动清理碎片；`verify.ps1` `395` 测与 Lint `0` errors 通过 | [性能优化清单](tasks/optimize-recording-preview-perf.md)

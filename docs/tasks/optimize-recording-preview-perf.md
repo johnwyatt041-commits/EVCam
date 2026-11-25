@@ -27,7 +27,7 @@
 
 ## 最近记录
 
-- 2026-11-23 10:39:05 +08:00 | 封包发布 `build26` 至 GitHub Pre-release（`2d99f75` / `1.6.6-test-11230919`） | 单 A 版 `5` 资产远端 SHA256 核验一致、`build24` 归档，含批次 A/B/C 修复与 `395` 测及 Lint `0` errors | [notes](../../outputs/EVCam-E5-build26-1.6.6-test-11230919-notes.md)
+- 2026-11-23 10:39:05 +08:00 | 封包发布 `build26` 至 GitHub Pre-release（`2d99f75` / `1.6.6-test-11230919`） | 单 A 版 `5` 资产远端 SHA256 核验一致、`build24` 归档，含批次 A/B/C 修复与 `395` 测及 Lint `0` errors | [notes](../../outputs/archive/EVCam-E5-build26-1.6.6-test-11230919-notes.md)
 - 2026-11-23 09:26:36 +08:00 | 完成批次 C (`C1~C4`) 离线修复与单 A 版验证（`1.6.6-test-11230919`） | 异步扫盘加载态、滤隐藏/回收站与内存 Set O(1) 判锁、每组 1 张已录主路缩略图含限流负缓存、双入口安全清理碎片；`verify.ps1` `395` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
 - 2026-11-23 01:53:49 +08:00 | 完成批次 B (`B1~B3`) 离线修复与单 A 版验证（`1.6.6-test-11230150`） | 修 Mode A 双绑定/`200ms` 重建/`onClosed` 错清、`-16` 延迟移除不断录、三保险 R 挡/AVM 避让；`verify.ps1` `389` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
 - 2026-11-23 01:28:05 +08:00 | 完成批次 A (`A1~A4`) 离线修复与单 A 版验证（`1.6.6-test-11230123`） | 修 `start_recording` 短路、规则保留、VHAL `stopAsync` 静默、直连帧数日志；`verify.ps1` `380` 测与 Lint `0` errors 通过 | [STATUS.md](../STATUS.md)
