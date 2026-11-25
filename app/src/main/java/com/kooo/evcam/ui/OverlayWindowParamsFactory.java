@@ -163,9 +163,13 @@ public final class OverlayWindowParamsFactory {
             attached = false;
             if (activeWm != null) {
                 try {
-                    activeWm.removeView(view);
+                    activeWm.removeViewImmediate(view);
                 } catch (Exception e) {
-                    AppLog.w(TAG, "移除悬浮窗失败: " + e.getMessage());
+                    try {
+                        activeWm.removeView(view);
+                    } catch (Exception e2) {
+                        AppLog.w(TAG, "移除悬浮窗失败: " + e2.getMessage());
+                    }
                 }
             }
         }

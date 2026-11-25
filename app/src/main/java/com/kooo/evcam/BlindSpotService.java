@@ -39,6 +39,7 @@ import com.kooo.evcam.blindspot.BlindSpotPlacement;
 import com.kooo.evcam.blindspot.MirrorTarget;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
+import com.kooo.evcam.service.AvmForegroundDetector;
 import com.kooo.evcam.ui.OverlayWindowParamsFactory;
 import com.kooo.evcam.ui.StandalonePreviewWindow;
 
@@ -98,15 +99,50 @@ public class BlindSpotService extends Service {
     private DisplayManager displayManager;
 
     // 全景影像避让
+    private final AvmForegroundDetector avmForegroundDetector = new AvmForegroundDetector();
     private Runnable avmCheckRunnable;
-    private long avmEventQueryEndMs;
-    private String cachedAvmActivity;
-    private boolean cachedAvmForeground;
     private boolean isAvmAvoidanceActive = false; // 当前是否处于避让状态（AVM或自身前台）
     private int avmDeactivateCount = 0; // 连续未检测到AVM前台的次数（去抖）
     private static final int AVM_DEACTIVATE_THRESHOLD = 2; // 连续2次（2秒）未检测到才解除避让
     private static final long AVM_CHECK_INTERVAL_MS = 1000; // 前台检测轮询间隔
     private static volatile boolean isSelfInForeground = false; // EVCam自身Activity是否在前台（生命周期驱动）
+    private final KeepAliveAccessibilityService.ForegroundWindowListener foregroundWindowListener = (pkg, cls) -> {
+        if (isServiceDestroyed) {
+            return;
+        }
+        hideHandler.post(() -> {
+            if (isServiceDestroyed || appConfig == null
+                    || !appConfig.isBlindSpotGlobalEnabled()
+                    || !appConfig.isAvmAvoidanceEnabled()
+                    || isSelfInForeground) {
+                return;
+            }
+            String target = appConfig.getAvmAvoidanceActivity();
+            if (target == null || target.trim().isEmpty()
+                    || BlindSpotCoordinator.isAvmAvoidanceAllMode(true, target)) {
+                return;
+            }
+            boolean hasActiveFeature = BlindSpotCoordinator.hasActiveAvmAvoidanceFeature(
+                    true,
+                    true,
+                    appConfig.isMainFloatingEnabled(),
+                    appConfig.isTurnSignalLinkageEnabled(),
+                    appConfig.isMainBlindSpotEnabled());
+            if (!hasActiveFeature) {
+                return;
+            }
+            if (avmForegroundDetector.onAccessibilityWindowEvent(target, pkg, cls)) {
+                avmDeactivateCount = 0;
+                if (!isAvmAvoidanceActive) {
+                    isAvmAvoidanceActive = true;
+                    AppLog.i(TAG, "全景影像避让（实时窗口变化）：隐藏主屏补盲窗口");
+                    reconcileSuppressionTransition("avmAccEnter");
+                }
+            } else if (isAvmAvoidanceActive) {
+                checkAvmForeground();
+            }
+        });
+    };
 
     /** MainActivity.onResume 时调用 */
     public static void notifySelfForeground() {
@@ -199,6 +235,7 @@ public class BlindSpotService extends Service {
         displayManager = (DisplayManager) getSystemService(Context.DISPLAY_SERVICE);
         syncSuppressionConfig();
         initSignalObserver();
+        KeepAliveAccessibilityService.registerForegroundWindowListener(foregroundWindowListener);
         syncAvmAvoidanceState("onCreate", false);
 
         // 按需延迟预创建主屏补盲窗口（非纯副屏/非复用/非all模式时才触发）
@@ -1732,9 +1769,7 @@ public class BlindSpotService extends Service {
     }
 
     private void stopAvmPollingOnly() {
-        avmEventQueryEndMs = 0;
-        cachedAvmActivity = null;
-        cachedAvmForeground = false;
+        avmForegroundDetector.reset();
         avmDeactivateCount = 0;
         if (avmCheckRunnable != null) {
             hideHandler.removeCallbacks(avmCheckRunnable);
@@ -1790,39 +1825,10 @@ public class BlindSpotService extends Service {
     }
 
     /**
-     * 检测指定Activity（完整类名）是否在前台
-     * 使用 UsageEvents 精确到 Activity 级别（需 PACKAGE_USAGE_STATS 权限）
-     * 首次查询最近5分钟，之后只读取增量事件并保留前后台状态。
+     * 检测指定全景影像目标是否在前台（统一委托给 AvmForegroundDetector：无障碍优先 + UsageEvents 增量追踪）
      */
     private boolean isActivityInForeground(String activityClassName) {
-        long now = System.currentTimeMillis();
-        boolean reset = !activityClassName.equals(cachedAvmActivity) || now < avmEventQueryEndMs;
-        if (reset) {
-            cachedAvmActivity = activityClassName;
-            cachedAvmForeground = false;
-            avmEventQueryEndMs = 0;
-        }
-        long from = avmEventQueryEndMs == 0 ? now - 300000 : Math.max(0, avmEventQueryEndMs - 1);
-        try {
-            UsageStatsManager usm = (UsageStatsManager) getSystemService(Context.USAGE_STATS_SERVICE);
-            if (usm == null) return cachedAvmForeground;
-            android.app.usage.UsageEvents events = usm.queryEvents(from, now);
-            if (events == null) return cachedAvmForeground;
-            android.app.usage.UsageEvents.Event event = new android.app.usage.UsageEvents.Event();
-            while (events.hasNextEvent()) {
-                events.getNextEvent(event);
-                if (!activityClassName.equals(event.getClassName())) continue;
-                if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_FOREGROUND) {
-                    cachedAvmForeground = true;
-                } else if (event.getEventType() == android.app.usage.UsageEvents.Event.MOVE_TO_BACKGROUND) {
-                    cachedAvmForeground = false;
-                }
-            }
-            avmEventQueryEndMs = now;
-        } catch (Exception e) {
-            AppLog.w(TAG, "Foreground event query failed", e);
-        }
-        return cachedAvmForeground;
+        return avmForegroundDetector.isAvmInForeground(this, activityClassName);
     }
 
     /**
@@ -1866,8 +1872,10 @@ public class BlindSpotService extends Service {
     @Override
     public void onDestroy() {
         isServiceDestroyed = true;
+        KeepAliveAccessibilityService.unregisterForegroundWindowListener(foregroundWindowListener);
         stopSignalObservers();
         stopAvmAvoidance();
+        avmForegroundDetector.reset();
         clearPreCreatedWindows();
         if (hideRunnable != null) {
             hideHandler.removeCallbacks(hideRunnable);

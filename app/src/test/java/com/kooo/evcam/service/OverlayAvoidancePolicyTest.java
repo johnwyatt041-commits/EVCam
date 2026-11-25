@@ -133,5 +133,65 @@ public class OverlayAvoidancePolicyTest {
         assertFalse(OverlayAvoidancePolicy.shouldPollAvmExit(true, true, true, false));
         assertFalse(OverlayAvoidancePolicy.shouldPollAvmExit(true, false, false, false));
         assertFalse(OverlayAvoidancePolicy.shouldPollAvmExit(true, false, true, true));
+
+        // Continuous AVM watch runs whenever background wanted, app not foreground, and not in R gear.
+        assertTrue(OverlayAvoidancePolicy.shouldWatchAvmForeground(true, false, false));
+        assertFalse(OverlayAvoidancePolicy.shouldWatchAvmForeground(false, false, false));
+        assertFalse(OverlayAvoidancePolicy.shouldWatchAvmForeground(true, true, false));
+        assertFalse(OverlayAvoidancePolicy.shouldWatchAvmForeground(true, false, true));
+    }
+
+    @Test
+    public void matchesOemGeelyEcarxFlymeAvmAndApaVariantsWhileRejectingSelfAndOrdinaryApps() {
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.ecarx.avm", "com.ecarx.avm.MainActivity"));
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.geely.apa_app", "com.geely.apa_app.ApaActivity"));
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.flyme.auto.panoramic", "com.flyme.auto.panoramic.PanoramicActivity"));
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                "com.geely.avm_app.AvmRenderActivity",
+                "com.lynkco.surround360",
+                "com.lynkco.surround360.SurroundActivity"));
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.zeekr.apa", "com.zeekr.apa.ParkingCameraActivity"));
+        assertTrue(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, OverlayAvoidancePolicy.SYSTEM_UI_PACKAGE, "com.android.systemui.avm.AvmDialog"));
+
+        // Must NOT match normal SystemUI windows, EVCam itself, or ordinary OEM launcher/settings/map apps.
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, OverlayAvoidancePolicy.SYSTEM_UI_PACKAGE, "com.android.systemui.VolumeDialog"));
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, OverlayAvoidancePolicy.SELF_PACKAGE, "com.kooo.evcam.MainActivity"));
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                "all", OverlayAvoidancePolicy.SELF_PACKAGE, "com.kooo.evcam.MainActivity"));
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.flyme.auto.launcher", "com.flyme.auto.launcher.Launcher"));
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.geely.hmi.settings", "com.geely.hmi.settings.SettingsActivity"));
+        assertFalse(OverlayAvoidancePolicy.matchesAvmTarget(
+                null, "com.autonavi.amapauto", "com.autonavi.amapauto.MainMapActivity"));
+    }
+
+    @Test
+    public void avmForegroundDetectorTracksAccessibilityWindowEventsWithoutStaleSelfShortCircuit() {
+        AvmForegroundDetector detector = new AvmForegroundDetector();
+        String target = OverlayAvoidancePolicy.DEFAULT_AVM_ACTIVITY;
+
+        // 1. Stale self package after backgrounding must not force false if AVM enters next.
+        assertFalse(detector.onAccessibilityWindowEvent(target, OverlayAvoidancePolicy.SELF_PACKAGE, "com.kooo.evcam.MainActivity"));
+        assertTrue(detector.onAccessibilityWindowEvent(target, "com.geely.avm_app", "com.geely.avm_app.AvmRenderActivity"));
+
+        // 2. Transient SystemUI or stale self event does not drop active AVM state.
+        assertTrue(detector.onAccessibilityWindowEvent(target, OverlayAvoidancePolicy.SYSTEM_UI_PACKAGE, "com.android.systemui.VolumeDialog"));
+        assertTrue(detector.onAccessibilityWindowEvent(target, OverlayAvoidancePolicy.SELF_PACKAGE, "com.kooo.evcam.MainActivity"));
+
+        // 3. Switching to Launcher / Map clears AVM foreground state.
+        assertFalse(detector.onAccessibilityWindowEvent(target, "com.flyme.auto.launcher", "com.flyme.auto.launcher.Launcher"));
+
+        // 4. Re-entering OEM AVM from background immediately triggers true.
+        assertTrue(detector.onAccessibilityWindowEvent(target, "com.ecarx.panoramic", "com.ecarx.panoramic.AvmActivity"));
+        detector.reset();
+        assertFalse(detector.onAccessibilityWindowEvent(target, OverlayAvoidancePolicy.SYSTEM_UI_PACKAGE, "com.android.systemui.StatusBar"));
     }
 }

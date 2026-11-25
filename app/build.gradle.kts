@@ -20,8 +20,8 @@ android {
         applicationId = "com.kooo.evcam"
         minSdk = 28
         targetSdk = 36
-        versionCode = 87
-        versionName = "1.6.6-test-11231552"
+        versionCode = 88
+        versionName = "1.6.6-test-11260052"
         buildConfigField("boolean", "RECORDING_COMPARISON", "true")
 
 

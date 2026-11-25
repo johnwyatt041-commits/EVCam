@@ -72,7 +72,7 @@ public class FloatingWindowService extends Service {
     private BroadcastReceiver foregroundStateReceiver;
     
     // 悬浮窗显示状态
-    private boolean isFloatingWindowVisible = true;
+    private boolean isFloatingWindowVisible = false;
     private final AvmForegroundDetector avmForegroundDetector = new AvmForegroundDetector();
     private volatile boolean isServiceDestroyed = false;
     private boolean appInForeground = false;
@@ -90,6 +90,19 @@ public class FloatingWindowService extends Service {
             avmForeground = avmForegroundDetector.isAvmInForeground(FloatingWindowService.this, target);
             reconcileFloatingVisibility("avm_poll");
         }
+    };
+    private final KeepAliveAccessibilityService.ForegroundWindowListener foregroundWindowListener = (pkg, cls) -> {
+        if (isServiceDestroyed || blinkHandler == null) {
+            return;
+        }
+        blinkHandler.post(() -> {
+            if (isServiceDestroyed || appInForeground || inReverseGear) {
+                return;
+            }
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.onAccessibilityWindowEvent(target, pkg, cls);
+            reconcileFloatingVisibility("acc_window");
+        });
     };
     private final VehicleSignalHub.Listener vehicleSignalListener = snapshot -> {
         if (isServiceDestroyed || blinkHandler == null) {
@@ -119,8 +132,9 @@ public class FloatingWindowService extends Service {
         avmForeground = !appInForeground && !inReverseGear
                 && avmForegroundDetector.isAvmInForeground(this, appConfig.getAvmAvoidanceActivity());
         VehicleSignalHub.getInstance().addListener(vehicleSignalListener);
-        
-        // 创建悬浮窗
+        KeepAliveAccessibilityService.registerForegroundWindowListener(foregroundWindowListener);
+
+        // 准备悬浮窗视图并按避让策略决定是否挂载
         createFloatingWindow();
         reconcileFloatingVisibility("create");
         
@@ -159,6 +173,7 @@ public class FloatingWindowService extends Service {
         isServiceRunning = false;
         cancelPendingAvoidanceCallbacks();
         VehicleSignalHub.getInstance().removeListener(vehicleSignalListener);
+        KeepAliveAccessibilityService.unregisterForegroundWindowListener(foregroundWindowListener);
         avmForegroundDetector.reset();
         
         // 保存当前位置
@@ -301,20 +316,9 @@ public class FloatingWindowService extends Service {
             }
         });
         
-        boolean initialSuppressed = OverlayAvoidancePolicy.shouldSuppressMainOverlay(
-                appInForeground, inReverseGear, avmForeground);
-        floatingView.setVisibility(initialSuppressed ? View.GONE : View.VISIBLE);
-        isFloatingWindowVisible = !initialSuppressed;
-
-        // 添加到窗口
-        attachedOverlay = OverlayWindowParamsFactory.attachLightweightMainOverlay(
-                this, windowManager, floatingView, layoutParams, this::stopSelf);
-        if (attachedOverlay == null) {
-            AppLog.e(TAG, "添加悬浮窗失败");
-            stopSelf();
-        } else {
-            AppLog.d(TAG, "悬浮窗创建成功，大小: " + sizePx + "px, 透明度: " + alpha + "%");
-        }
+        floatingView.setVisibility(View.VISIBLE);
+        isFloatingWindowVisible = false;
+        AppLog.d(TAG, "悬浮窗视图已准备，大小: " + sizePx + "px, 透明度: " + alpha + "%");
     }
     
     /**
@@ -428,53 +432,68 @@ public class FloatingWindowService extends Service {
             if (blinkHandler != null) {
                 blinkHandler.removeCallbacks(deferredShowRunnable);
             }
-            if (isFloatingWindowVisible) {
+            if (isFloatingWindowVisible || attachedOverlay != null) {
                 AppLog.d(TAG, "避让隐藏悬浮窗 (reason=" + reason
                         + ", appFg=" + appInForeground + ", reverse=" + inReverseGear + ", avm=" + avmForeground + ")");
             }
             hideFloatingWindow();
-            if (blinkHandler != null) {
-                if (OverlayAvoidancePolicy.shouldPollAvmExit(true, appInForeground, avmForeground, inReverseGear)) {
-                    blinkHandler.removeCallbacks(avmRecheckRunnable);
-                    blinkHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
-                } else {
-                    blinkHandler.removeCallbacks(avmRecheckRunnable);
-                }
-            }
-            return;
+        } else {
+            showFloatingWindow();
         }
         if (blinkHandler != null) {
             blinkHandler.removeCallbacks(avmRecheckRunnable);
+            if (OverlayAvoidancePolicy.shouldWatchAvmForeground(true, appInForeground, inReverseGear)) {
+                blinkHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
+            }
         }
-        showFloatingWindow();
     }
     
     /**
-     * 隐藏悬浮窗
+     * 隐藏悬浮窗（从 WindowManager 立即卸载，避免 360 层叠加闪屏）
      */
     private void hideFloatingWindow() {
         stopBlinkAnimation();
-        if (floatingView != null && isFloatingWindowVisible) {
-            floatingView.setVisibility(View.GONE);
-            isFloatingWindowVisible = false;
-            AppLog.d(TAG, "悬浮窗已隐藏（应用在前台或倒挡/360避让）");
+        if (layoutParams != null && appConfig != null) {
+            appConfig.setFloatingWindowPosition(layoutParams.x, layoutParams.y);
         }
+        if (attachedOverlay != null) {
+            OverlayWindowParamsFactory.detachSafely(attachedOverlay);
+            attachedOverlay = null;
+            AppLog.d(TAG, "悬浮窗已卸载（应用在前台或倒挡/360避让）");
+        }
+        isFloatingWindowVisible = false;
     }
     
     /**
      * 显示悬浮窗
      */
     private void showFloatingWindow() {
-        if (OverlayAvoidancePolicy.shouldSuppressMainOverlay(appInForeground, inReverseGear, avmForeground)) {
+        if (isServiceDestroyed
+                || OverlayAvoidancePolicy.shouldSuppressMainOverlay(appInForeground, inReverseGear, avmForeground)) {
             return;
         }
-        if (floatingView != null && !isFloatingWindowVisible) {
-            floatingView.setVisibility(View.VISIBLE);
-            isFloatingWindowVisible = true;
-            if (isRecording) {
-                startBlinkAnimation();
+        if (floatingView == null || layoutParams == null) {
+            createFloatingWindow();
+        }
+        if (floatingView == null || layoutParams == null) {
+            return;
+        }
+        if (attachedOverlay == null) {
+            attachedOverlay = OverlayWindowParamsFactory.attachLightweightMainOverlay(
+                    this, windowManager, floatingView, layoutParams, this::stopSelf);
+            if (attachedOverlay == null) {
+                AppLog.e(TAG, "添加悬浮窗失败");
+                stopSelf();
+                return;
             }
+        }
+        floatingView.setVisibility(View.VISIBLE);
+        if (!isFloatingWindowVisible) {
+            isFloatingWindowVisible = true;
             AppLog.d(TAG, "悬浮窗已显示（应用在后台）");
+        }
+        if (isRecording) {
+            startBlinkAnimation();
         }
     }
     
@@ -489,14 +508,14 @@ public class FloatingWindowService extends Service {
         isRecording = recording;
         AppLog.d(TAG, "录制状态更新: " + (recording ? "录制中" : "未录制"));
         
-        if (recording && isFloatingWindowVisible) {
+        if (recording && isFloatingWindowVisible && attachedOverlay != null) {
             startBlinkAnimation();
         } else {
             stopBlinkAnimation();
         }
         
         // 刷新视图
-        if (floatingView != null) {
+        if (floatingView != null && isFloatingWindowVisible && attachedOverlay != null) {
             floatingView.invalidate();
         }
     }
@@ -539,10 +558,13 @@ public class FloatingWindowService extends Service {
      * 更新悬浮窗（应用新设置）
      */
     private void updateFloatingWindow() {
+        stopBlinkAnimation();
         OverlayWindowParamsFactory.detachSafely(attachedOverlay);
         attachedOverlay = null;
-        
-        createFloatingWindow();
+        floatingView = null;
+        layoutParams = null;
+        isFloatingWindowVisible = false;
+
         reconcileFloatingVisibility("update");
     }
     

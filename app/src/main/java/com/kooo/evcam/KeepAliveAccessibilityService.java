@@ -38,6 +38,13 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     private static boolean isServiceRunning = false;
     private static volatile String lastForegroundPackage;
     private static volatile String lastForegroundClass;
+
+    public interface ForegroundWindowListener {
+        void onForegroundWindowChanged(String packageName, String className);
+    }
+
+    private static final java.util.concurrent.CopyOnWriteArraySet<ForegroundWindowListener> foregroundWindowListeners =
+            new java.util.concurrent.CopyOnWriteArraySet<>();
     
     private ScheduledExecutorService heartbeatExecutor;
     private long startTime;
@@ -215,9 +222,17 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
         if (event != null && event.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
             CharSequence pkg = event.getPackageName();
             if (pkg != null && pkg.length() > 0) {
-                lastForegroundPackage = pkg.toString();
+                String pkgStr = pkg.toString();
                 CharSequence cls = event.getClassName();
-                lastForegroundClass = cls != null ? cls.toString() : null;
+                String clsStr = cls != null ? cls.toString() : null;
+                boolean changed = !pkgStr.equals(lastForegroundPackage)
+                        || (clsStr != null ? !clsStr.equals(lastForegroundClass) : lastForegroundClass != null);
+                lastForegroundPackage = pkgStr;
+                lastForegroundClass = clsStr;
+                if (changed) {
+                    AppLog.d(TAG, "Foreground window changed: pkg=" + pkgStr + ", cls=" + clsStr);
+                    notifyForegroundWindowChanged(pkgStr, clsStr);
+                }
             }
         }
     }
@@ -292,6 +307,33 @@ public class KeepAliveAccessibilityService extends AccessibilityService {
     public static void unregisterDetachListener(Runnable listener) {
         if (listener != null) {
             detachListeners.remove(listener);
+        }
+    }
+
+    public static void registerForegroundWindowListener(ForegroundWindowListener listener) {
+        if (listener != null) {
+            foregroundWindowListeners.add(listener);
+        }
+    }
+
+    public static void unregisterForegroundWindowListener(ForegroundWindowListener listener) {
+        if (listener != null) {
+            foregroundWindowListeners.remove(listener);
+        }
+    }
+
+    private static void notifyForegroundWindowChanged(String pkg, String cls) {
+        if (foregroundWindowListeners.isEmpty()) {
+            return;
+        }
+        for (ForegroundWindowListener listener : foregroundWindowListeners) {
+            if (listener != null) {
+                try {
+                    listener.onForegroundWindowChanged(pkg, cls);
+                } catch (Exception e) {
+                    AppLog.w(TAG, "通知前台窗口变化回调失败: " + e.getMessage());
+                }
+            }
         }
     }
 

@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.graphics.Color;
 import android.graphics.SurfaceTexture;
+import android.os.Handler;
+import android.os.Looper;
 import android.util.DisplayMetrics;
 import android.util.Size;
 import android.view.LayoutInflater;
@@ -19,12 +21,15 @@ import android.widget.Toast;
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
 import com.kooo.evcam.BlindSpotService;
+import com.kooo.evcam.KeepAliveAccessibilityService;
 import com.kooo.evcam.MainActivity;
 import com.kooo.evcam.R;
 import com.kooo.evcam.WakeUpHelper;
 import com.kooo.evcam.camera.CameraManagerHolder;
 import com.kooo.evcam.camera.MultiCameraManager;
 import com.kooo.evcam.camera.SingleCamera;
+import com.kooo.evcam.service.OverlayAvoidancePolicy;
+import com.kooo.evcam.vehicle.VehicleSignalHub;
 
 /**
  * 4.2 独立预览悬浮窗（PreviewPresentation.WINDOW）。
@@ -52,6 +57,20 @@ public final class StandalonePreviewWindow {
     private final AppConfig appConfig;
     private final WindowManager fallbackWm;
     private final Callbacks callbacks;
+    private final Handler mainHandler = new Handler(Looper.getMainLooper());
+    private final VehicleSignalHub.Listener vehicleSignalListener = snapshot -> {
+        if (OverlayAvoidancePolicy.isReverseGear(snapshot)) {
+            dismissForAvoidanceOnMainThread();
+        }
+    };
+    private final KeepAliveAccessibilityService.ForegroundWindowListener foregroundWindowListener =
+            this::onForegroundWindowChanged;
+
+    private void onForegroundWindowChanged(String pkg, String cls) {
+        if (OverlayAvoidancePolicy.matchesAvmTarget(appConfig.getAvmAvoidanceActivity(), pkg, cls)) {
+            dismissForAvoidanceOnMainThread();
+        }
+    }
 
     private View rootView;
     private TextureView textureView;
@@ -88,6 +107,10 @@ public final class StandalonePreviewWindow {
                 && !OverlayWindowParamsFactory.shouldUseAccessibilityOverlay(context)) {
             Toast.makeText(context, "请先授予悬浮窗权限", Toast.LENGTH_SHORT).show();
             WakeUpHelper.requestOverlayPermission(context);
+            return;
+        }
+        if (OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot())) {
+            AppLog.i(TAG, "当前处于倒挡(R)，跳过打开独立预览悬浮窗以避免与原车 360 争抢显示");
             return;
         }
         String resolvedPos = normalizeCamera(cameraPosition, config.getStandaloneWindowCamera());
@@ -179,6 +202,8 @@ public final class StandalonePreviewWindow {
             return;
         }
         showing = true;
+        VehicleSignalHub.getInstance().addListener(vehicleSignalListener);
+        KeepAliveAccessibilityService.registerForegroundWindowListener(foregroundWindowListener);
         updateCameraButtonsUi();
 
         setupDrag(headerView, screenW, screenH);
@@ -401,8 +426,20 @@ public final class StandalonePreviewWindow {
         appContext.startActivity(intent);
     }
 
+    private void dismissForAvoidanceOnMainThread() {
+        mainHandler.post(() -> {
+            if (showing) {
+                AppLog.i(TAG, "检测到倒挡/原车 360，关闭独立预览悬浮窗以避免闪屏");
+                dismiss(true);
+            }
+        });
+    }
+
     private void closeInternal(boolean notifyClosed) {
         showing = false;
+        mainHandler.removeCallbacksAndMessages(null);
+        VehicleSignalHub.getInstance().removeListener(vehicleSignalListener);
+        KeepAliveAccessibilityService.unregisterForegroundWindowListener(foregroundWindowListener);
         clearBoundCameraSurface();
         OverlayWindowParamsFactory.detachSafely(attachedOverlay);
         attachedOverlay = null;

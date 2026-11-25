@@ -35,6 +35,7 @@ import androidx.core.content.ContextCompat;
 
 import com.kooo.evcam.AppConfig;
 import com.kooo.evcam.AppLog;
+import com.kooo.evcam.KeepAliveAccessibilityService;
 import com.kooo.evcam.MainActivity;
 import com.kooo.evcam.R;
 import com.kooo.evcam.WakeUpHelper;
@@ -132,6 +133,23 @@ public class RecordingFloatingService extends Service {
             }
         });
     };
+    private final KeepAliveAccessibilityService.ForegroundWindowListener foregroundWindowListener = (pkg, cls) -> {
+        if (isServiceDestroyed || mainHandler == null) {
+            return;
+        }
+        mainHandler.post(() -> {
+            if (isServiceDestroyed || !showRequestedByBackground || inReverseGear) {
+                return;
+            }
+            MainActivity main = MainActivity.getInstance();
+            if (main != null && main.isInterfaceInForeground()) {
+                return;
+            }
+            String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
+            avmForeground = avmForegroundDetector.onAccessibilityWindowEvent(target, pkg, cls);
+            reconcileOverlayVisibility("acc_window");
+        });
+    };
 
     public class LocalBinder extends Binder {
         public RecordingFloatingService getService() {
@@ -182,6 +200,7 @@ public class RecordingFloatingService extends Service {
         windowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
         inReverseGear = OverlayAvoidancePolicy.isReverseGear(VehicleSignalHub.getInstance().getSnapshot());
         VehicleSignalHub.getInstance().addListener(vehicleSignalListener);
+        KeepAliveAccessibilityService.registerForegroundWindowListener(foregroundWindowListener);
 
         // 获取屏幕尺寸
         DisplayMetrics metrics = new DisplayMetrics();
@@ -307,6 +326,7 @@ public class RecordingFloatingService extends Service {
         isServiceDestroyed = true;
         cancelPendingAvoidanceCallbacks();
         VehicleSignalHub.getInstance().removeListener(vehicleSignalListener);
+        KeepAliveAccessibilityService.unregisterForegroundWindowListener(foregroundWindowListener);
         avmForegroundDetector.reset();
         hideFloatingWindow();
 
@@ -356,9 +376,7 @@ public class RecordingFloatingService extends Service {
         if (floatingContainer != null) {
             String target = appConfig != null ? appConfig.getAvmAvoidanceActivity() : null;
             avmForeground = avmForegroundDetector.isAvmInForeground(this, target);
-            if (avmForeground) {
-                reconcileOverlayVisibility("avm_foreground");
-            }
+            reconcileOverlayVisibility("show_check");
             return;
         }
         mainHandler.removeCallbacks(deferredShowRunnable);
@@ -406,17 +424,13 @@ public class RecordingFloatingService extends Service {
                         + ", appFg=" + appFg + ", reverse=" + inReverseGear + ", avm=" + avmForeground + ")");
                 hideFloatingWindow();
             }
-            if (OverlayAvoidancePolicy.shouldPollAvmExit(
-                    showRequestedByBackground, appFg, avmForeground, inReverseGear)) {
-                mainHandler.removeCallbacks(avmRecheckRunnable);
-                mainHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
-            } else {
-                mainHandler.removeCallbacks(avmRecheckRunnable);
-            }
-            return;
+        } else {
+            showFloatingWindowNow();
         }
         mainHandler.removeCallbacks(avmRecheckRunnable);
-        showFloatingWindowNow();
+        if (OverlayAvoidancePolicy.shouldWatchAvmForeground(showRequestedByBackground, appFg, inReverseGear)) {
+            mainHandler.postDelayed(avmRecheckRunnable, OverlayAvoidancePolicy.AVM_RECHECK_INTERVAL_MS);
+        }
     }
 
     private void showFloatingWindowNow() {
