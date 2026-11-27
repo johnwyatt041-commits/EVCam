@@ -23,8 +23,8 @@
 
 ## 最近记录
 
-- 2026-11-23 16:14:36 +08:00 | 发布 `build27` 至 GitHub Pre-release（`0bb9b04` / `v1.6.6-test-11231552-build27`） | 推送分支与附注标签至 `johnwyatt041-commits/EVCam`，单 A 版 5 资产远端 SHA256 核验一致 | [notes](../../outputs/EVCam-E5-build27-1.6.6-test-11231552-notes.md)
-- 2026-11-23 16:04:43 +08:00 | 完成 `0bb9b04` 提交与本地 `build27` 封包（`1.6.6-test-11231552`） | 归档 `build25` 至 `outputs/archive/`，产出单 A 版 `build27` 5 份本地文件 | [notes](../../outputs/EVCam-E5-build27-1.6.6-test-11231552-notes.md)
+- 2026-11-23 16:14:36 +08:00 | 发布 `build27` 至 GitHub Pre-release（`0bb9b04` / `v1.6.6-test-11231552-build27`） | 推送分支与附注标签至 `johnwyatt041-commits/EVCam`，单 A 版 5 资产远端 SHA256 核验一致 | [notes](../../outputs/archive/EVCam-E5-build27-1.6.6-test-11231552-notes.md)
+- 2026-11-23 16:04:43 +08:00 | 完成 `0bb9b04` 提交与本地 `build27` 封包（`1.6.6-test-11231552`） | 归档 `build25` 至 `outputs/archive/`，产出单 A 版 `build27` 5 份本地文件 | [notes](../../outputs/archive/EVCam-E5-build27-1.6.6-test-11231552-notes.md)
 - 2026-11-23 16:01:40 +08:00 | 实现 13 个外部广播快捷入口并完成离线验证（`1.6.6-test-11231552`） | `verify.ps1` `405` 测全过、Lint `0` errors、Release APK 签名与原生/标定资产核验通过 | [STATUS.md](../STATUS.md)
 
 ## 下一步

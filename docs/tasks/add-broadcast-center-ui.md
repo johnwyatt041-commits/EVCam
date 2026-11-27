@@ -1,11 +1,11 @@
 # 设置页「6. 广播中心」快捷复制入口
 
-最后更新：2026-11-28 02:07:30 +08:00
-最后核对：2026-11-28 02:07:30 +08:00
+最后更新：2026-11-28 02:16:00 +08:00
+最后核对：2026-11-28 02:16:00 +08:00
 任务/执行者：add-broadcast-center-ui / Antigravity
 分支/工作树：codex/e5-recording-startup-fix / E:\GPT\EVCam
-状态：等待实测（已完成离线代码实现、单元测试与 Lint 校验，待打包发布与实车联调）
-当前结论：已在设置页新增「6. 广播中心」，集中收纳全部 14 项外部可调用内置广播并支持分类筛选、关键词检索、一键复制（包名/Action/完整配置/ADB 命令/全部清单）与本机广播测试，单 A 版离线 `410` 测与 Lint `0` errors 通过。
+状态：等待实测（已完成源码提交 `056a9f3` 与单 A 版 `build29` GitHub Pre-release 发布：[`v1.6.6-test-11280205-build29`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11280205-build29)）
+当前结论：已在设置页新增「6. 广播中心」（14 项内置广播筛选/搜索/一键复制与本机测试），源码提交 `056a9f3` 并封包发布 `build29`（`1.6.6-test-11280205` / `versionCode = 89`）至 GitHub fork Pre-release（5 资产远端 SHA256 核验一致），离线 `410` 测与 Lint `0` errors 通过；待实车联调。
 
 ## 实现要点
 
@@ -13,13 +13,14 @@
 - **设置项与零重建主题 UI**：在 [SettingsCatalog.java](../../app/src/main/java/com/kooo/evcam/ui/SettingsCatalog.java) 注册 `ID_BROADCAST_CENTER`（「6. 广播中心」），在 [SettingsFragment.java](../../app/src/main/java/com/kooo/evcam/SettingsFragment.java) 路由至 [BroadcastCenterFragment.java](../../app/src/main/java/com/kooo/evcam/ui/BroadcastCenterFragment.java)，配套 [fragment_broadcast_center.xml](../../app/src/main/res/layout/fragment_broadcast_center.xml) 与 [ic_nav_broadcast.xml](../../app/src/main/res/drawable/ic_nav_broadcast.xml)；实现 `UiThemeController.ThemeAware` 与 `UiScaleController.ScaleAware`，无常驻后台开销。
 - **版本号更新**：[build.gradle.kts](../../app/build.gradle.kts) 中 `versionCode = 89`、`versionName` 更新为 `1.6.6-test-11280205`。
 
-## 验证与证据（2026-11-28 02:07:30 +08:00）
+## 验证与证据（2026-11-28 02:16:00 +08:00）
 
 - **单元测试与构建**：新增 [ExternalBroadcastCatalogTest.java](../../app/src/test/java/com/kooo/evcam/external/ExternalBroadcastCatalogTest.java)（3 测）并更新 [SettingsCatalogAndAppearanceTest.java](../../app/src/test/java/com/kooo/evcam/ui/SettingsCatalogAndAppearanceTest.java)；`.\tools\verify.ps1` 运行 `410` 测全过（`0` 败/错/跳，日志 `work/verification/build-20261128-020451-529.log`），单 A 版 Debug 与 Release 构建通过。
-- **Lint 与签名**：`:app:lintIndependentDebug --no-daemon --offline` `0` errors（`2263` warnings）；Release APK V2 签名（`a40da80a...`）、`libvhal_decoder.so` 与 4 份默认标定资产校验通过；尚未实车联调。
+- **Lint、APK 与远端核验**：`:app:lintIndependentDebug --no-daemon --offline` `0` errors（`2263` warnings）；`build29` Release APK（`8,062,285` B，SHA256 `461b65b2ed1fdb19aed3e85c7dc23864afff985d3ff1d58aef3f2abbbeaa89e0`）通过 V2 签名（`a40da80a...`）、`libvhal_decoder.so`（8,408 B）与 4 份默认标定资产校验；GitHub Pre-release [`v1.6.6-test-11280205-build29`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11280205-build29) 全部 5 资产远端 SHA256 核验一致；尚未实车联调。
 
 ## 最近记录
 
+- 2026-11-28 02:16:00 +08:00 | 发布 `build29` 至 GitHub Pre-release（`056a9f3` / `v1.6.6-test-11280205-build29`） | 归档 `build27` 至 `outputs/archive/`，推送分支与附注标签至 `johnwyatt041-commits/EVCam`，单 A 版 5 资产远端 SHA256 核验一致 | [notes](../../outputs/EVCam-E5-build29-1.6.6-test-11280205-notes.md)
 - 2026-11-28 02:07:30 +08:00 | 完成「6. 广播中心」源码定版与全量单测/Lint 校验（`1.6.6-test-11280205` / `versionCode = 89`） | 新增目录清单、UI 与 3 项单测；`verify.ps1` `410` 测全过、Debug/Release 构建、Lint `0` errors 与 APK 签名资产校验通过 | [STATUS.md](../STATUS.md)
 
 ## 下一步

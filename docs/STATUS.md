@@ -1,21 +1,21 @@
 # 项目进度
 
-最后更新/核对：2026-11-28 02:07:30 +08:00（Asia/Hong_Kong）
-维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；最新正式封包为 `build28` / `1.6.6-test-11260052`；正在封包「6. 广播中心」`build29` / `1.6.6-test-11280205` / `versionCode = 89`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
+最后更新/核对：2026-11-28 02:16:00 +08:00（Asia/Hong_Kong）
+维护：Antigravity（已下线 `composite(B)` 构建风味并锁定仅在 **`independent(A)`** 迭代；已提交并封包发布**设置页「6. 广播中心」** `build29` / `1.6.6-test-11280205` / `versionCode = 89`）。执行规范：[PROGRESS_RULES.md](PROGRESS_RULES.md)。
 
 ## 当前快照
 
 | 项目 | 当前状态 |
 | --- | --- |
-| 分支与提交 | `codex/e5-recording-startup-fix`（正在提交并封包「6. 广播中心」`1.6.6-test-11280205` / `build29`） |
-| 本地交付 | `outputs/` 顶层保留 **`build27`** + **`build28`**（`build29` 封包中） |
-| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11260052-build28`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11260052-build28)（5 资产远端 SHA256 核验一致） |
+| 分支与提交 | `codex/e5-recording-startup-fix` 最新源码 `056a9f3`（**设置页「6. 广播中心」** `1.6.6-test-11280205` / `build29`，含本发布记录提交） |
+| 本地交付 | `outputs/` 顶层保留 **`build28`** + **`build29`**（已归档 `build27` 至 `outputs/archive/`） |
+| GitHub | `johnwyatt041-commits/EVCam` 最新 Pre-release：[`v1.6.6-test-11280205-build29`](https://github.com/johnwyatt041-commits/EVCam/releases/tag/v1.6.6-test-11280205-build29)（5 资产远端 SHA256 核验一致） |
 | 离线与设备验证 | **当前工作区已过单 A 离线验证**（`.\tools\verify.ps1` `410` 测 `0` 败/错/跳 + Debug/Release + `:app:lintIndependentDebug` `0` errors / `2263` warnings）；待实车实测 |
-| 实车状态 | 待在银河 E5 实车验证原车 360 闪屏修复、按钮广播与广播中心快捷键绑定及批次 A/B/C；回放 Wi-Fi 分享确认 `wlan0 (192.168.14.146)` 需手动开热点才出现，待确认后续方案 |
+| 实车状态 | 待在银河 E5 实车验证广播中心快捷键绑定、原车 360 闪屏修复、按钮广播与批次 A/B/C；回放 Wi-Fi 分享确认 `wlan0 (192.168.14.146)` 需手动开热点才出现，待确认后续方案 |
 
 ## 当前结论与确认边界
 
-- **设置页「6. 广播中心」已离线完成（`1.6.6-test-11280205`，`versionCode = 89`）**：详见 [广播中心任务](tasks/add-broadcast-center-ui.md)（收纳 13 个外部控制广播与 `ACTION_KEEP_ALIVE` 共 14 项，支持分类筛选、关键词检索、一键复制包名/Action/完整配置/ADB 命令/全部清单与本机测试，通过 `410` 测、Lint `0` errors 与 APK 签名资产校验）。
+- **设置页「6. 广播中心」已发布 `build29` GitHub Pre-release（`1.6.6-test-11280205` / `056a9f3`，待实车验证）**：详见 [广播中心任务](tasks/add-broadcast-center-ui.md)（收纳 13 个外部控制广播与 `ACTION_KEEP_ALIVE` 共 14 项，支持分类筛选、关键词检索、一键复制包名/Action/完整配置/ADB 命令/全部清单与本机测试；APK `EVCam-E5-A-Independent-1.6.6-test-11280205-build29-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `410` 测与 Lint `0` errors）。
 
 - **原车 360/AVM 显示闪屏修复已发布 `build28` GitHub Pre-release（`1.6.6-test-11260052` / `f8c1ac3`，待实车验证）**：详见 [原车 360 闪屏修复任务](tasks/fix-native-360-avm-screen-flicker.md)（补齐无障碍窗口实时推送、后台持续 AVM 巡检、`FloatingWindowService` 立即卸载替代 `GONE`、修 450ms/1000ms 竞态与 OEM 多包名识别、`StandalonePreviewWindow` 倒挡/360 避让；APK `EVCam-E5-A-Independent-1.6.6-test-11260052-build28-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `407` 测与 Lint `0` errors）。
 - **外部显式广播快捷控制已发布 `build27` GitHub Pre-release（`1.6.6-test-11231552` / `0bb9b04`），待实车验证**：详见 [外部广播快捷控制任务](tasks/add-external-broadcast-control.md)（13 个显式广播，包名 `com.kooo.evcam`，零常驻后台占用；APK `EVCam-E5-A-Independent-1.6.6-test-11231552-build27-release.apk` 与 5 资产远端 SHA256 核验一致，通过 `405` 测与 Lint `0` errors）。
@@ -35,7 +35,7 @@
 
 ## 最近更新（最多5条）
 
-- 2026-11-28 02:07:30 +08:00 | 完成设置页「6. 广播中心」源码定版与验证（`1.6.6-test-11280205` / `versionCode = 89`） | 新增 `ExternalBroadcastCatalog` 与 `BroadcastCenterFragment`（14 项内置广播筛选/搜索/复制与本机测试），`verify.ps1` `410` 测、Lint `0` errors 与 APK 签名资产校验通过 | [广播中心任务](tasks/add-broadcast-center-ui.md)
+- 2026-11-28 02:16:00 +08:00 | 封包发布 build29 并推送 GitHub Pre-release（`1.6.6-test-11280205`） | 源码 `056a9f3` 打标 `v1.6.6-test-11280205-build29` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build27` 归档，通过 `410` 测与 Lint `0` errors | [广播中心任务](tasks/add-broadcast-center-ui.md)
 - 2026-11-26 20:22:00 +08:00 | 记录回放分享需手动开热点的实车反馈与 SC 核对 | 确认 `wlan0 (192.168.14.146)` 为车机 SoftAP 网口；核对 SmartCam V3.0.56 同样不自动开系统热点，待用户确认后续方案与不开热点日志/对比 | [回放分享网卡修复](tasks/fix-lan-share-nic-detection.md)
 - 2026-11-26 01:08:30 +08:00 | 封包发布 build28 并推送 GitHub Pre-release（`1.6.6-test-11260052`） | 源码 `f8c1ac3` 打标 `v1.6.6-test-11260052-build28` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build26` 归档，通过 `407` 测与 Lint `0` errors | [360闪屏修复](tasks/fix-native-360-avm-screen-flicker.md)
 - 2026-11-23 16:14:36 +08:00 | 封包发布 build27 并推送 GitHub Pre-release（`1.6.6-test-11231552`） | 源码 `0bb9b04` 打标 `v1.6.6-test-11231552-build27` 推送，单 A 版 `5` 资产远端 SHA256 核验一致、`build25` 归档，通过 `405` 测与 Lint `0` errors | [外部广播控制](tasks/add-external-broadcast-control.md)
