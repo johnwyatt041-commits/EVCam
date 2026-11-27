@@ -465,6 +465,8 @@ public class SettingsFragment extends Fragment
                 return new com.kooo.evcam.ui.SurroundSettingsFragment();
             case SettingsCatalog.ID_BLIND_SPOT:
                 return new BlindSpotSettingsFragment();
+            case SettingsCatalog.ID_BROADCAST_CENTER:
+                return new com.kooo.evcam.ui.BroadcastCenterFragment();
             case SettingsCatalog.ID_SIGNAL_PRESET:
                 return new com.kooo.evcam.ui.VehicleSignalPresetFragment();
             case SettingsCatalog.ID_FEISHU:

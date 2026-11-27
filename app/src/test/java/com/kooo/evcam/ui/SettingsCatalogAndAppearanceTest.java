@@ -74,7 +74,8 @@ public class SettingsCatalogAndAppearanceTest {
     @Test
     public void catalogShowsOnlyImplementedEntriesWithoutShellsOrExcludedCategories() {
         List<SettingsCatalog.Entry> entries = SettingsCatalog.getImplementedEntries();
-        assertEquals(10, entries.size());
+        assertEquals(11, entries.size());
+        assertNotNull(SettingsCatalog.findById(SettingsCatalog.ID_BROADCAST_CENTER));
 
         List<String> actualTitles = new ArrayList<>();
         List<String> actualDisplayTitles = new ArrayList<>();
@@ -95,6 +96,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "3. 记录仪",
                 "4. 360 画面",
                 "5. 补盲",
+                "6. 广播中心",
                 "10. 信号预设与匹配",
                 "11. 飞书远程",
                 "12. 配置广场",
@@ -108,6 +110,7 @@ public class SettingsCatalogAndAppearanceTest {
                 "记录仪",
                 "360 画面",
                 "补盲",
+                "广播中心",
                 "信号预设与匹配",
                 "飞书远程",
                 "配置广场",

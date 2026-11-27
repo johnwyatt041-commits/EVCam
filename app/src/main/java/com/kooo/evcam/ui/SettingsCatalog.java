@@ -17,6 +17,7 @@ public final class SettingsCatalog {
     public static final String ID_RECORDER = "recorder";
     public static final String ID_SURROUND_360 = "surround_360";
     public static final String ID_BLIND_SPOT = "blind_spot";
+    public static final String ID_BROADCAST_CENTER = "broadcast_center";
     public static final String ID_SIGNAL_PRESET = "signal_preset";
     public static final String ID_FEISHU = "feishu";
     public static final String ID_CONFIG_PLAZA = "config_plaza";
@@ -63,6 +64,8 @@ public final class SettingsCatalog {
                     "360 全景模式 A、分视角、R 档自动预览返桌、E5 校准与离线车模", R.drawable.ic_nav_recording),
             new Entry(ID_BLIND_SPOT, "5", "5. 补盲", "补盲",
                     "转向补盲联动、悬浮窗口、副屏显示/流输出与位置校准", R.drawable.ic_nav_blind_spot),
+            new Entry(ID_BROADCAST_CENTER, "6", "6. 广播中心", "广播中心",
+                    "内置外部控制广播清单、参数说明、一键复制 Action/包名/命令与本机测试", R.drawable.ic_nav_broadcast),
             new Entry(ID_SIGNAL_PRESET, "10", "10. 信号预设与匹配", "信号预设与匹配",
                     "银河 E5 四类信号源预设、实时快照诊断与 VHAL 属性映射", R.drawable.ic_vehicle_outline),
             new Entry(ID_FEISHU, "11", "11. 飞书远程", "飞书远程",
